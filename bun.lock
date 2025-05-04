@@ -175,7 +175,7 @@
         "@codingame/monaco-vscode-workspace-trust-service-override": "^16.0.6",
         "@codingame/monaco-vscode-xml-default-extension": "^16.0.6",
         "@codingame/monaco-vscode-yaml-default-extension": "^16.0.6",
-        "@electric-sql/pglite": "^0.2.15",
+        "@electric-sql/pglite": "^0.3.0",
         "@elysiajs/eden": "^1.2.0",
         "@lucia-auth/adapter-postgresql": "^3.1.2",
         "@octokit/webhooks": "^13.4.1",
@@ -810,7 +810,7 @@
 
     "@codingame/monaco-vscode-yaml-default-extension": ["@codingame/monaco-vscode-yaml-default-extension@16.0.6", "", { "dependencies": { "@codingame/monaco-vscode-api": "16.0.6" } }, "sha512-HTBXe3J6tYQodqy1ltNwEexFwyGrS8kbwPf9XRToAngLp5p5k73DwkWQscDeC2DkkWSR0BC4MQ+L5iQfD/KK8w=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.2.17", "", {}, "sha512-qEpKRT2oUaWDH6tjRxLHjdzMqRUGYDnGZlKrnL4dJ77JVMcP2Hpo3NYnOSPKdZdeec57B6QPprCUFg0picx5Pw=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.3.0", "", {}, "sha512-ou1PA24kStSNpQVGdzDg1FGRzO7AQ3O6OX5FryupMdHkSfSswG2ZVXjCzzJKK88KLk+Q4QinKjZIUtmMeec5rg=="],
 
     "@elysiajs/eden": ["@elysiajs/eden@1.2.0", "", { "peerDependencies": { "elysia": ">= 1.2.0" } }, "sha512-MpV45ahuF+iFZUg4tyJbLr9qxzY99m8clJVgQrDrz7Qh6eOKQ8MY6vjYMj3Wh21pTIRHPHzOLhVorRGby1/Owg=="],
 
