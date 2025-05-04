@@ -5,7 +5,7 @@ import {
   registerCustomView,
   ViewContainerLocation,
 } from "@codingame/monaco-vscode-workbench-service-override";
-import { ExtensionHostKind, registerExtension } from "vscode/extensions";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions"
 import getWorkspace from "~/example-small-schema";
 import { fileSystemProvider } from "~/fsProvider";
 import {

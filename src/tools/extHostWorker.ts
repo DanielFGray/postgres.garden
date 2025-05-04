@@ -2,7 +2,7 @@ import type { WorkerConfig } from "@codingame/monaco-vscode-extensions-service-o
 import { Worker } from "./fakeWorker";
 
 const fakeWorker = new Worker(
-  new URL("vscode/workers/extensionHost.worker", import.meta.url),
+  new URL("@codingame/monaco-vscode-api/workers/extensionHost.worker", import.meta.url),
   { type: "module" },
 );
 

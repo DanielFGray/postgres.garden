@@ -1,31 +1,6 @@
-import "@codingame/monaco-vscode-diff-default-extension";
-import "@codingame/monaco-vscode-json-default-extension";
-import "@codingame/monaco-vscode-json-language-features-default-extension";
-import "@codingame/monaco-vscode-markdown-basics-default-extension";
-import "@codingame/monaco-vscode-markdown-language-features-default-extension";
-import "@codingame/monaco-vscode-sql-default-extension";
-import "@codingame/monaco-vscode-typescript-basics-default-extension";
-import "@codingame/monaco-vscode-typescript-language-features-default-extension";
-import '@codingame/monaco-vscode-html-language-features-default-extension'
-import '@codingame/monaco-vscode-css-language-features-default-extension'
-import '@codingame/monaco-vscode-emmet-default-extension'
-import "@codingame/monaco-vscode-theme-defaults-default-extension";
-import "@codingame/monaco-vscode-theme-seti-default-extension";
-import "@codingame/monaco-vscode-theme-solarized-light-default-extension";
-import "@codingame/monaco-vscode-theme-solarized-dark-default-extension";
-import "@codingame/monaco-vscode-references-view-default-extension";
-import "@codingame/monaco-vscode-search-result-default-extension";
-import "@codingame/monaco-vscode-configuration-editing-default-extension";
-import "@codingame/monaco-vscode-media-preview-default-extension";
-import "@codingame/monaco-vscode-notebook-renderers-default-extension";
-import {
-  IStorageService,
-  getService,
-  initialize as initializeMonacoService,
-} from "vscode/services";
+import { initialize as initializeMonacoService } from "@codingame/monaco-vscode-api";
 import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-service-override";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
-import { BrowserStorageService } from "@codingame/monaco-vscode-storage-service-override";
 import getConfigurationServiceOverride, {
   IStoredWorkspace,
   initUserConfiguration,
@@ -43,7 +18,7 @@ import {
   IWorkbenchConstructionOptions,
   LogLevel,
   IEditorOverrideServices,
-} from "vscode/services";
+} from "@codingame/monaco-vscode-api";
 import * as vscode from "vscode";
 import getModelServiceOverride from "@codingame/monaco-vscode-model-service-override";
 import getNotificationServiceOverride from "@codingame/monaco-vscode-notifications-service-override";
@@ -101,26 +76,86 @@ import getUpdateServiceOverride from "@codingame/monaco-vscode-update-service-ov
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override";
 import getLocalizationServiceOverride from "@codingame/monaco-vscode-localization-service-override";
 import getTreeSitterServiceOverride from "@codingame/monaco-vscode-treesitter-service-override";
-import { EnvironmentOverride } from "vscode/workbench";
-import { Worker } from "./tools/crossOriginWorker";
-import defaultKeybindings from "./user/keybindings.json?raw";
-import defaultConfiguration from "./user/configuration.json?raw";
-// import { TerminalBackend } from './features/terminal'
-import { workerConfig } from "./tools/extHostWorker";
-import "vscode/localExtensionHost";
-import "./style.css";
-// import "./features/notebook/markdown";
-// import "./features/notebook/sql";
-// import './features/output'
-// import './features/debugger'
-import "./features/search";
-// import './features/intellisense'
-// import './features/notifications'
-// import './features/terminal'
-// import './features/scm'
-import "./features/postgres";
-import "./features/testing";
-import "./features/ai";
+import getTelemetryServiceOverride from "@codingame/monaco-vscode-telemetry-service-override";
+import getMcpServiceOverride from "@codingame/monaco-vscode-mcp-service-override";
+import { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
+import { Worker } from "./tools/crossOriginWorker"
+import defaultKeybindings from "./user/keybindings.json?raw"
+import defaultConfiguration from "./user/configuration.json?raw"
+// import { TerminalBackend } from "./features/terminal"
+import { workerConfig } from "./tools/extHostWorker"
+import "vscode/localExtensionHost"
+import "./style.css"
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+// import "./features/output"
+// import "./features/debugger"
+import "./features/search"
+// import "./features/intellisense"
+// import "./features/notifications"
+// import "./features/terminal"
+// import "./features/scm"
+// import "./features/testing"
+import "./features/ai"
+import "./features/postgres"
+// import "@codingame/monaco-vscode-clojure-default-extension"
+// import "@codingame/monaco-vscode-coffeescript-default-extension"
+// import "@codingame/monaco-vscode-cpp-default-extension"
+// import "@codingame/monaco-vscode-csharp-default-extension"
+// import "@codingame/monaco-vscode-css-language-features-default-extension"
+import "@codingame/monaco-vscode-css-default-extension"
+import "@codingame/monaco-vscode-diff-default-extension"
+// import "@codingame/monaco-vscode-emmet-default-extension"
+// import "@codingame/monaco-vscode-fsharp-default-extension"
+// import "@codingame/monaco-vscode-go-default-extension"
+// import "@codingame/monaco-vscode-groovy-default-extension"
+import "@codingame/monaco-vscode-html-default-extension"
+// import "@codingame/monaco-vscode-html-language-features-default-extension"
+// import "@codingame/monaco-vscode-java-default-extension"
+// import "@codingame/monaco-vscode-javascript-default-extension"
+import "@codingame/monaco-vscode-json-default-extension"
+// import "@codingame/monaco-vscode-json-language-features-default-extension"
+// import "@codingame/monaco-vscode-julia-default-extension"
+// import "@codingame/monaco-vscode-lua-default-extension"
+import "@codingame/monaco-vscode-markdown-language-features-default-extension"
+import "@codingame/monaco-vscode-markdown-basics-default-extension"
+// import "@codingame/monaco-vscode-objective-c-default-extension"
+// import "@codingame/monaco-vscode-perl-default-extension"
+// import "@codingame/monaco-vscode-php-default-extension"
+// import "@codingame/monaco-vscode-powershell-default-extension"
+// import "@codingame/monaco-vscode-python-default-extension"
+// import "@codingame/monaco-vscode-r-default-extension"
+// import "@codingame/monaco-vscode-ruby-default-extension"
+// import "@codingame/monaco-vscode-rust-default-extension"
+// import "@codingame/monaco-vscode-scss-default-extension"
+import "@codingame/monaco-vscode-shellscript-default-extension"
+import "@codingame/monaco-vscode-sql-default-extension"
+// import "@codingame/monaco-vscode-swift-default-extension"
+// import "@codingame/monaco-vscode-typescript-basics-default-extension"
+// import "@codingame/monaco-vscode-typescript-language-features-default-extension"
+// import "@codingame/monaco-vscode-vb-default-extension"
+import "@codingame/monaco-vscode-xml-default-extension"
+// import "@codingame/monaco-vscode-yaml-default-extension"
+import "@codingame/monaco-vscode-theme-defaults-default-extension"
+import "@codingame/monaco-vscode-theme-seti-default-extension"
+import "@codingame/monaco-vscode-theme-abyss-default-extension"
+import "@codingame/monaco-vscode-theme-defaults-default-extension"
+import "@codingame/monaco-vscode-theme-kimbie-dark-default-extension"
+import "@codingame/monaco-vscode-theme-monokai-default-extension"
+import "@codingame/monaco-vscode-theme-monokai-dimmed-default-extension"
+import "@codingame/monaco-vscode-theme-quietlight-default-extension"
+import "@codingame/monaco-vscode-theme-red-default-extension"
+import "@codingame/monaco-vscode-theme-service-override"
+import "@codingame/monaco-vscode-theme-seti-default-extension"
+import "@codingame/monaco-vscode-theme-solarized-dark-default-extension"
+import "@codingame/monaco-vscode-theme-solarized-light-default-extension"
+import "@codingame/monaco-vscode-theme-tomorrow-night-blue-default-extension"
+import "@codingame/monaco-vscode-references-view-default-extension"
+import "@codingame/monaco-vscode-search-result-default-extension"
+import "@codingame/monaco-vscode-configuration-editing-default-extension"
+import "@codingame/monaco-vscode-markdown-math-default-extension"
+// import "@codingame/monaco-vscode-npm-default-extension"
+import "@codingame/monaco-vscode-media-preview-default-extension"
+import "@codingame/monaco-vscode-ipynb-default-extension"
 import {
   workspaceFile,
   WORKSPACE_PREFIX as workspacePrefix,
@@ -201,7 +236,7 @@ const workerLoaders: Partial<Record<string, WorkerLoader>> = {
 };
 
 window.MonacoEnvironment = {
-  getWorker: function (moduleId, label) {
+  getWorker: function(moduleId, label) {
     const workerFactory = workerLoaders[label];
     if (workerFactory != null) {
       return workerFactory();
@@ -261,12 +296,10 @@ const constructOptions: IWorkbenchConstructionOptions = {
     nameLong: "Postgres Playground",
     extensionsGallery: {
       serviceUrl: "https://open-vsx.org/vscode/gallery",
-      itemUrl: "https://open-vsx.org/vscode/item",
-      resourceUrlTemplate:
-        "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
+      resourceUrlTemplate: "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
+      extensionUrlTemplate: "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest", // https://github.com/eclipse/openvsx/issues/1036#issuecomment-2476449435
       controlUrl: "",
       nlsBaseUrl: "",
-      publisherUrl: "",
     },
   },
 };
@@ -366,6 +399,8 @@ const commonServices: IEditorOverrideServices = {
     ],
   }),
   ...getSecretStorageServiceOverride(),
+  // ...getTelemetryServiceOverride(),
+  ...getMcpServiceOverride()
 };
 
 const container = document.createElement("div");
@@ -388,19 +423,22 @@ await initializeMonacoService(
   envOptions,
 );
 
+await registerExtension(
+  {
+    name: 'demo',
+    publisher: 'codingame',
+    version: '1.0.0',
+    engines: {
+      vscode: '*'
+    }
+  },
+  ExtensionHostKind.LocalProcess
+).setAsDefaultApi()
+
 // const layoutService = await getService(IWorkbenchLayoutService)
 // document.querySelector('#togglePanel')!.addEventListener('click', async () => {
 //   layoutService.setPartHidden(layoutService.isVisible(Parts.PANEL_PART, window), Parts.PANEL_PART)
 // })
-
-// document.querySelector('#toggleAuxiliary')!.addEventListener('click', async () => {
-//   layoutService.setPartHidden(layoutService.isVisible(Parts.AUXILIARYBAR_PART, window), Parts.AUXILIARYBAR_PART)
-// })
-
-async function clearStorage(): Promise<void> {
-  await userDataProvider.reset();
-  await ((await getService(IStorageService)) as BrowserStorageService).clear();
-}
 
 const searchParams = new URLSearchParams(window.location.search);
 const locale = searchParams.get("locale");
