@@ -58,7 +58,7 @@ export class DatabaseExplorerProvider
       case "schema": {
         if (
           vscode.workspace
-            .getConfiguration("pg-playground.introspection-tree")
+            .getConfiguration("postgres.garden.introspection-tree")
             .get(
               "grouping",
               "grouped by type" as "grouped by type" | "alphabetical",

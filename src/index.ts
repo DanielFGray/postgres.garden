@@ -254,7 +254,7 @@ await Promise.all([
 const constructOptions: IWorkbenchConstructionOptions = {
   enableWorkspaceTrust: false,
   windowIndicator: {
-    label: "Postgres Playground",
+    label: "postgres.garden",
     tooltip: "",
     command: "",
   },
@@ -271,7 +271,7 @@ const constructOptions: IWorkbenchConstructionOptions = {
   configurationDefaults: {
     // eslint-disable-next-line no-template-curly-in-string
     "window.title":
-      "Postgres Playground${separator}${dirty}${activeEditorShort}",
+      "postgres.garden${separator}${dirty}${activeEditorShort}",
   },
   defaultLayout: {
     views: [],
@@ -289,11 +289,11 @@ const constructOptions: IWorkbenchConstructionOptions = {
   },
   welcomeBanner: {
     message:
-      "Welcome to Postgres Playground! This is a very early release, expect some bugs and missing features.",
+      "Welcome to postgres.garden! This is a very early release, expect some bugs and missing features.",
   },
   productConfiguration: {
-    nameShort: "pg-playground",
-    nameLong: "Postgres Playground",
+    nameShort: "postgres.garden",
+    nameLong: "postgres.garden",
     extensionsGallery: {
       serviceUrl: "https://open-vsx.org/vscode/gallery",
       resourceUrlTemplate: "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",

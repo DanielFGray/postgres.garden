@@ -34,8 +34,8 @@ import { api } from "~/api";
 
 const { getApi } = registerExtension(
   {
-    name: "pg-playground",
-    publisher: "pg-playground",
+    name: "postgres.garden",
+    publisher: "postgres.garden",
     version: "1.0.0",
     engines: { vscode: "*" },
     capabilities: { virtualWorkspaces: true },
@@ -44,9 +44,9 @@ const { getApi } = registerExtension(
       configuration: [
         {
           order: 22,
-          title: "Postgres Playground",
+          title: "postgres.garden",
           properties: {
-            "pg-playground.introspection-tree.grouping": {
+            "postgres.garden.introspection-tree.grouping": {
               title: "introspection tree grouping",
 
               type: "string",

@@ -303,7 +303,7 @@ export const app = new Elysia({
                   variables: {
                     user: userInformation.login,
                     owner: "danielfgray",
-                    repo: "postgres-playground",
+                    repo: "postgres.garden",
                   },
                 }),
               })

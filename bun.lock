@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "postgres-playground",
+      "name": "postgres.garden",
       "dependencies": {
         "@codingame/monaco-vscode-accessibility-service-override": "^16.0.6",
         "@codingame/monaco-vscode-ai-service-override": "^16.0.6",
