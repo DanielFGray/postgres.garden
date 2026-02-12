@@ -1,92 +1,174 @@
 import * as semicolons from "postgres-semicolons";
-import { PGlite, type QueryOptions } from "@electric-sql/pglite";
+import type { QueryOptions } from "@electric-sql/pglite";
+import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { live } from "@electric-sql/pglite/live";
-import { vector } from "@electric-sql/pglite/vector";
-import { amcheck } from "@electric-sql/pglite/contrib/amcheck";
-import { auto_explain } from "@electric-sql/pglite/contrib/auto_explain";
-import { bloom } from "@electric-sql/pglite/contrib/bloom";
-import { btree_gin } from "@electric-sql/pglite/contrib/btree_gin";
-import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
-import { citext } from "@electric-sql/pglite/contrib/citext";
-import { cube } from "@electric-sql/pglite/contrib/cube";
-import { earthdistance } from "@electric-sql/pglite/contrib/earthdistance";
-import { fuzzystrmatch } from "@electric-sql/pglite/contrib/fuzzystrmatch";
-import { hstore } from "@electric-sql/pglite/contrib/hstore";
-import { isn } from "@electric-sql/pglite/contrib/isn";
-import { lo } from "@electric-sql/pglite/contrib/lo";
-import { ltree } from "@electric-sql/pglite/contrib/ltree";
-import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
-import { seg } from "@electric-sql/pglite/contrib/seg";
-import { tablefunc } from "@electric-sql/pglite/contrib/tablefunc";
-import { tcn } from "@electric-sql/pglite/contrib/tcn";
-import { tsm_system_rows } from "@electric-sql/pglite/contrib/tsm_system_rows";
-import { tsm_system_time } from "@electric-sql/pglite/contrib/tsm_system_time";
-import { uuid_ossp } from "@electric-sql/pglite/contrib/uuid_ossp";
 
-// TODO: avoid module scoping this
-// TODO: maybe use https://pglite.dev/docs/multi-tab-worker
-let db: PGlite;
-try {
-  reset().then(healthcheck);
-} catch (e) {
-  console.error(e);
-}
+/**
+ * PGlite service managing a Web Worker instance with multi-tab support.
+ * Only the leader tab will run the actual database instance.
+ */
+let instanceCounter = 0;
 
-export async function reset() {
-  if (db) await db.close();
-  db = await PGlite.create({
-    // fs, // fails at runtime for missing emscriptenOpts
-    extensions: {
-      live,
-      vector,
-      amcheck,
-      auto_explain,
-      bloom,
-      btree_gin,
-      btree_gist,
-      citext,
-      cube,
-      earthdistance,
-      fuzzystrmatch,
-      hstore,
-      isn,
-      lo,
-      ltree,
-      pg_trgm,
-      seg,
-      tablefunc,
-      tcn,
-      tsm_system_rows,
-      tsm_system_time,
-      uuid_ossp,
-    },
-  });
-  window.db = db;
-}
+export class PGliteService {
+  private db: PGliteWorker | null = null;
+  private initPromise: Promise<PGliteWorker> | null = null;
+  private worker: Worker | null = null;
+  private readonly instanceId = ++instanceCounter;
 
-async function healthcheck() {
-  return (await db.query<{ test: 1 }>("select 1 as test")).rows[0]?.test === 1;
-}
+  /**
+   * Initialize the PGlite worker instance.
+   * Safe to call multiple times - will return the same instance.
+   */
+  async initialize(): Promise<PGliteWorker> {
+    if (this.db) {
+      return this.db;
+    }
 
-export function query<T>(
-  query: string,
-  params?: any[] | undefined,
-  opts?: QueryOptions,
-) {
-  const result = db.query<T>(query, params, opts);
-  return Object.assign(result, { statement: statementFromQuery(query) });
-}
+    // Ensure only one initialization happens at a time
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
-export async function exec(sql: string, opts?: QueryOptions) {
-  const results = db.exec(sql, opts);
-  const metadata = metadataFromQueries(sql);
-  return (await results).map((r, i) => Object.assign(r, metadata[i]));
+    this.initPromise = this.createWorker();
+
+    try {
+      this.db = await this.initPromise;
+      return this.db;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async createWorker(): Promise<PGliteWorker> {
+    try {
+      this.worker = new Worker(new URL("./pglite.worker.ts", import.meta.url), {
+        type: "module",
+      });
+
+      const worker = await PGliteWorker.create(this.worker, {
+        dataDir: "idb://postgres-garden",
+        extensions: {
+          live, // Client-side extension for live queries
+        },
+      });
+
+      // @ts-expect-error expose for debugging
+      window.db = worker;
+
+      // Log leader status
+      console.log(
+        `[PGlite #${this.instanceId}] PGlite initialized - Leader: ${worker.isLeader}`,
+      );
+
+      // Subscribe to leader changes - this can cause the DB connection to close/reopen
+      worker.onLeaderChange(() => {
+        console.log(
+          `[PGlite #${this.instanceId}] Leader changed - Now leader: ${worker.isLeader}`,
+        );
+        // When leadership changes, the IndexedDB connection may be closed
+        // We don't need to do anything here - our retry logic will handle it
+      });
+
+      // Run healthcheck
+      const healthy = await this.healthcheck(worker);
+      if (!healthy) {
+        console.warn("PGlite healthcheck failed, but continuing...");
+      }
+
+      return worker;
+    } catch (error) {
+      console.error("Failed to initialize PGlite worker:", error);
+      throw new Error(
+        `PGlite initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  private async healthcheck(db: PGliteWorker): Promise<boolean> {
+    try {
+      const result = await db.query<{ test: 1 }>("select 1 as test");
+      return result.rows[0]?.test === 1;
+    } catch (error) {
+      console.error("PGlite healthcheck failed:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Reset the database by closing and reinitializing.
+   */
+  async reset(): Promise<void> {
+    console.log("[PGlite] Resetting database");
+    if (this.db) {
+      await this.db.close();
+      this.db = null;
+    }
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    this.initPromise = null;
+    await this.initialize();
+  }
+
+  /**
+   * Execute a query and return results with statement metadata.
+   */
+  async query<T>(query: string, params?: unknown[], opts?: QueryOptions) {
+    const db = await this.initialize();
+    const result = await db.query<T>(query, params, opts);
+    return Object.assign(result, { statement: statementFromQuery(query) });
+  }
+
+  /**
+   * Execute SQL statements and return results with metadata.
+   */
+  async exec(sql: string, opts?: QueryOptions) {
+    const db = await this.initialize();
+    const results = db.exec(sql, opts);
+    const metadata = metadataFromQueries(sql);
+    return (await results).map((r, i) => Object.assign(r, metadata[i]));
+  }
+
+  /**
+   * Get the underlying PGliteWorker instance.
+   * Useful for accessing extensions like live queries.
+   */
+  async getWorker(): Promise<PGliteWorker> {
+    return this.initialize();
+  }
+
+  /**
+   * Check if this instance is the leader.
+   */
+  async isLeader(): Promise<boolean> {
+    const db = await this.initialize();
+    return db.isLeader;
+  }
+
+  /**
+   * Dispose of the service and close the database connection.
+   */
+  async dispose(): Promise<void> {
+    if (this.db) {
+      await this.db.close();
+      this.db = null;
+    }
+
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+
+    this.initPromise = null;
+  }
 }
 
 function metadataFromQueries(sql: string) {
   const splits = semicolons.parseSplits(sql, false);
   const queries = semicolons.splitStatements(sql, splits.positions, true);
-  return queries.map(query => {
+  return queries.map((query) => {
     const statement = statementFromQuery(query);
     return { query, statement };
   });
@@ -101,6 +183,6 @@ function statementFromQuery(query: string) {
         lowerQuery.startsWith("alter") ||
         lowerQuery.startsWith("drop")
       ? firstWords.slice(0, 2).join(" ")
-      : firstWords[0];
+      : (firstWords[0] ?? "");
   return statement.toUpperCase();
 }

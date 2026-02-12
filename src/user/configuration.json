@@ -25,5 +25,6 @@
   "editor.minimap.autohide": true,
   "window.commandCenter": false,
   "workbench.layoutControl.enabled": false,
-  "workbench.sideBar.location": "right"
+  "workbench.sideBar.location": "right",
+  "workbench.startupEditor": "none"
 }

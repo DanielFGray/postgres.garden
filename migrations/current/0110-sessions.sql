@@ -1,10 +1,14 @@
 create table app_private.sessions (
   id text primary key,
   user_id uuid not null,
-  expires_at timestamptz not null default now()
+  session_data jsonb not null default '{}'::jsonb,
+  secret_hash bytea,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz default (now() + interval '30 days')
 );
 
 create index sessions_user_id_idx on app_private.sessions (user_id);
+create index sessions_expires_at_idx on app_private.sessions (expires_at);
 
 alter table app_private.sessions enable row level security;
 

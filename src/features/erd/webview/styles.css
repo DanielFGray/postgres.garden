@@ -1,0 +1,66 @@
+.erd-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-family: var(--vscode-font-family);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-editor-background);
+}
+
+.erd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  background-color: var(--vscode-editor-background);
+}
+
+.erd-header h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.refresh-btn {
+  padding: 6px 12px;
+  background-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--vscode-font-family);
+  transition: background-color 0.2s;
+}
+
+.refresh-btn:hover {
+  background-color: var(--vscode-button-hoverBackground);
+}
+
+.mermaid-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.loading,
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 14px;
+}
+
+.error {
+  color: var(--vscode-errorForeground);
+  background-color: var(--vscode-editor-background);
+  padding: 20px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.loading {
+  color: var(--vscode-descriptionForeground);
+}

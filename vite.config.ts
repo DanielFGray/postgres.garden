@@ -1,74 +1,85 @@
-import { defineConfig } from "vite";
-import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
-import * as fs from "fs";
-import path from "path";
-import tsconfigPaths from "vite-tsconfig-paths";
-
-const proxyTarget = `http://localhost:${process.env.PORT}`;
+import { defineConfig } from 'vite'
+import importMetaUrlPlugin from '@codingame/esbuild-import-meta-url-plugin'
+import * as fs from 'fs'
+import path from 'path'
 
 export default defineConfig({
+  server: {
+    port: 3000,
+    host: '0.0.0.0',
+    fs: {
+      allow: ['../'] // allow to load codicon.ttf from monaco-editor in the parent folder
+    }
+  },
   build: {
-    target: "esnext",
-    rollupOptions: {
-      external: ["~lib"],
-    },
+    target: 'esnext',
+    emptyOutDir: false,
+    manifest: 'manifest.json', // Generate manifest.json in outDir root for production asset resolution
   },
   worker: {
-    format: "es",
-  },
-  server: {
-    host: "0.0.0.0",
-    proxy: {
-      "/auth": {
-        target: proxyTarget,
-        changeOrigin: true,
-      },
-      "/api": {
-        target: proxyTarget,
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/api/, ""),
-      },
-    },
+    format: 'es'
   },
   plugins: [
-    tsconfigPaths(),
     {
-      // For the *-language-features extensions which use SharedArrayBuffer
-      name: "configure-response-headers",
-      apply: "serve",
-      configureServer: server => {
-        server.middlewares.use((_req, res, next) => {
-          res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
-          res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-          res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-          next();
-        });
-      },
+      name: 'load-vscode-css-as-string',
+      enforce: 'pre',
+      async resolveId(source, importer, options) {
+        const resolved = await this.resolve(source, importer, options)
+        if (
+          resolved &&
+          resolved.id.match(
+            /node_modules\/(@codingame\/monaco-vscode|vscode|monaco-editor).*\.css$/
+          )
+        ) {
+          return {
+            ...resolved,
+            id: resolved.id + '?inline'
+          }
+        }
+        return undefined
+      }
     },
     {
-      name: "force-prevent-transform-assets",
-      apply: "serve",
+      // For the *-language-features extensions which use SharedArrayBuffer
+      name: 'configure-response-headers',
+      apply: 'serve',
+      configureServer: (server) => {
+        server.middlewares.use((_req, res, next) => {
+          res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
+          res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+          next()
+        })
+      }
+    },
+    {
+      name: 'force-prevent-transform-assets',
+      apply: 'serve',
       configureServer(server) {
         return () => {
           server.middlewares.use(async (req, res, next) => {
             if (req.originalUrl != null) {
-              const pathname = new URL(req.originalUrl, import.meta.url)
-                .pathname;
-              if (pathname.endsWith(".html")) {
-                res.setHeader("Content-Type", "text/html");
-                res.writeHead(200);
-                res.write(fs.readFileSync(path.join(__dirname, pathname)));
-                res.end();
+              const pathname = new URL(req.originalUrl, import.meta.url).pathname
+              if (pathname.endsWith('.html')) {
+                res.setHeader('Content-Type', 'text/html')
+                res.writeHead(200)
+                res.write(fs.readFileSync(path.join(__dirname, pathname)))
+                res.end()
               }
             }
 
-            next();
-          });
-        };
-      },
-    },
+            next()
+          })
+        }
+      }
+    }
   ],
+  esbuild: {
+    minifySyntax: false
+  },
   optimizeDeps: {
+    // This is require because vite excludes local dependencies from being optimized
+    // Monaco-vscode-api packages are local dependencies and the number of modules makes chrome hang
     include: [
       "@codingame/monaco-vscode-api/extensions",
       "@codingame/monaco-vscode-api",
@@ -84,23 +95,14 @@ export default defineConfig({
     ],
     exclude: ["@electric-sql/pglite"],
     esbuildOptions: {
-      tsconfig: "./tsconfig.json",
-      plugins: [importMetaUrlPlugin],
-    },
+      tsconfig: './tsconfig.json',
+      plugins: [importMetaUrlPlugin]
+    }
   },
   define: {
-    rootDirectory: JSON.stringify(__dirname),
+    rootDirectory: JSON.stringify(__dirname)
   },
   resolve: {
-    alias: [
-      {
-        find: /^@codingame\/monaco-vscode-api\/vscode\//,
-        replacement: `${path.resolve(
-          __dirname,
-          "node_modules/@codingame/monaco-vscode-api/vscode/src/",
-        )}/`,
-      },
-    ],
-    dedupe: ["vscode"],
-  },
-});
+    dedupe: ['vscode']
+  }
+})

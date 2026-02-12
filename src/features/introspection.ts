@@ -1,12 +1,10 @@
 import * as vscode from "vscode";
 import {
-  PgType,
   Introspection,
   makeIntrospectionQuery,
   parseIntrospectionResults,
 } from "pg-introspection";
-import { PGLITE_EXECUTE, ERD_UPDATE } from "./constants";
-import { Results } from "~/types";
+import { PGLITE_EXECUTE, type ExtendedResults } from "./constants.js";
 
 export class DatabaseExplorerProvider
   implements vscode.TreeDataProvider<Entity>
@@ -19,13 +17,20 @@ export class DatabaseExplorerProvider
     this.#onDidChangeTreeData.event;
 
   refresh = async (): Promise<void> => {
-    const [result] = await vscode.commands.executeCommand<
-      Results<{ introspection: string }>[]
-    >(PGLITE_EXECUTE, makeIntrospectionQuery());
-    this.introspection = parseIntrospectionResults(
-      result.rows[0]?.introspection,
-      true,
+    const [result] = await vscode.commands.executeCommand<ExtendedResults[]>(
+      PGLITE_EXECUTE,
+      makeIntrospectionQuery(),
     );
+    if (!result || "error" in result) {
+      console.error("Failed to fetch introspection data");
+      return;
+    }
+    const introspectionJson = result.rows[0]?.introspection as string;
+    if (!introspectionJson) {
+      console.error("No introspection data returned");
+      return;
+    }
+    this.introspection = parseIntrospectionResults(introspectionJson, true);
     this.#onDidChangeTreeData.fire();
   };
 
@@ -41,11 +46,11 @@ export class DatabaseExplorerProvider
     if (!this.introspection) return [];
     if (!parent) {
       return this.introspection.namespaces
-        .filter(n => n.nspname !== "pg_catalog" && n.nspname !== "pg_toast")
+        .filter((n) => n.nspname !== "pg_catalog" && n.nspname !== "pg_toast")
         .map(
-          n =>
+          (n) =>
             new Entity({
-              id: n.oid,
+              id: n._id,
               label: n.nspname,
               description: "schema",
               kind: "schema",
@@ -66,11 +71,13 @@ export class DatabaseExplorerProvider
         ) {
           const id = parent.id;
           const tables = this.introspection.classes
-            .filter(table => table.relnamespace === id && table.relkind === "r")
+            .filter(
+              (table) => table.relnamespace === id && table.relkind === "r",
+            )
             .map(
-              t =>
+              (t) =>
                 new Entity({
-                  id: t.oid,
+                  id: t._id,
                   label: t.relname,
                   kind: "table",
                   description: "table",
@@ -79,11 +86,13 @@ export class DatabaseExplorerProvider
                 }),
             );
           const views = this.introspection.classes
-            .filter(table => table.relnamespace === id && table.relkind === "v")
+            .filter(
+              (table) => table.relnamespace === id && table.relkind === "v",
+            )
             .map(
-              t =>
+              (t) =>
                 new Entity({
-                  id: t.oid,
+                  id: t._id,
                   label: t.relname,
                   kind: "view",
                   description: "view",
@@ -92,11 +101,11 @@ export class DatabaseExplorerProvider
                 }),
             );
           const domains = this.introspection.types
-            .filter(t => t.typtype === "d" && t.typnamespace === id)
+            .filter((t) => t.typtype === "d" && t.typnamespace === id)
             .map(
-              t =>
+              (t) =>
                 new Entity({
-                  id: t.oid,
+                  id: t._id,
                   label: t.typname,
                   kind: "label",
                   // TODO: find how to get domain type name [text, int, etc]
@@ -107,13 +116,13 @@ export class DatabaseExplorerProvider
             );
 
           const enums = this.introspection.types
-            .filter(t => t.typtype === "e" && t.typnamespace === id)
-            .map(t => {
+            .filter((t) => t.typtype === "e" && t.typnamespace === id)
+            .map((t) => {
               const values = t.getEnumValues();
               if (!values)
                 throw new Error(`could not find enum values for ${t.typname}`);
               return new Entity({
-                id: t.oid,
+                id: t._id,
                 label: t.typname,
                 kind: "enum",
                 description: "enum",
@@ -124,11 +133,11 @@ export class DatabaseExplorerProvider
             });
 
           const composites = this.introspection.classes
-            .filter(cls => cls.relkind === "c" && cls.relnamespace === id)
+            .filter((cls) => cls.relkind === "c" && cls.relnamespace === id)
             .map(
-              t =>
+              (t) =>
                 new Entity({
-                  id: t.oid,
+                  id: t._id,
                   label: t.relname,
                   kind: "composite",
                   description: "composite",
@@ -146,18 +155,12 @@ export class DatabaseExplorerProvider
             );
           const types = [...domains, ...enums, ...composites];
           const functions = this.introspection.procs
-            .filter(proc => proc.pronamespace === id)
-            .map(proc => {
-              const type = this.introspection!.getType({
-                id: proc?.prorettype,
-              });
-              const returnType = proc.proretset
-                ? "setof " + type?.typname
-                : type?.typname;
+            .filter((proc) => proc.pronamespace === id)
+            .map((proc) => {
               const args =
                 proc.pronargs && proc.pronargs > 0 ? proc.pronargs : "";
               return new Entity({
-                id: proc.oid,
+                id: proc._id,
                 label: `${proc.proname}(${args}):`,
                 kind: "function",
                 description: "function",
@@ -170,7 +173,7 @@ export class DatabaseExplorerProvider
         const items = [];
         if (
           this.introspection.classes.find(
-            cls => cls.relnamespace === parent.id && cls.relkind === "r",
+            (cls) => cls.relnamespace === parent.id && cls.relkind === "r",
           )
         ) {
           items.push(
@@ -185,7 +188,7 @@ export class DatabaseExplorerProvider
         }
         if (
           this.introspection.classes.find(
-            cls => cls.relnamespace === parent.id && cls.relkind === "v",
+            (cls) => cls.relnamespace === parent.id && cls.relkind === "v",
           )
         ) {
           items.push(
@@ -199,7 +202,9 @@ export class DatabaseExplorerProvider
           );
         }
         if (
-          this.introspection.procs.find(proc => proc.pronamespace === parent.id)
+          this.introspection.procs.find(
+            (proc) => proc.pronamespace === parent.id,
+          )
         ) {
           items.push(
             new Entity({
@@ -213,12 +218,12 @@ export class DatabaseExplorerProvider
         }
         if (
           this.introspection.types.find(
-            t =>
+            (t) =>
               t.typnamespace === parent.id &&
               (t.typtype === "e" || t.typtype === "d"),
           ) ||
           this.introspection.classes.find(
-            cls => cls.relkind === "c" && cls.relnamespace === parent.id,
+            (cls) => cls.relkind === "c" && cls.relnamespace === parent.id,
           )
         ) {
           items.push(
@@ -236,11 +241,11 @@ export class DatabaseExplorerProvider
       case "tables": {
         const [id] = parent.id.split("-");
         return this.introspection.classes
-          .filter(table => table.relnamespace === id && table.relkind === "r")
+          .filter((table) => table.relnamespace === id && table.relkind === "r")
           .map(
-            t =>
+            (t) =>
               new Entity({
-                id: t.oid,
+                id: t._id,
                 label: t.relname,
                 kind: "table",
                 icon: "symbol-structure",
@@ -251,11 +256,11 @@ export class DatabaseExplorerProvider
       case "views": {
         const [id] = parent.id.split("-");
         return this.introspection.classes
-          .filter(table => table.relnamespace === id && table.relkind === "v")
+          .filter((table) => table.relnamespace === id && table.relkind === "v")
           .map(
-            t =>
+            (t) =>
               new Entity({
-                id: t.oid,
+                id: t._id,
                 label: t.relname,
                 kind: "view",
                 icon: "symbol-structure",
@@ -266,11 +271,11 @@ export class DatabaseExplorerProvider
       case "types": {
         const [id] = parent.id.split("-");
         const domains = this.introspection.types
-          .filter(t => t.typtype === "d" && t.typnamespace === id)
+          .filter((t) => t.typtype === "d" && t.typnamespace === id)
           .map(
-            t =>
+            (t) =>
               new Entity({
-                id: t.oid,
+                id: t._id,
                 label: t.typname,
                 kind: "label",
                 // TODO: find how to get domain type name [text, int, etc]
@@ -281,13 +286,13 @@ export class DatabaseExplorerProvider
           );
 
         const enums = this.introspection.types
-          .filter(t => t.typtype === "e" && t.typnamespace === id)
-          .map(t => {
+          .filter((t) => t.typtype === "e" && t.typnamespace === id)
+          .map((t) => {
             const values = t.getEnumValues();
             if (!values)
               throw new Error(`could not find enum values for ${t.typname}`);
             return new Entity({
-              id: t.oid,
+              id: t._id,
               label: t.typname,
               kind: "enum",
               description: "enum",
@@ -298,11 +303,11 @@ export class DatabaseExplorerProvider
           });
 
         const composites = this.introspection.classes
-          .filter(cls => cls.relkind === "c" && cls.relnamespace === id)
+          .filter((cls) => cls.relkind === "c" && cls.relnamespace === id)
           .map(
-            t =>
+            (t) =>
               new Entity({
-                id: t.oid,
+                id: t._id,
                 label: t.relname,
                 kind: "composite",
                 description: "composite",
@@ -323,8 +328,8 @@ export class DatabaseExplorerProvider
       case "functions": {
         const [id] = parent.id.split("-");
         return this.introspection.procs
-          .filter(proc => proc.pronamespace === id)
-          .map(proc => {
+          .filter((proc) => proc.pronamespace === id)
+          .map((proc) => {
             const type = this.introspection!.getType({ id: proc?.prorettype });
             const returnType = proc.proretset
               ? "setof " + type?.typname
@@ -332,7 +337,7 @@ export class DatabaseExplorerProvider
             const args =
               proc.pronargs && proc.pronargs > 0 ? proc.pronargs : "";
             return new Entity({
-              id: proc.oid,
+              id: proc._id,
               label: `${proc.proname}(${args}):`,
               kind: "function",
               description: returnType,
@@ -384,7 +389,7 @@ export class DatabaseExplorerProvider
       }
 
       case "fnreturns": {
-        const [id] = parent.id.split("-");
+        const id = parent.id.split("-")[0]!;
         const proc = this.introspection.getProc({ id });
         if (!proc) return [];
         const type = this.introspection.getType({ id: proc?.prorettype });
@@ -401,8 +406,8 @@ export class DatabaseExplorerProvider
       }
 
       case "fnarguments": {
-        const [id] = parent.id.split("-");
-        const proc = this.introspection.getProc({ id });
+        const argId = parent.id.split("-")[0]!;
+        const proc = this.introspection.getProc({ id: argId });
         const types = proc?.proargtypes ?? [];
         return (
           proc?.proargnames ??
@@ -412,7 +417,7 @@ export class DatabaseExplorerProvider
             new Entity({
               id: `${parent.id}-${arg}`,
               label: arg,
-              description: this.introspection!.getType({ id: types[i] })
+              description: this.introspection!.getType({ id: types[i]! })
                 ?.typname,
               kind: "label",
               icon: "symbol-property",
@@ -425,9 +430,9 @@ export class DatabaseExplorerProvider
         const type = this.introspection.getType({ id: parent.id });
         return (
           type?.getEnumValues()?.map(
-            x =>
+            (x) =>
               new Entity({
-                id: x.oid,
+                id: x._id,
                 label: x.enumlabel,
                 kind: "enum_value",
                 icon: "symbol-property",
@@ -441,21 +446,21 @@ export class DatabaseExplorerProvider
       case "view":
       case "table": {
         const indexes = this.introspection.indexes.filter(
-          idx => idx.indrelid === parent.id,
+          (idx) => idx.indrelid === parent.id,
         );
 
         const primaryKey = indexes
-          .find(idx => idx.indisprimary)
+          .find((idx) => idx.indisprimary)
           ?.getKeys()
-          .map(k => k.attname);
+          .map((k) => k!.attname);
 
         const columns = this.introspection.attributes.filter(
-          attr => attr.attrelid === parent.id,
+          (attr) => attr.attrelid === parent.id,
         );
         return [
-          ...columns.map(c => {
+          ...columns.map((c) => {
             return new Entity({
-              id: c.oid,
+              id: `${c.attrelid}-${c.attnum}`,
               label: c.attname,
               description: [
                 c.getType()?.typname,
@@ -471,12 +476,12 @@ export class DatabaseExplorerProvider
             });
           }),
           ...indexes
-            .filter(idx => !idx.indisprimary)
-            .map(idx => {
+            .filter((idx) => !idx.indisprimary)
+            .map((idx) => {
               const cls = idx.getIndexClass()!;
               const am = cls.getAccessMethod()!;
               return new Entity({
-                id: idx.oid,
+                id: String(idx.indexrelid),
                 label: cls.relname,
                 description: [
                   ...(idx.indisunique ? ["unique"] : []),
@@ -500,8 +505,9 @@ class Entity extends vscode.TreeItem {
   public readonly label: string;
   public readonly kind: string;
   public readonly description: string | undefined;
-  public readonly iconPath: string;
+  declare iconPath: string;
   public readonly collapsibleState: vscode.TreeItemCollapsibleState;
+  public parent?: Entity;
 
   constructor(props: {
     id: string;

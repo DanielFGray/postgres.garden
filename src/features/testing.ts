@@ -1,6 +1,10 @@
 import type * as vscode from "vscode";
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+import {
+  ExtensionHostKind,
+  registerExtension,
+} from "@codingame/monaco-vscode-api/extensions";
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 const { getApi } = registerExtension(
   {
     name: "testing",
@@ -16,7 +20,7 @@ const { getApi } = registerExtension(
   },
 );
 
-void getApi().then(async api => {
+void getApi().then((api) => {
   const testRe = /^([0-9]+)\s*([+*/-])\s*([0-9]+)\s*=\s*([0-9]+)/;
   const headingRe = /^(#+)\s*(.+)$/;
 
@@ -124,7 +128,7 @@ void getApi().then(async api => {
             expected,
             thisGeneration,
           );
-          const id = `${item.uri}/${data.getLabel()}`;
+          const id = `${item.uri?.toString() ?? ""}/${data.getLabel()}`;
 
           const tcase = controller.createTestItem(
             id,
@@ -139,7 +143,7 @@ void getApi().then(async api => {
         onHeading: (range, name, depth) => {
           ascend(depth);
           const parent = ancestors[ancestors.length - 1]!;
-          const id = `${item.uri}/${name}`;
+          const id = `${item.uri?.toString() ?? ""}/${name}`;
 
           const thead = controller.createTestItem(id, name, item.uri);
           thead.range = range;
@@ -174,7 +178,7 @@ void getApi().then(async api => {
 
     async run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
       const start = Date.now();
-      await new Promise(resolve =>
+      await new Promise((resolve) =>
         setTimeout(resolve, 1000 + Math.random() * 1000),
       );
       const actual = this.evaluate();
@@ -217,7 +221,7 @@ void getApi().then(async api => {
     vscode.TestItem | "ALL",
     vscode.TestRunProfile | undefined
   >();
-  fileChangedEmitter.event(uri => {
+  fileChangedEmitter.event((uri) => {
     if (watchingTests.has("ALL")) {
       startTestRun(
         new api.TestRunRequest(
@@ -257,9 +261,11 @@ void getApi().then(async api => {
       watchingTests.set("ALL", request.profile);
       cancellation.onCancellationRequested(() => watchingTests.delete("ALL"));
     } else {
-      request.include.forEach(item => watchingTests.set(item, request.profile));
+      request.include.forEach((item) =>
+        watchingTests.set(item, request.profile),
+      );
       cancellation.onCancellationRequested(() =>
-        request.include!.forEach(item => watchingTests.delete(item)),
+        request.include!.forEach((item) => watchingTests.delete(item)),
       );
     }
   };
@@ -366,7 +372,7 @@ void getApi().then(async api => {
     true,
   );
 
-  ctrl.resolveHandler = async item => {
+  ctrl.resolveHandler = async (item) => {
     if (item == null) {
       startWatchingWorkspace(ctrl, fileChangedEmitter);
       return;
@@ -396,7 +402,9 @@ void getApi().then(async api => {
   }
 
   api.workspace.onDidOpenTextDocument(updateNodeForDocument);
-  api.workspace.onDidChangeTextDocument(e => updateNodeForDocument(e.document));
+  api.workspace.onDidChangeTextDocument((e) =>
+    updateNodeForDocument(e.document),
+  );
 
   function getOrCreateFile(controller: vscode.TestController, uri: vscode.Uri) {
     const existing = controller.items.get(uri.toString());
@@ -420,7 +428,7 @@ void getApi().then(async api => {
 
   function gatherTestItems(collection: vscode.TestItemCollection) {
     const items: vscode.TestItem[] = [];
-    collection.forEach(item => items.push(item));
+    collection.forEach((item) => items.push(item));
     return items;
   }
 
@@ -429,7 +437,7 @@ void getApi().then(async api => {
       return [];
     }
 
-    return api.workspace.workspaceFolders.map(workspaceFolder => ({
+    return api.workspace.workspaceFolders.map((workspaceFolder) => ({
       workspaceFolder,
       pattern: new api.RelativePattern(workspaceFolder, "**/*.md"),
     }));
@@ -451,18 +459,18 @@ void getApi().then(async api => {
     return getWorkspaceTestPatterns().map(({ pattern }) => {
       const watcher = api.workspace.createFileSystemWatcher(pattern);
 
-      watcher.onDidCreate(uri => {
+      watcher.onDidCreate((uri) => {
         getOrCreateFile(controller, uri);
         fileChangedEmitter.fire(uri);
       });
-      watcher.onDidChange(async uri => {
+      watcher.onDidChange(async (uri) => {
         const { file, data } = getOrCreateFile(controller, uri);
         if (data.didResolve) {
           await data.updateFromDisk(controller, file);
         }
         fileChangedEmitter.fire(uri);
       });
-      watcher.onDidDelete(uri => controller.items.delete(uri.toString()));
+      watcher.onDidDelete((uri) => controller.items.delete(uri.toString()));
 
       void findInitialFiles(controller, pattern);
 

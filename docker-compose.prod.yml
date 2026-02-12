@@ -1,0 +1,71 @@
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.postgres-garden.loadbalancer.server.port=3000"
+      # Shared middlewares
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Embedder-Policy=credentialless"
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Opener-Policy=same-origin"
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Resource-Policy=cross-origin"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.average=10"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.burst=20"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.period=1s"
+      # Main router: static assets + SPA (headers only, no rate limit)
+      - "traefik.http.routers.postgres-garden.rule=Host(`postgres.garden`)"
+      - "traefik.http.routers.postgres-garden.entrypoints=websecure"
+      - "traefik.http.routers.postgres-garden.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden.middlewares=postgres-garden-headers"
+      # API router: /api, /auth, /webhooks (rate limited)
+      - "traefik.http.routers.postgres-garden-api.rule=Host(`postgres.garden`) && (PathPrefix(`/api`) || PathPrefix(`/auth`) || PathPrefix(`/webhooks`))"
+      - "traefik.http.routers.postgres-garden-api.entrypoints=websecure"
+      - "traefik.http.routers.postgres-garden-api.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden-api.middlewares=postgres-garden-ratelimit,postgres-garden-headers"
+
+  worker:
+    build: .
+    command: ["sh", "-c", "cd worker && bun graphile-worker"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${ROOT_DATABASE_USER}
+      - POSTGRES_PASSWORD=${ROOT_DATABASE_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ROOT_DATABASE_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+  dokploy-network:
+    external: true

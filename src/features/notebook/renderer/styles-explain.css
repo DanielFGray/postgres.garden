@@ -1,0 +1,5 @@
+/* Bootstrap subset for pev2 */
+@import "bootstrap/dist/css/bootstrap.min.css";
+
+/* PEV2 styles */
+@import "pev2/dist/pev2.css";

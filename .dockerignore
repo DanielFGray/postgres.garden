@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+*.log
+.git
+cypress
+docs
+session-*.md
+REPEATED_LOADING_ANALYSIS.md
+WORKSPACE_INITIALIZATION_GUIDE.md

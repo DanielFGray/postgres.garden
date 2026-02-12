@@ -33,8 +33,10 @@ const server = http.createServer(
   }),
 );
 
-wss.on("connection", ws => {
-  const socket = new DAPSocket(message => ws.send(message));
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (ws) => {
+  const socket = new DAPSocket((message) => ws.send(message));
 
   let initialized = false;
 
@@ -69,14 +71,14 @@ wss.on("connection", ws => {
           const stderr = new stream.PassThrough();
           container.modem.demuxStream(execStream, stdout, stderr);
 
-          stdout.on("data", buffer => ws.send(makeOutput("stdout", buffer)));
-          stderr.on("data", buffer => ws.send(makeOutput("stderr", buffer)));
+          stdout.on("data", (buffer) => ws.send(makeOutput("stdout", buffer)));
+          stderr.on("data", (buffer) => ws.send(makeOutput("stderr", buffer)));
 
           execStream.on("end", () => {
             ws.close();
           });
 
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           socket.connect(debuggerPort);
 
           return;
@@ -99,7 +101,7 @@ const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 async function createContainer() {
   const stream = await docker.pull(image);
   await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(stream, err =>
+    docker.modem.followProgress(stream, (err) =>
       err == null ? resolve() : reject(err),
     );
   });
@@ -138,7 +140,7 @@ async function prepareContainer(container: Docker.Container) {
     hijack: true,
   });
   execStream.pipe(process.stdout);
-  await new Promise(resolve => execStream.on("end", resolve));
+  await new Promise((resolve) => execStream.on("end", resolve));
   // eslint-disable-next-line no-console
   console.log("Node installed");
 }
@@ -228,10 +230,8 @@ const TWO_CRLF = "\r\n\r\n";
 const HEADER_LINESEPARATOR = /\r?\n/;
 const HEADER_FIELDSEPARATOR = /: */;
 
-const wss = new WebSocketServer({ server });
-
 async function findPortFree() {
-  return new Promise<number>(resolve => {
+  return new Promise<number>((resolve) => {
     const srv = net.createServer();
     srv.listen(0, () => {
       const port = (srv.address() as net.AddressInfo).port;

@@ -1,0 +1,6 @@
+[build]
+root = "."
+
+[[define]]
+key = "import.meta.url"
+value = '"file:///build"'

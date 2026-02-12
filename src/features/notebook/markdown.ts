@@ -4,10 +4,7 @@ export class MarkdownSerializer implements vscode.NotebookSerializer {
   private readonly decoder = new TextDecoder();
   private readonly encoder = new TextEncoder();
 
-  deserializeNotebook(
-    data: Uint8Array,
-    _token: vscode.CancellationToken,
-  ): vscode.NotebookData {
+  deserializeNotebook(data: Uint8Array): vscode.NotebookData {
     const content = this.decoder.decode(data);
 
     const cellRawData = parseMarkdown(content);
@@ -16,10 +13,7 @@ export class MarkdownSerializer implements vscode.NotebookSerializer {
     return { cells };
   }
 
-  serializeNotebook(
-    data: vscode.NotebookData,
-    _token: vscode.CancellationToken,
-  ): Uint8Array | Thenable<Uint8Array> {
+  serializeNotebook(data: vscode.NotebookData): Uint8Array | Thenable<Uint8Array> {
     const stringOutput = writeCellsToMarkdown(data.cells);
     return this.encoder.encode(stringOutput);
   }
@@ -50,6 +44,13 @@ export interface RawNotebookCell {
   kind: vscode.NotebookCellKind;
 }
 
+/** Typed shape of the metadata we store on markdown notebook cells */
+interface MarkdownCellMetadata {
+  leadingWhitespace?: string;
+  trailingWhitespace?: string;
+  indentation?: string;
+}
+
 interface ICodeBlockStart {
   langId: string;
   indentation: string;
@@ -63,8 +64,8 @@ function parseCodeBlockStart(line: string): ICodeBlockStart | null {
   const match = line.match(/( {4}|\t)?```(\S*)/);
   if (!match) return null;
   return {
-    indentation: match[1],
-    langId: match[2],
+    indentation: match[1] ?? "",
+    langId: match[2] ?? "",
   };
 }
 
@@ -99,7 +100,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
     const start = i;
     const nextNonWhitespaceLineOffset = lines
       .slice(start)
-      .findIndex(l => l !== "");
+      .findIndex((l) => l !== "");
     let end: number; // will be next line or overflow
     let isLast = false;
     if (nextNonWhitespaceLineOffset < 0) {
@@ -133,7 +134,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
 
     const content = lines
       .slice(startSourceIdx, i - 1)
-      .map(line =>
+      .map((line) =>
         line.replace(new RegExp("^" + codeBlockStart.indentation), ""),
       )
       .join("\n");
@@ -183,16 +184,17 @@ export function writeCellsToMarkdown(
   let result = "";
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i]!;
+    const meta = cell.metadata as MarkdownCellMetadata | undefined;
     if (i === 0) {
-      result += cell.metadata?.leadingWhitespace ?? "";
+      result += meta?.leadingWhitespace ?? "";
     }
 
     if (cell.kind === vscode.NotebookCellKind.Code) {
-      const indentation = cell.metadata?.indentation || "";
+      const indentation = meta?.indentation || "";
       const codePrefix = indentation + "```" + cell.languageId + "\n";
       const contents = cell.value
         .split(/\r?\n/g)
-        .map(line => indentation + line)
+        .map((line) => indentation + line)
         .join("\n");
       const codeSuffix = "\n" + indentation + "```";
 
@@ -211,14 +213,16 @@ function getBetweenCellsWhitespace(
   idx: number,
 ): string {
   const thisCell = cells[idx]!;
+  const thisMeta = thisCell.metadata as MarkdownCellMetadata | undefined;
   const nextCell = cells[idx + 1];
 
   if (!nextCell) {
-    return thisCell.metadata?.trailingWhitespace ?? "\n";
+    return thisMeta?.trailingWhitespace ?? "\n";
   }
 
-  const trailing = thisCell.metadata?.trailingWhitespace;
-  const leading = nextCell.metadata?.leadingWhitespace;
+  const nextMeta = nextCell.metadata as MarkdownCellMetadata | undefined;
+  const trailing = thisMeta?.trailingWhitespace;
+  const leading = nextMeta?.leadingWhitespace;
 
   if (typeof trailing === "string" && typeof leading === "string") {
     return trailing + leading;

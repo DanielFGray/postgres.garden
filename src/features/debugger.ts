@@ -1,6 +1,10 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions"
+import {
+  ExtensionHostKind,
+  registerExtension,
+} from "@codingame/monaco-vscode-api/extensions";
 import type * as vscode from "vscode";
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 const { getApi, registerFileUrl } = registerExtension(
   {
     name: "debugger",
@@ -34,11 +38,13 @@ registerFileUrl(
   "data:text/javascript;base64," + window.btoa("// nothing"),
 );
 
-void getApi().then(async debuggerVscodeApi => {
+void getApi().then((debuggerVscodeApi) => {
   class WebsocketDebugAdapter implements vscode.DebugAdapter {
     constructor(private websocket: WebSocket) {
-      websocket.onmessage = message => {
-        this._onDidSendMessage.fire(JSON.parse(message.data));
+      websocket.onmessage = (message) => {
+        this._onDidSendMessage.fire(
+          JSON.parse(message.data as string) as vscode.DebugProtocolMessage,
+        );
       };
     }
 
@@ -94,11 +100,10 @@ void getApi().then(async debuggerVscodeApi => {
 
       const adapter = new WebsocketDebugAdapter(websocket);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      adapter.onDidSendMessage((message: any) => {
-        if (message.type === "event" && message.event === "output") {
-          // eslint-disable-next-line no-console
-          console.log("OUTPUT", message.body.output);
+      adapter.onDidSendMessage((message: vscode.DebugProtocolMessage) => {
+        const msg = message as { type?: string; event?: string; body?: { output?: string } };
+        if (msg.type === "event" && msg.event === "output") {
+          console.log("OUTPUT", msg.body?.output);
         }
       });
       return new debuggerVscodeApi.DebugAdapterInlineImplementation(adapter);

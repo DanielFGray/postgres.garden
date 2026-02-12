@@ -1,0 +1,420 @@
+.sql-result-renderer {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  padding: 8px;
+}
+
+/* Table styles */
+.table-container {
+  max-height: 600px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+}
+
+.sql-table {
+  width: 100%;
+  border-collapse: collapse;
+  position: relative;
+}
+
+.sql-table th,
+.sql-table td {
+  padding: 6px 12px;
+  text-align: left;
+  border: 1px solid var(--vscode-panel-border);
+}
+
+.sql-table th {
+  background: var(--vscode-editor-background);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 1px 0 var(--vscode-panel-border);
+  user-select: none;
+}
+
+.sql-table .null {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+/* Type-specific cell styles */
+.sql-table .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sql-table .boolean {
+  color: var(--vscode-symbolIcon-booleanForeground);
+  font-weight: 500;
+}
+
+.sql-table .date {
+  color: var(--vscode-symbolIcon-stringForeground);
+}
+
+/* Inline JSON tree in table cells */
+.json-cell-tree {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.json-toggle {
+  cursor: pointer;
+  color: var(--vscode-textLink-foreground);
+  user-select: none;
+}
+
+.json-toggle:hover {
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.json-cell-children {
+  margin-left: 16px;
+  border-left: 1px solid var(--vscode-panel-border);
+  padding-left: 8px;
+  margin-top: 4px;
+}
+
+.json-cell-entry {
+  padding: 1px 0;
+}
+
+.json-key {
+  color: var(--vscode-symbolIcon-propertyForeground);
+}
+
+.json-string {
+  color: var(--vscode-symbolIcon-stringForeground);
+}
+
+.json-number {
+  color: var(--vscode-symbolIcon-numberForeground);
+}
+
+.json-boolean {
+  color: var(--vscode-symbolIcon-booleanForeground);
+}
+
+.json-null {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+/* Cell truncation */
+.cell-content {
+  position: relative;
+}
+
+.expand-btn {
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 0.9em;
+  text-decoration: underline;
+}
+
+.expand-btn:hover {
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.cell-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.cell-modal {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  padding: 16px;
+  max-width: 80%;
+  max-height: 80%;
+  overflow: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.cell-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.cell-modal-title {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.cell-modal-close {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: none;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.cell-modal-close:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.cell-modal-content {
+  font-family: var(--vscode-editor-font-family);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* Column resizing */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 1;
+}
+
+.resize-handle:hover,
+.resize-handle.resizing {
+  background: var(--vscode-focusBorder);
+}
+
+/* Explain view styles */
+.explain-view {
+  position: relative;
+  padding: 8px;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+  min-height: 400px;
+  height: 600px;
+  max-height: 90vh;
+  overflow: hidden;
+  resize: vertical;
+}
+
+.explain-view .pev2-container {
+  height: calc(100% - 16px);
+}
+
+.explain-view .plan-container {
+  height: 100%;
+}
+
+.explain-view .splitpanes {
+  height: 100% !important;
+}
+
+.explain-header {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.explain-header h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.explain-query {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.9em;
+  background: var(--vscode-textCodeBlock-background);
+  padding: 8px;
+  border-radius: 3px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.explain-loading,
+.explain-error,
+.explain-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.explain-error {
+  color: var(--vscode-errorForeground);
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+  border-radius: 3px;
+}
+
+/* PEV2 theme overrides for VSCode consistency */
+.explain-view {
+  /* Override Bootstrap CSS variables with VSCode theme */
+  --bs-body-bg: var(--vscode-editor-background);
+  --bs-body-color: var(--vscode-foreground);
+  --bs-border-color: var(--vscode-panel-border);
+  --bs-secondary-bg: var(--vscode-editor-background);
+  --bs-tertiary-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --bs-body-bg: var(--vscode-editor-background);
+  --bs-emphasis-color: var(--vscode-foreground);
+  --bs-link-color: var(--vscode-textLink-foreground);
+  --bs-link-hover-color: var(--vscode-textLink-activeForeground);
+  --bs-primary: var(--vscode-button-background);
+  --bs-primary-rgb: 0, 122, 204;
+}
+
+/* Scale down FontAwesome icons in pev2 */
+.explain-view .svg-inline--fa {
+  font-size: 0.9em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+/* Make edges thinner - override the dynamic stroke-width */
+.explain-view .pev2-container svg > g > path {
+  stroke-width: 2px !important;
+  opacity: 0.7;
+}
+
+/* Override highlight.js colors for Raw and Query tabs */
+.explain-view pre {
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+.explain-view pre code {
+  color: var(--vscode-editor-foreground);
+}
+
+/* JSON syntax highlighting - use reliable VSCode variables */
+.explain-view .hljs-attr,
+.explain-view .hljs-property {
+  color: var(--vscode-textLink-foreground);
+}
+
+.explain-view .hljs-string {
+  color: var(--vscode-charts-orange, var(--vscode-debugTokenExpression-string, #ce9178));
+}
+
+.explain-view .hljs-number {
+  color: var(--vscode-charts-green, var(--vscode-debugTokenExpression-number, #b5cea8));
+}
+
+.explain-view .hljs-literal,
+.explain-view .hljs-keyword {
+  color: var(--vscode-textPreformat-foreground);
+}
+
+/* SQL syntax highlighting */
+.explain-view .hljs-built_in,
+.explain-view .hljs-type {
+  color: var(--vscode-charts-yellow, #dcdcaa);
+}
+
+.explain-view .hljs-comment {
+  color: var(--vscode-descriptionForeground);
+}
+
+.explain-view .hljs-operator {
+  color: var(--vscode-foreground);
+}
+
+.explain-view .hljs-punctuation {
+  color: var(--vscode-editor-foreground);
+}
+
+/* Make pev2 use VSCode fonts */
+.explain-view .plan-container,
+.explain-view .plan-node {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.explain-view .font-monospace,
+.explain-view pre,
+.explain-view code {
+  font-family: var(--vscode-editor-font-family);
+}
+
+/* Fix nav pills styling */
+.explain-view .nav-pills .nav-link {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: none;
+  font-size: 0.85em;
+  padding: 4px 10px;
+}
+
+.explain-view .nav-pills .nav-link.active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.explain-view .nav-pills .nav-link:hover:not(.active) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Fix button group styling */
+.explain-view .btn-group .btn {
+  font-size: 0.8em;
+  padding: 2px 8px;
+}
+
+/* Fix card styling */
+.explain-view .card {
+  background: var(--vscode-editor-background);
+  border-color: var(--vscode-panel-border);
+}
+
+.explain-view .card-body {
+  padding: 8px 10px;
+}
+
+/* Fix alert/badge colors for severity */
+.explain-view .alert {
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+/* Fix progress bar background */
+.explain-view .progress {
+  background: var(--vscode-progressBar-background, rgba(128, 128, 128, 0.2));
+  height: 4px;
+}
+
+/* Splitpanes styling */
+.explain-view .splitpanes__splitter {
+  background: var(--vscode-panel-border);
+}
+
+/* Make plan nodes more compact */
+.explain-view .plan-node {
+  width: 200px;
+  font-size: 12px;
+}
+
+.explain-view .plan-node header h4 {
+  font-size: 12px;
+}
+
+.explain-view .plan-node.detailed {
+  width: 320px;
+}

@@ -1,0 +1,9 @@
+[test]
+# Exclude external sample repos and node_modules from test discovery
+# Note: We use 'bun test server/' in package.json scripts instead of relying on exclude
+# This prevents bun test from running tests in vscode-extension-samples
+exclude = [
+  "vscode-extension-samples/**",
+  "node_modules/**",
+  "cypress/**"
+]

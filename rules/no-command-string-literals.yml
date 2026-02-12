@@ -1,0 +1,29 @@
+id: no-command-string-literals
+language: TypeScript
+severity: error
+message: |
+  Use named constants from './constants' instead of string literals for command IDs.
+  
+  Common patterns:
+  - registerCommand("command.id", ...) → registerCommand(COMMAND_ID, ...)
+  - executeCommand("command.id", ...) → executeCommand(COMMAND_ID, ...)
+  
+  All command IDs should be defined in src/features/constants.ts
+
+note: |
+  This prevents typos and makes refactoring easier.
+  Define the constant in src/features/constants.ts and import it.
+
+rule:
+  any:
+    # Match any registerCommand call where first argument is a string literal
+    - pattern: $_.registerCommand($CMD, $$$)
+      has:
+        kind: string
+        stopBy: end
+    
+    # Match any executeCommand call where first argument is a string literal
+    - pattern: $_.executeCommand($CMD, $$$)
+      has:
+        kind: string
+        stopBy: end

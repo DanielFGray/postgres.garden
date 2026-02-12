@@ -4,14 +4,11 @@ import * as vscode from "vscode";
 const DELIMITER = "\n\n";
 
 export class SQLSerializer implements vscode.NotebookSerializer {
-  async deserializeNotebook(
-    context: Uint8Array,
-    _token: vscode.CancellationToken,
-  ): Promise<vscode.NotebookData> {
+  deserializeNotebook(context: Uint8Array): vscode.NotebookData {
     const str = new TextDecoder().decode(context);
     const blocks = splitSqlBlocks(str);
 
-    const cells = blocks.map(query => {
+    const cells = blocks.map((query) => {
       if (/^(---+|\/\*+\*\/)$/.test(query)) {
         return new vscode.NotebookCellData(
           vscode.NotebookCellKind.Markup,
@@ -36,19 +33,16 @@ export class SQLSerializer implements vscode.NotebookSerializer {
     return new vscode.NotebookData(cells);
   }
 
-  async serializeNotebook(
-    data: vscode.NotebookData,
-    _token: vscode.CancellationToken,
-  ): Promise<Uint8Array> {
+  serializeNotebook(data: vscode.NotebookData): Uint8Array {
     return new TextEncoder().encode(
       data.cells
         .map(({ value, kind }) => {
           if (kind === vscode.NotebookCellKind.Code) return value;
           if (value === "***") return "---";
           const lines = value.split("\n");
-          if (lines[0].trim().length === 0) return "";
+          if (lines[0]?.trim().length === 0) return "";
           const withCommentChars = lines
-            .map(line => (!line ? " *" : " * " + line))
+            .map((line) => (!line ? " *" : " * " + line))
             .join("\n");
           return `/*\n${withCommentChars}\n */`;
         })
@@ -64,8 +58,8 @@ function stripCommentChars(query: string) {
       ? lines.slice(1, -1)
       : lines;
   return (
-    inner.every(line => /(^ \*$|^-- |^ * )/.exec(line))
-      ? inner.map(line => line.slice(3) ?? "")
+    inner.every((line) => /(^ \*$|^-- |^ * )/.exec(line))
+      ? inner.map((line) => line.slice(3) ?? "")
       : inner
   ).join("\n");
 }

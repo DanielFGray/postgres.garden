@@ -84,11 +84,11 @@
    * evaluated (i.e. in watch mode).
    */
   "afterCurrent": [
-    // {
-    //   "_": "command",
-    //   "shadow": false,
-    //   "command": ""
-    // }
+    {
+      "_": "command",
+      "shadow": false,
+      "command": "bun db:types --url $GM_DBURL"
+    }
   ],
 
   /*

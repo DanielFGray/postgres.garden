@@ -1,9 +1,13 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions"
+import {
+  ExtensionHostKind,
+  registerExtension,
+} from "@codingame/monaco-vscode-api/extensions";
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 const { getApi } = registerExtension(
   {
-    name: "aiDemo",
-    publisher: "codingame",
+    name: "postgres-garden-ai",
+    publisher: "postgres-garden",
     version: "1.0.0",
     engines: {
       vscode: "*",
@@ -24,14 +28,13 @@ const { getApi } = registerExtension(
   },
 );
 
-void getApi().then(async vscode => {
+void getApi().then((vscode) => {
   vscode.commands.registerCommand("aiSuggestedCommand", () => {
-    void vscode.window.showInformationMessage("Hello", {
+    vscode.window.showInformationMessage("Hello", {
       detail: "You just run the AI suggested command",
       modal: true,
     });
   });
-
   vscode.ai.registerRelatedInformationProvider(
     vscode.RelatedInformationType.CommandInformation,
     {

@@ -158,7 +158,7 @@ $$ language plpgsql strict volatile;
 create function app_public.logout() returns void as $$
 begin
   -- Delete the session
-  delete from app_private.sessions where uuid = app_public.current_session_id();
+  delete from app_private.sessions where id = app_public.current_session_id();
   -- Clear the identifier from the transaction
   perform set_config('my.session_id', '', true);
 end;
@@ -301,80 +301,6 @@ begin
 end;
 $$ language plpgsql volatile;
 
-create function app_private.reset_password(user_id uuid, reset_token text, new_password text) returns boolean as $$
-declare
-  v_user app_public.users;
-  v_user_secret app_private.user_secrets;
-  v_token_max_duration interval = interval '3 days';
-begin
-  select users.* into v_user
-  from app_public.users
-  where id = user_id;
-
-  if not (v_user is null) then
-    -- Load their secrets
-    select * into v_user_secret from app_private.user_secrets
-    where user_secrets.user_id = v_user.id;
-
-    -- Have there been too many reset attempts?
-    if (
-      v_user_secret.first_failed_reset_password_attempt is not null
-    and
-      v_user_secret.first_failed_reset_password_attempt > NOW() - v_token_max_duration
-    and
-      v_user_secret.failed_reset_password_attempts >= 20
-    ) then
-      raise exception 'Password reset locked - too many reset attempts' using errcode = 'LOCKD';
-    end if;
-
-    -- Not too many reset attempts, let's check the token
-    if v_user_secret.reset_password_token = reset_token then
-      -- Excellent - they're legit
-
-      perform app_private.assert_valid_password(new_password);
-
-      -- Let's reset the password as requested
-      update app_private.user_secrets
-      set
-        password_hash = crypt(new_password, gen_salt('bf')),
-        failed_password_attempts = 0,
-        first_failed_password_attempt = null,
-        reset_password_token = null,
-        reset_password_token_generated = null,
-        failed_reset_password_attempts = 0,
-        first_failed_reset_password_attempt = null
-      where user_secrets.user_id = v_user.id;
-
-      -- Revoke the users' sessions
-      delete from app_private.sessions
-      where sessions.user_id = v_user.id;
-
-      -- Notify user their password was reset
-      perform graphile_worker.add_job(
-        'user__audit',
-        json_build_object(
-          'type', 'reset_password',
-          'user_id', v_user.id,
-          'current_user_id', app_public.current_user_id()
-        ));
-
-      return true;
-    else
-      -- Wrong token, bump all the attempt tracking figures
-      update app_private.user_secrets
-      set
-        failed_reset_password_attempts = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then 1 else failed_reset_password_attempts + 1 end),
-        first_failed_reset_password_attempt = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then now() else first_failed_reset_password_attempt end)
-      where user_secrets.user_id = v_user.id;
-      return null;
-    end if;
-  else
-    -- No user with that id was found
-    return null;
-  end if;
-end;
-$$ language plpgsql strict volatile;
-
 /*
  * For security reasons we don't want to allow a user to just delete their user
  * account without confirmation; so we have them request deletion, receive an
@@ -490,14 +416,13 @@ begin
 
       -- Reset the password as requested
       update app_private.user_secrets
-      set
-        password_hash = crypt(new_password, gen_salt('bf'))
+      set password_hash = crypt(new_password, gen_salt('bf'))
       where user_secrets.user_id = v_user.id;
 
       -- Revoke all other sessions
       delete from app_private.sessions
       where sessions.user_id = v_user.id
-      and sessions.uuid <> app_public.current_session_id();
+      and sessions.id <> app_public.current_session_id();
 
       -- Notify user their password was changed
       perform graphile_worker.add_job(
@@ -520,6 +445,77 @@ $$ language plpgsql strict volatile security definer set search_path to pg_catal
 
 grant execute on function app_public.change_password(text, text) to :DATABASE_VISITOR;
 
+create function app_private.reset_password(
+  user_id uuid,
+  reset_token text,
+  new_password text
+) returns boolean as $$
+declare
+  v_user app_public.users;
+  v_user_secret app_private.user_secrets;
+  v_token_max_duration interval = interval '3 days';
+begin
+  select users.* into v_user
+  from app_public.users
+  where id = reset_password.user_id;
+
+  if v_user is null then return null; end if;
+
+  -- Load their secrets
+  select * into v_user_secret from app_private.user_secrets
+  where user_secrets.user_id = v_user.id;
+
+  -- Have there been too many reset attempts?
+  if (
+    v_user_secret.first_failed_reset_password_attempt is not null
+    and v_user_secret.first_failed_reset_password_attempt > NOW() - v_token_max_duration
+    and v_user_secret.failed_reset_password_attempts >= 20
+  ) then
+    raise exception 'Password reset locked - too many reset attempts' using errcode = 'LOCKD';
+  end if;
+
+  -- Not too many reset attempts, let's check the token
+  if v_user_secret.reset_password_token != reset_token then
+    -- Wrong token, bump all the attempt tracking figures
+    update app_private.user_secrets
+    set
+      failed_reset_password_attempts = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then 1 else failed_reset_password_attempts + 1 end),
+      first_failed_reset_password_attempt = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then now() else first_failed_reset_password_attempt end)
+    where user_secrets.user_id = v_user.id;
+    return null;
+  end if;
+
+  -- Excellent - they're legit
+  perform app_private.assert_valid_password(new_password);
+
+  -- Let's reset the password as requested
+  update app_private.user_secrets
+  set
+    password_hash = crypt(new_password, gen_salt('bf')),
+    failed_password_attempts = 0,
+    first_failed_password_attempt = null,
+    reset_password_token = null,
+    reset_password_token_generated = null,
+    failed_reset_password_attempts = 0,
+    first_failed_reset_password_attempt = null
+  where user_secrets.user_id = v_user.id;
+
+  -- Revoke the users' sessions
+  delete from app_private.sessions
+  where sessions.user_id = v_user.id;
+
+  -- Notify user their password was reset
+  perform graphile_worker.add_job(
+    'user__audit',
+    json_build_object(
+      'type', 'reset_password',
+      'user_id', v_user.id,
+      'current_user_id', app_public.current_user_id()
+    ));
+  return true;
+end;
+$$ language plpgsql strict volatile;
+
 /*
  * A user account may be created explicitly via the GraphQL `register` mutation
  * (which calls `really_create_user` below), or via OAuth (which, via
@@ -536,6 +532,7 @@ create function app_private.really_create_user(
   email_is_verified bool default false,
   name text default null,
   avatar_url text default null,
+  role app_public.user_role default 'user',
   password text default null
 ) returns app_public.users as $$
 declare
@@ -553,8 +550,8 @@ begin
   end if;
 
   -- Insert the new user
-  insert into app_public.users (username, name, avatar_url) values
-    (v_username, name, avatar_url)
+  insert into app_public.users (username, name, avatar_url, role) values
+    (v_username, name, avatar_url, role)
     returning * into v_user;
 
 	-- Add the user's email
@@ -637,7 +634,8 @@ begin
     email => v_email,
     email_is_verified => f_email_is_verified,
     name => v_name,
-    avatar_url => v_avatar_url
+    avatar_url => v_avatar_url,
+    role => coalesce((f_profile->>'role')::app_public.user_role, 'user')
   );
 
   -- Insert the user’s private account data (e.g. OAuth tokens)
@@ -749,7 +747,8 @@ begin
       update app_public.users
         set
           name = coalesce(users.name, v_name),
-          avatar_url = coalesce(users.avatar_url, v_avatar_url)
+          avatar_url = coalesce(users.avatar_url, v_avatar_url),
+          role = coalesce((f_profile->>'role')::app_public.user_role, users.role)
         where id = v_matched_user_id
         returning  * into v_user;
       return v_user;

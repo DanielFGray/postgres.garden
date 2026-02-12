@@ -1,32 +1,55 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "target": "esnext",
+    "target": "ESNext",
     "useDefineForClassFields": true,
-    "module": "nodenext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true,
-
-    /* Bundler mode */
+    "module": "ESNext",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strict": true,
+    "sourceMap": true,
     "resolveJsonModule": true,
     "isolatedModules": false,
+    "esModuleInterop": true,
     "noEmit": true,
-    "jsx": "react-jsx",
-
-    /* Linting */
-    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "types": ["cypress", "node"],
+    "noImplicitReturns": true,
     "baseUrl": ".",
-    "paths": {
-      "~/*": ["./src/*"],
-      "~lib/*": ["./lib/*"],
-      "~server/*": ["./server/*"]
-    }
+    "experimentalDecorators": true,
+    "noUncheckedIndexedAccess": true,
+    "skipDefaultLibCheck": true,
+    "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "refactors": true,
+        "diagnostics": true,
+        "quickinfo": true,
+        "completions": true,
+        "namespaceImportPackages": ["effect", "@effect/*"]
+      }
+    ]
   },
-  "include": ["src", "server", "worker", "scripts"],
-  "exclude": ["cypress"]
+  "exclude": [
+    "node_modules",
+    "lib",
+    "scripts",
+    "dist",
+    "src/features/notebook/renderer/pev2",
+    "src/debugServer.ts",
+    "src/features/erd"
+  ],
+  "include": [
+    "src",
+    "server"
+  ]
 }

@@ -1,0 +1,119 @@
+@use "sass:math";
+
+// The yiq lightness value that determines when the lightness of color changes from "dark" to "light". Acceptable values are between 0 and 255.
+$yiq-contrasted-threshold: 150 !default;
+
+// Customize the light and dark text colors for use in our YIQ color contrast function.
+$yiq-text-dark: darken(#f7f7f7, 70%) !default;
+$yiq-text-light: white !default;
+
+// Color contrast
+@function color-yiq($color, $dark: $yiq-text-dark, $light: $yiq-text-light) {
+  $r: red($color);
+  $g: green($color);
+  $b: blue($color);
+
+  $yiq: math.div(($r * 299) + ($g * 587) + ($b * 114), 1000);
+
+  @if ($yiq >= $yiq-contrasted-threshold) {
+    @return $dark;
+  } @else {
+    @return $light;
+  }
+}
+
+/**
+ * Severity classes
+ */
+@each $color, $value in $severity-colors {
+  .alert.c-#{$color} {
+    background-color: $value;
+    color: color-yiq($value);
+    font-weight: bold;
+  }
+
+  .progress-bar.c-#{$color} {
+    background-color: $value;
+    border-color: $value !important;
+  }
+
+  .text-c-#{$color} {
+    color: $value;
+  }
+
+  svg circle.c-#{$color} {
+    fill: $value;
+  }
+}
+
+$buffers-colors: (
+  hit: map-get($severity-colors, 1),
+  read: map-get($severity-colors, 2),
+  dirtied: map-get($severity-colors, 3),
+  written: map-get($severity-colors, 4),
+) !default;
+
+/**
+ * Shared buffers classes
+ */
+@each $color, $value in $buffers-colors {
+  .bg-#{$color} {
+    background-color: $value;
+  }
+  .border-#{$color} {
+    border-color: $value !important;
+  }
+}
+
+.btn-group-xs .btn,
+.btn-xs {
+  padding: 0.25rem 0.4rem;
+  font-size: $font-size-sm;
+  border-radius: 0.2rem;
+
+  &,
+  .fa {
+    line-height: 0.5;
+  }
+}
+
+/*
+ * Used with @extend in .plan-node.never-executed
+ */
+%bg-hatched {
+  --hatched-color: var(--bs-tertiary-bg);
+  $angle: 45deg;
+  $progress-height: 1rem !default;
+  background-image: linear-gradient(
+    $angle,
+    var(--hatched-color) 25%,
+    var(--bs-body-bg) 25%,
+    var(--bs-body-bg) 50%,
+    var(--hatched-color) 50%,
+    var(--hatched-color) 75%,
+    var(--bs-body-bg) 75%,
+    var(--bs-body-bg)
+  );
+  background-size: $progress-height $progress-height;
+}
+
+.bg-hatched {
+  @extend %bg-hatched;
+}
+
+.border-dashed {
+  border-style: dashed !important;
+  background-color: transparent !important;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.opacity-20 {
+  opacity: 0.2 !important;
+}

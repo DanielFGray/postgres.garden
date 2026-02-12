@@ -10,7 +10,7 @@
  */
 
 create type app_public.user_role as enum('user', 'sponsor', 'pro', 'admin');
-create domain app_public.username as citext check(length(value) >= 2 and length(value) <= 24 and value ~ '^[a-zA-Z][a-zA-Z0-9_-]+$');
+create domain app_public.username as citext check(length(value) >= 2 and length(value) <= 64 and value ~ '^[a-zA-Z][a-zA-Z0-9_-]+$');
 create domain app_public.url as text check(value ~ '^https?://\S+$');
 
 create table app_public.users (

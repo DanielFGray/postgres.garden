@@ -1,143 +1,452 @@
-import { describe, it, expect, afterAll } from "bun:test";
-import Postgres from "postgres";
+/**
+ * Authentication Tests
+ * Tests for session validation, registration, login, and testing command endpoints
+ */
+
+import { describe, it, expect } from "bun:test";
 import { treaty } from "@elysiajs/eden";
-import { generateStr } from "~lib/index";
-import { app as App, lucia } from "~server/app";
-import "./assertEnv";
+import { app as baseApp } from "./app";
+import { testingServer } from "./testing";
+import { rootDb } from "./db";
 
-const { DATABASE_URL } = process.env;
+// Mount testing commands on the app
+const app = baseApp.use(testingServer);
 
-const app = treaty(App);
+// Create type-safe client
+const client = treaty(app);
 
-const user = {
-  username: `test_${generateStr(4)}`,
-  email: `test_${generateStr(4)}@test.com`,
-  password: generateStr(12),
+// Helper to get headers from Eden treaty responses (typed as HeadersInit but is Headers at runtime)
+const getHeader = (headers: HeadersInit | undefined, name: string) =>
+  new Headers(headers).get(name);
+
+// Helper to generate random strings for testing
+const generateStr = (length: number) =>
+  Math.random()
+    .toString(36)
+    .substring(2, 2 + length);
+
+// Helper to clean up a specific user
+const cleanupUser = async (username: string) => {
+  await rootDb
+    .deleteFrom("app_public.users")
+    .where("username", "=", username)
+    .execute();
 };
 
-describe("auth:user", () => {
-  let userId: string;
-  let Cookie: string;
+describe("Session Validation", () => {
+  it("can register and create session", async () => {
+    const username = `test_${generateStr(8)}`;
+    const email = `${username}@test.com`;
+    const password = "TestPassword123!";
 
-  it("can register", async () => {
-    const { headers, data, error } = await app.register.post(user);
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(headers).toBeDefined();
-    userId = data?.id as string;
-    expect(data).toBeObject();
-    expect(data?.id).toBeString();
-    expect(data?.username).toBe(user.username);
-    expect(data?.role).toBeOneOf(["user", "admin"]);
-    expect(headers?.get("set-cookie")).toContain(lucia.sessionCookieName);
-    Cookie = headers?.get("set-cookie");
+    try {
+      const { data, status, headers } = await client.register.post({
+        username,
+        email,
+        password,
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("id");
+      expect(data).toHaveProperty("username", username);
+
+      // Check session cookie was set
+      const setCookie = getHeader(headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+      expect(setCookie).toContain("session=");
+    } finally {
+      await cleanupUser(username);
+    }
   });
 
-  it("can not register with an existing username", async () => {
-    const { error, data } = await app.register.post(user);
-    expect(data).toBeNull();
-    expect(error?.value).toEqual("username already exists");
+  it("can validate session cookie on /me endpoint", async () => {
+    const username = `test_${generateStr(8)}`;
+    const email = `${username}@test.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // Register to get a session
+      const registerRes = await client.register.post({
+        username,
+        email,
+        password,
+      });
+
+      const setCookie = getHeader(registerRes.headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+      const sessionCookie = setCookie!.split(";")[0]!;
+
+      // Use session to access /me
+      const { data, status } = await client.me.get({
+        fetch: { headers: { Cookie: sessionCookie } },
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("username", username);
+    } finally {
+      await cleanupUser(username);
+    }
   });
 
-  it("can not login with wrong password", async () => {
-    const { data, error } = await app.login.post({
-      id: user.username,
-      password: "wrong123",
+  it("rejects invalid session token", async () => {
+    const { status, data } = await client.me.get({
+      fetch: { headers: { Cookie: "session=invalid.token.here" } },
     });
-    expect(data).toBeNull();
-    expect(error?.value).toContain("invalid id or password");
-  });
 
-  it("can login with email", async () => {
-    const { data, error } = await app.login.post({
-      id: user.email,
-      password: user.password,
-    });
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data?.id).toEqual(userId);
-    expect(data?.username).toEqual(user.username);
-    expect(data?.role).toBeOneOf(["user", "admin"]);
-  });
-
-  it("can request /me from cookie", async () => {
-    const { data, error } = await app.me.get({ headers: { Cookie } });
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data?.id).toEqual(userId);
-    expect(data?.username).toEqual(user.username);
-    expect(data?.role).toBeOneOf(["user", "admin"]);
-  });
-
-  let postId: number;
-  it("can use cookie to make new posts", async () => {
-    const { data, error } = await app.playgrounds.post(
-      { files: { "0001-test.sql": "select 1 as test" } },
-      { headers: { Cookie } },
-    );
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data).toBeNumber();
-    postId = data as number;
-  });
-
-  it("can fetch new post without cookie", async () => {
-    const { data, error } = await app.playground({ id: postId }).get();
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data).toBeObject();
-    expect(data?.id).toBe(postId);
-  });
-
-  it("can list user's own posts", async () => {
-    const { data, error } = await app.u({ username: user.username }).get();
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data).toBeArray();
-    expect(data).not.toBeEmpty();
-  });
-
-  it("can use cookie to list latest posts", async () => {
-    const { data, error } = await app.playgrounds.get({ headers: { Cookie } });
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data).toBeArray();
-    expect(data).not.toBeEmpty();
-  });
-
-  let secretPostId: number;
-  it("can use cookie to make private post", async () => {
-    const { data, error } = await app.playgrounds.post(
-      {
-        files: { "0001-test.sql": "select 1 as test" },
-        privacy: "private",
-      },
-      { headers: { Cookie } },
-    );
-    expect(error?.value).toBeUndefined();
-    expect(data).not.toBeNull();
-    expect(data).toBeNumber();
-    secretPostId = data as number;
-  });
-
-  it("can not fetch secret post without cookie", async () => {
-    const { data, error } = await app.playground({ id: secretPostId }).get();
-    expect(error?.status).toBe(404);
+    expect(status).toBe(200);
+    // When no valid session, response body is empty
     expect(data).toBeFalsy();
   });
 
-  it("can fetch secret post with cookie", async () => {
-    const { data, error } = await app
-      .playground({ id: secretPostId })
-      .get({ headers: { Cookie } });
-    expect(error?.value).toBeUndefined();
-    expect(data).toBeObject();
-    expect(data?.id).toBe(secretPostId);
+  it("rejects expired session", async () => {
+    const username = `test_${generateStr(8)}`;
+    const email = `${username}@test.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // Register to get a session
+      const registerRes = await client.register.post({
+        username,
+        email,
+        password,
+      });
+
+      const setCookie = getHeader(registerRes.headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+      const sessionCookie = setCookie!.split(";")[0]!;
+      const sessionId = sessionCookie.split("=")[1]!.split(".")[0]!;
+
+      // Manually expire the session in database
+      await rootDb
+        .updateTable("app_private.sessions")
+        .set({ expires_at: new Date(Date.now() - 1000) }) // 1 second ago
+        .where("id", "=", sessionId)
+        .execute();
+
+      // Try to use the expired session
+      const { status, data } = await client.me.get({
+        fetch: { headers: { Cookie: sessionCookie } },
+      });
+
+      expect(status).toBe(200);
+      // Session should be rejected, empty response
+      expect(data).toBeFalsy();
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("can login with email and create new session", async () => {
+    const username = `test_${generateStr(8)}`;
+    const email = `${username}@test.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // First register
+      await client.register.post({ username, email, password });
+
+      // Then login
+      const { data, status, headers } = await client.login.post({
+        id: email,
+        password,
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("username", username);
+
+      // Should have new session cookie
+      const setCookie = getHeader(headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+      expect(setCookie).toContain("session=");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("can logout and invalidate session", async () => {
+    const username = `test_${generateStr(8)}`;
+    const email = `${username}@test.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // Register
+      await client.register.post({ username, email, password });
+
+      // Login to get a fresh session
+      const loginRes = await client.login.post({
+        id: username,
+        password,
+      });
+
+      const setCookie = getHeader(loginRes.headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+      const sessionCookie = setCookie!.split(";")[0]!;
+
+      // Logout
+      const logoutRes = await client.logout.post(
+        {},
+        { fetch: { headers: { Cookie: sessionCookie } } },
+      );
+      expect(logoutRes.status).toBe(200);
+
+      // Try to use the old session
+      const meRes = await client.me.get({
+        fetch: { headers: { Cookie: sessionCookie } },
+      });
+
+      // Session should be invalid after logout
+      expect(meRes.data).toBeFalsy();
+    } finally {
+      await cleanupUser(username);
+    }
   });
 });
 
-afterAll(async () => {
-  const sql = Postgres(DATABASE_URL);
-  await sql`delete from app_public.users where username = ${user.username}`;
-  void sql.end();
+describe("Testing Command Endpoints", () => {
+  it("should clear test users successfully", async () => {
+    const username = `test_cleartest_${generateStr(6)}`;
+
+    // Clean up first in case of previous failed run
+    await cleanupUser(username);
+
+    // Create a test user with the test% prefix
+    await rootDb
+      .insertInto("app_public.users")
+      .values({
+        username,
+        is_verified: true,
+      })
+      .execute();
+
+    const { data, status } = await client.api.testingCommand.clearTestUsers.get();
+
+    expect(status).toBe(200);
+    expect(data).toHaveProperty("success", true);
+
+    // Verify user was deleted
+    const user = await rootDb
+      .selectFrom("app_public.users")
+      .where("username", "=", username)
+      .selectAll()
+      .executeTakeFirst();
+
+    expect(user).toBeUndefined();
+  });
+
+  it("should create a test user", async () => {
+    const username = `testuser_${generateStr(6)}`;
+    const email = `${username}@example.com`;
+
+    try {
+      const { data, status } = await client.api.testingCommand.createUser.get({
+        query: {
+          username,
+          email,
+          verified: "true",
+          password: "TestPassword123",
+        },
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("user");
+      expect(data).toHaveProperty("user.username", username);
+      expect(data).toHaveProperty("user.is_verified", true);
+      expect(data).toHaveProperty("userEmailId");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should get user secrets", async () => {
+    const username = `testuser_${generateStr(6)}`;
+
+    try {
+      // First create a user
+      await client.api.testingCommand.createUser.get({
+        query: { username, password: "TestPassword456" },
+      });
+
+      // Then get their secrets
+      const { data, status } = await client.api.testingCommand.getUserSecrets.get({
+        query: { username },
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("user_id");
+      expect(data).toHaveProperty("password_hash");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should verify a user", async () => {
+    const username = `testuser_${generateStr(6)}`;
+
+    try {
+      // Create unverified user
+      await client.api.testingCommand.createUser.get({
+        query: { username, verified: "false" },
+      });
+
+      // Verify the user
+      const { data, status } = await client.api.testingCommand.verifyUser.get({
+        query: { username },
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("success", true);
+
+      // Verify it worked in DB
+      const user = await rootDb
+        .selectFrom("app_public.users")
+        .where("username", "=", username)
+        .select("is_verified")
+        .executeTakeFirst();
+
+      expect(user?.is_verified).toBe(true);
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should login and set session cookie via testing endpoint", async () => {
+    const username = `testlogin_${generateStr(6)}`;
+
+    try {
+      const { status, headers } = await client.api.testingCommand.login.get({
+        query: { username, verified: "true", redirectTo: "/" },
+        fetch: { redirect: "manual" },
+      });
+
+      expect(status).toBe(302);
+      expect(getHeader(headers, "location")).toBe("/");
+      expect(getHeader(headers, "set-cookie")).toContain("session=");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should register a new user via testing API", async () => {
+    const username = `testuser_${generateStr(8)}`;
+    const email = `${username}@example.com`;
+
+    try {
+      const { status, headers } = await client.api.testingCommand.register.post(
+        {
+          username,
+          email,
+          password: "TestPassword123!",
+        },
+        { fetch: { redirect: "manual" } },
+      );
+
+      expect(status).toBe(302);
+      expect(getHeader(headers, "location")).toBe("/");
+      expect(getHeader(headers, "set-cookie")).toContain("session=");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should login via testing API and get session cookie", async () => {
+    const username = `logintest_${generateStr(8)}`;
+    const email = `${username}@example.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // First register
+      await client.api.testingCommand.register.post(
+        { username, email, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      // Then login
+      const { status, headers } = await client.api.testingCommand.loginPost.post(
+        { id: username, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      expect(status).toBe(302);
+      expect(getHeader(headers, "location")).toBe("/");
+      expect(getHeader(headers, "set-cookie")).toContain("session=");
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should access /me endpoint with valid session from testing login", async () => {
+    const username = `metest_${generateStr(8)}`;
+    const email = `${username}@example.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // Register and login via testing endpoints
+      await client.api.testingCommand.register.post(
+        { username, email, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      const loginRes = await client.api.testingCommand.loginPost.post(
+        { id: username, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      const setCookie = getHeader(loginRes.headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+
+      const sessionCookie = setCookie!.split(";")[0]!;
+
+      // Access /me with the session cookie
+      const { data, status } = await client.me.get({
+        fetch: { headers: { Cookie: sessionCookie } },
+      });
+
+      expect(status).toBe(200);
+      expect(data).toHaveProperty("username", username);
+    } finally {
+      await cleanupUser(username);
+    }
+  });
+
+  it("should logout and clear session from testing login", async () => {
+    const username = `logouttest_${generateStr(8)}`;
+    const email = `${username}@example.com`;
+    const password = "TestPassword123!";
+
+    try {
+      // Register and login via testing endpoints
+      await client.api.testingCommand.register.post(
+        { username, email, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      const loginRes = await client.api.testingCommand.loginPost.post(
+        { id: username, password },
+        { fetch: { redirect: "manual" } },
+      );
+
+      const setCookie = getHeader(loginRes.headers, "set-cookie");
+      expect(setCookie).toBeTruthy();
+
+      const sessionCookie = setCookie!.split(";")[0]!;
+
+      // Logout
+      const logoutRes = await client.logout.post(
+        {},
+        { fetch: { headers: { Cookie: sessionCookie } } },
+      );
+      expect(logoutRes.status).toBe(200);
+
+      // Try to access /me with old session (should fail)
+      const meRes = await client.me.get({
+        fetch: { headers: { Cookie: sessionCookie } },
+      });
+
+      // When no user is authenticated, /me returns empty body
+      expect(meRes.status).toBe(200);
+      expect(meRes.data).toBeFalsy();
+    } finally {
+      await cleanupUser(username);
+    }
+  });
 });

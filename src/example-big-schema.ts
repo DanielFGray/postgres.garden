@@ -3,7 +3,7 @@ export default function getWorkspace() {
     defaultLayout: {
       editors: [
         {
-          uri: "/example.md",
+          uri: "/workspace/example.md",
           viewColumn: 1,
         },
       ],
@@ -15,7 +15,7 @@ export default function getWorkspace() {
       },
     },
     files: {
-      "/example.md": `
+      "/workspace/example.md": `
 \`\`\`sql
 begin;
 truncate app_public.users restart identity cascade;
@@ -78,7 +78,7 @@ select * from app_public.top_posts();
 rollback;
 \`\`\`
 `.trim(),
-      "/00100-posts.sql": `
+      "/workspace/00100-posts.sql": `
 create domain app_public.tag as text check (length(value) between 1 and 64);
 
 create type app_public.privacy as enum ('private', 'secret', 'public');
@@ -247,7 +247,7 @@ create trigger _100_timestamps
 execute procedure app_private.tg__timestamps();
 `.trim(),
 
-        "/workspace/migrations/current/99999-fixtures.sql": `
+      "/workspace/99999-fixtures.sql": `
 create or replace function app_public.posts_current_user_voted(
   post app_public.posts
 ) returns app_public.vote_type as $$
@@ -505,7 +505,7 @@ create or replace view app_public.top_tags as
   order by count desc;
 `.trim(),
 
-      "/00010-graphile-starter.sql": `
+      "/workspace/00010-graphile-starter.sql": `
 drop schema if exists app_public cascade;
 drop schema if exists app_hidden cascade;
 drop schema if exists app_private cascade;

@@ -1,19 +1,10 @@
 import * as vscode from "vscode";
-import * as db from "./pglite";
-import { IDisposable } from "monaco-editor";
+import { PGliteService } from "./pglite";
 import {
-  registerCustomView,
-  ViewContainerLocation,
-} from "@codingame/monaco-vscode-workbench-service-override";
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions"
-import getWorkspace from "~/example-small-schema";
-import { fileSystemProvider } from "~/fsProvider";
-import {
-  FileType,
-  RegisteredMemoryFile,
-} from "@codingame/monaco-vscode-files-service-override";
-import { DatabaseExplorerProvider } from "./introspection";
-import { throttle } from "~lib/index";
+  ExtensionHostKind,
+  registerExtension,
+} from "@codingame/monaco-vscode-api/extensions";
+import { DatabaseExplorerProvider } from "./introspection.js";
 import {
   PGLITE_RESET,
   PGLITE_EXECUTE,
@@ -21,18 +12,19 @@ import {
   DATABASE_EXPLORER,
   DATABASE_MIGRATE,
   LATEST_POSTS,
-  WORKSPACE_PREFIX,
   ERD_SHOW,
-  ERD_UPDATE,
-  // PLAYGROUND_INFO,
-} from "./constants";
-import { SQLNotebookExecutionController } from "./notebook/controller";
-import { SQLSerializer } from "./notebook/sql";
-import { MarkdownSerializer } from "./notebook/markdown";
-import { getMermaidERD, mermaidRender } from "./erd";
-import { api } from "~/api";
+} from "./constants.js";
+import { SQLNotebookExecutionController } from "./notebook/controller.js";
+import { SQLSerializer } from "./notebook/sql.js";
+import { MarkdownSerializer } from "./notebook/markdown.js";
+import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
+import { ERDPanelProvider } from "./erd/ERDPanelProvider.js";
 
-const { getApi } = registerExtension(
+// Module-level subscriptions for HMR support
+const subscriptions: vscode.Disposable[] = [];
+
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const { getApi, registerFileUrl } = registerExtension(
   {
     name: "postgres.garden",
     publisher: "postgres.garden",
@@ -41,6 +33,65 @@ const { getApi } = registerExtension(
     capabilities: { virtualWorkspaces: true },
     extensionKind: ["workspace"],
     contributes: {
+      languages: [
+        {
+          id: "sql",
+          extensions: [".sql", ".dsql"],
+          aliases: ["PostgreSQL", "SQL", "sql"],
+          configuration: "./language-configuration.json",
+        },
+      ],
+      grammars: [
+        {
+          language: "sql",
+          scopeName: "source.sql",
+          path: "./syntaxes/sql.tmLanguage.json",
+        },
+      ],
+      walkthroughs: [
+        {
+          id: "pg-playground-getting-started",
+          title: "PostgreSQL Playground Getting Started",
+          description:
+            "Learn PostgreSQL with interactive examples and get started with your first playground",
+          steps: [
+            {
+              id: "choose-example",
+              title: "Choose Your Starting Example",
+              description:
+                "[Empty Playground](command:pg-playground.createEmpty)",
+              media: {
+                markdown: "media/examples-overview.md",
+              },
+              completionEvents: [
+                "onCommand:pg-playground.loadExample",
+                "onCommand:pg-playground.createEmpty",
+              ],
+            },
+            {
+              id: "run-query",
+              title: "Run Your First Query",
+              description:
+                "Execute a query to see live results:\n\n[▶️ Run Current Query](command:pg-playground.runQuery)\n\nWatch the output panel to see your query results in real-time.",
+              media: {
+                image: "media/run-query.png",
+                altText: "Running a PostgreSQL query",
+              },
+              completionEvents: ["onCommand:pg-playground.runQuery"],
+            },
+            {
+              id: "explore-features",
+              title: "Explore Advanced Features",
+              description:
+                "Discover powerful PostgreSQL playground features:\n\n• **Schema Introspection**: Explore database structure\n• **Query History**: Access previous queries\n• **Export Results**: Save query outputs\n• **Share Playgrounds**: Collaborate with others\n\n[📖 Open Documentation](command:vscode.open?https://docs.pg-playground.com)",
+              media: {
+                image: "media/features-overview.png",
+                altText: "PostgreSQL playground features",
+              },
+            },
+          ],
+        },
+      ],
       configuration: [
         {
           order: 22,
@@ -72,6 +123,14 @@ const { getApi } = registerExtension(
           selector: [{ filenamePattern: "*.md" }],
         },
       ],
+      notebookRenderer: [
+        {
+          id: "pg-playground-sql-renderer",
+          entrypoint: "./renderer/index.js",
+          displayName: "SQL Results Renderer",
+          mimeTypes: ["application/vnd.pg-playground.sql-result+json"],
+        },
+      ],
       commands: [
         {
           command: PGLITE_RESET,
@@ -99,14 +158,14 @@ const { getApi } = registerExtension(
           icon: "$(github)",
         },
         {
-          command: ERD_SHOW,
-          title: "Show entity relationship diagram",
-          icon: "$(type-hierarchy)",
-        },
-        {
           command: LATEST_POSTS,
           title: "Latest Posts",
           icon: "$(clock)",
+        },
+        {
+          command: ERD_SHOW,
+          title: "Show ERD",
+          icon: "$(type-hierarchy)",
         },
       ],
       menus: {
@@ -132,6 +191,7 @@ const { getApi } = registerExtension(
           // { command: "sql.format", group: "1_run" },
           { command: DATABASE_MIGRATE, group: "1_run" },
           { command: PGLITE_EXECUTE, group: "1_run" },
+          { command: ERD_SHOW, group: "1_run" },
           { command: PGLITE_RESET, group: "5_close" },
         ],
         "notebook/cell/execute": [
@@ -151,7 +211,8 @@ const { getApi } = registerExtension(
       viewsWelcome: [
         {
           view: "workbench.explorer.emptyView",
-          contents: `[see latest](command:${LATEST_POSTS})`,
+          contents:
+            "Welcome to PostgreSQL Playground! 🐘\n\nGet started with interactive PostgreSQL examples:\n\n[🆕 Create Empty Playground](command:pg-playground.createEmpty)\n\n[📚 Open Getting Started Guide](command:workbench.action.openWalkthrough?pg-playground-getting-started)",
         },
         {
           view: DATABASE_EXPLORER,
@@ -163,83 +224,64 @@ const { getApi } = registerExtension(
   ExtensionHostKind.LocalProcess,
 );
 
-// registerCustomView({
-//   id: PLAYGROUND_INFO,
-//   name: "Playground",
-//   canToggleVisibility: false,
-//   hideByDefault: false,
-//   default: true,
-//   collapsed: false,
-//   order: 0,
-//   location: ViewContainerLocation.Sidebar,
-//   icon: new URL(
-//     "../Visual_Studio_Code_1.35_icon.svg",
-//     import.meta.url,
-//   ).toString(),
-//   renderBody(container: HTMLElement): vscode.Disposable {
-//     container.style.display = "flex";
-//     container.style.flexDirection = "column";
-//     container.style.alignItems = "center";
-//     // container.style.justifyContent = "center";
-//     // container.style.height = "100%";
+// Register renderer bundle (both with and without .js)
+// CSS is inlined into the JS bundle and injected into the Shadow DOM at runtime.
+registerFileUrl(
+  "renderer/index",
+  new URL(
+    "./notebook/renderer-dist/sql-renderer.js",
+    import.meta.url,
+  ).toString(),
+);
 
-//     const playground = {};
-//     const isOwner = me?.username === playground?.user?.username;
+registerFileUrl(
+  "renderer/index.js",
+  new URL(
+    "./notebook/renderer-dist/sql-renderer.js",
+    import.meta.url,
+  ).toString(),
+);
 
-//     const fragment = document.createDocumentFragment();
-//     if (playground?.id) {
-//       const name = document.createElement("h1");
-//       name.textContent = playground.name;
-//       if (isOwner) {
-//         name.contentEditable = "true";
-//       }
-//       fragment.appendChild(name);
+// PostgreSQL language support (replaces @codingame/monaco-vscode-sql-default-extension)
+registerFileUrl(
+  "./language-configuration.json",
+  new URL("./pgsql/language-configuration.json", import.meta.url).toString(),
+);
 
-//       const description = document.createElement("div");
-//       description.textContent = playground.description;
-//       fragment.appendChild(description);
-//     }
+registerFileUrl(
+  "./syntaxes/sql.tmLanguage.json",
+  new URL("./pgsql/sql.tmLanguage.json", import.meta.url).toString(),
+);
 
-//     container.replaceChildren(fragment);
-//     return {
-//       dispose() {},
-//     };
-//   },
-//   actions: [
-//     // isOwner ?
-//     {
-//       id: "save-all",
-//       title: "Save Playground",
-//       icon: "saveAll",
-//       async run(accessor) {
-//         vscode.commands.executeCommand(SAVE_WORKSPACE);
-//         // void accessor.get(IDialogService).info("This is a custom view action button")
-//       },
-//     },
-//     // :
-//     {
-//       id: "fork",
-//       title: "fork",
-//       icon: "gistFork",
-//       async run(accessor) {
-//         vscode.commands.executeCommand(SAVE_WORKSPACE);
-//       },
-//     },
-//   ],
-// });
-
-void getApi().then(async vscode => {
+void getApi().then(async (vscode) => {
+  console.log(
+    "[TEST READY] VSCode API initialized, setting window.vscode and window.vscodeReady",
+  );
   window.vscode = vscode;
+  window.vscodeReady = Promise.resolve(vscode);
+  console.log("[TEST READY] window.vscodeReady is now set");
 
-  const subscriptions: IDisposable[] = [];
+  // Clear old subscriptions on HMR reload
+  // Wait for async disposals to complete before creating new services
+  await Promise.all(
+    subscriptions.map(async (d) => {
+      if (typeof d.dispose === "function") {
+        await d.dispose();
+      }
+    }),
+  );
+  subscriptions.length = 0;
 
+  // Register notebook serializers FIRST - before loading workspace
+  // This ensures .md and .sql files can be opened as notebooks
   subscriptions.push(
     vscode.workspace.registerNotebookSerializer(
       "markdown-notebook",
       new MarkdownSerializer(),
     ),
   );
-  new SQLNotebookExecutionController("markdown-notebook");
+  const controller1 = new SQLNotebookExecutionController("markdown-notebook");
+  subscriptions.push(controller1);
 
   subscriptions.push(
     vscode.workspace.registerNotebookSerializer(
@@ -247,39 +289,33 @@ void getApi().then(async vscode => {
       new SQLSerializer(),
     ),
   );
+  const controller2 = new SQLNotebookExecutionController("sql-notebook");
+  subscriptions.push(controller2);
 
-  new SQLNotebookExecutionController("sql-notebook");
+  // Create PGlite service instance
+  const pgliteService = new PGliteService();
 
-  const { defaultLayout, files } = getWorkspace();
-
-  Object.entries(files).forEach(([path, value]) =>
-    fileSystemProvider.registerFile(
-      new RegisteredMemoryFile(
-        vscode.Uri.file(
-          WORKSPACE_PREFIX.concat(path.startsWith("/") ? path : `/${path}`),
-        ),
-        value,
-      ),
-    ),
-  );
-
-  defaultLayout.editors.forEach(editor => {
-    const uri = vscode.Uri.file(
-      WORKSPACE_PREFIX.concat(
-        editor.uri.startsWith("/") ? editor.uri : `/${editor.uri}`,
-      ),
-    );
-    vscode.window.showNotebookDocument(uri);
+  // Add to subscriptions for proper cleanup
+  subscriptions.push({
+    dispose: () => pgliteService.dispose(),
   });
+
+  // Restore workspace from server (if available)
+  // Only restore for local workspaces (not remote)
+  // NOTE: This must happen AFTER notebook serializers are registered
+  await loadWorkspaceFromInitialData();
 
   const pgliteOutputChannel = vscode.window.createOutputChannel("PGlite");
   subscriptions.push(pgliteOutputChannel);
-  new Promise<void>(res => {
+
+  // Initialize PGlite and show version info
+  void new Promise<void>((res) => {
     pgliteOutputChannel.appendLine("starting postgres");
     // pgliteOutputChannel.show();
-    db.query<{ version: string }>("select version()")
-      .then(version => {
-        pgliteOutputChannel.appendLine(version.rows[0]?.version);
+    pgliteService
+      .query<{ version: string }>("select version()")
+      .then((result) => {
+        pgliteOutputChannel.appendLine(result.rows[0]?.version ?? "");
         pgliteOutputChannel.appendLine("Powered by @electric-sql/pglite");
       })
       .then(res)
@@ -289,31 +325,35 @@ void getApi().then(async vscode => {
   const queryOpts = {};
 
   subscriptions.push(
-    vscode.commands.registerCommand(DATABASE_MIGRATE, async function migrate() {
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      if (!folder) return;
-      const uris = (
-        await findFiles(folder.uri, ([f]) => /\/\d+[^/]+\.sql$/.test(f.path))
-      ).sort((a, b) => a.path.localeCompare(b.path));
-      if (!uris.length) {
-        return vscode.window.showInformationMessage(
-          "No migration files detected",
+    vscode.commands.registerCommand(
+      DATABASE_MIGRATE,
+      async function migrate(): Promise<void> {
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        if (!folder) return;
+        const uris = (
+          await findFiles(folder.uri, ([f]) => /\/\d+[^/]+\.sql$/.test(f.path))
+        ).sort((a, b) => a.path.localeCompare(b.path));
+        if (!uris.length) {
+          await vscode.window.showInformationMessage(
+            "No migration files detected",
+          );
+          return;
+        }
+        const files = await Promise.all(
+          uris.map(async (f) => {
+            const raw = await vscode.workspace.fs.readFile(f);
+            return new TextDecoder().decode(raw);
+          }),
         );
-      }
-      const files = await Promise.all(
-        uris.map(async f => {
-          const raw = await vscode.workspace.fs.readFile(f);
-          return new TextDecoder().decode(raw);
-        }),
-      );
-      for (const sql of files) {
-        await vscode.commands.executeCommand(PGLITE_EXECUTE, sql);
-      }
-      vscode.commands.executeCommand(PGLITE_INTROSPECT);
-      vscode.window.showInformationMessage(
-        `finished ${uris.length} migrations`,
-      );
-    }),
+        for (const sql of files) {
+          await vscode.commands.executeCommand(PGLITE_EXECUTE, sql);
+        }
+        vscode.commands.executeCommand(PGLITE_INTROSPECT);
+        vscode.window.showInformationMessage(
+          `finished ${uris.length} migrations`,
+        );
+      },
+    ),
   );
 
   subscriptions.push(
@@ -321,26 +361,25 @@ void getApi().then(async vscode => {
       PGLITE_EXECUTE,
       async function exec(sql: string) {
         try {
-          const result = await db.exec(sql, queryOpts);
-          result.forEach(stmt => {
+          const result = await pgliteService.exec(sql, queryOpts);
+          result.forEach((stmt) => {
             pgliteOutputChannel.appendLine(stmt.statement);
           });
           if (
-            result.some(r =>
-              ["CREATE", "ALTER", "DROP"].some(stmt =>
+            result.some((r) =>
+              ["CREATE", "ALTER", "DROP"].some((stmt) =>
                 r.statement.startsWith(stmt),
               ),
             )
           ) {
             vscode.commands.executeCommand(PGLITE_INTROSPECT);
-            vscode.commands.executeCommand(ERD_UPDATE);
           }
           return result;
         } catch (error) {
           pgliteOutputChannel.appendLine(
-            `error: ${error.message ?? JSON.stringify(error)}`,
+            `Error: ${(error as Error)?.message ?? JSON.stringify(error)}`,
           );
-          return [{ error }];
+          return [{ error, statement: sql }];
         }
       },
     ),
@@ -349,121 +388,14 @@ void getApi().then(async vscode => {
   subscriptions.push(
     vscode.commands.registerCommand(PGLITE_RESET, async function reset() {
       pgliteOutputChannel.replace("restarting postgres\n");
-      await db.reset();
+      await pgliteService.reset();
       vscode.commands.executeCommand(PGLITE_INTROSPECT);
-      const {
-        rows: [{ version }],
-      } = await db.query<{ version: string }>("select version()");
-      pgliteOutputChannel.appendLine(version);
-    }),
-  );
-
-  function createErdPanel() {
-    return vscode.window.createWebviewPanel(
-      "erd",
-      "Entity Relationship Diagram",
-      vscode.ViewColumn.Two,
-      {
-        enableCommandUris: true,
-        enableScripts: true,
-        retainContextWhenHidden: false,
-      },
-    );
-  }
-  let erdPanel: vscode.WebviewPanel | undefined;
-
-  const [updateErd] = throttle(async () => {
-    if (erdPanel) {
-      const erd = await getMermaidERD();
-      const { svg } = await mermaidRender(erd);
-      erdPanel.webview.html = svg;
-    }
-  }, 200);
-
-  subscriptions.push(vscode.commands.registerCommand(ERD_UPDATE, updateErd));
-  subscriptions.push(
-    vscode.commands.registerCommand(ERD_SHOW, () => {
-      if (!erdPanel) erdPanel = createErdPanel();
-      updateErd();
-      erdPanel.reveal();
-    }),
-  );
-
-  function createLatestPostsPanel() {
-    return vscode.window.createWebviewPanel(
-      "latest-posts",
-      "Latest Posts",
-      vscode.ViewColumn.Two,
-      {
-        retainContextWhenHidden: true,
-        enableScripts: true,
-        enableCommandUris: true,
-      },
-    );
-  }
-  let latestPanel: vscode.WebviewPanel | undefined;
-
-  async function* renderLatestPosts() {
-    const { data, error } = await api.playgrounds.get();
-    if (!data || error) {
-      if (error) console.log(error);
-      yield "failed to fetch latest posts";
-      return;
-    }
-    if (data.length === 0) {
-      yield "no posts [yet]";
-      return;
-    }
-    const posts = data.map(p => {
-      return `<tr>
-        <td><a href="/p/${p.id}">${p.name}</a></td>
-        <td><a href="/u/${p.user.username}">${p.user.username}</a></td>
-        <td>${p.description}</td>
-        <td>${p.stars} stars</td>
-      </tr>`;
-    });
-    yield `<table>${posts.join("")}</table>`;
-  }
-
-  subscriptions.push(
-    vscode.commands.registerCommand(LATEST_POSTS, async () => {
-      if (latestPanel) latestPanel.dispose();
-      latestPanel = createLatestPostsPanel();
-      latestPanel.reveal();
-      for await (const html of renderLatestPosts()) {
-        latestPanel.webview.html = html;
-      }
-    }),
-  );
-
-  // vscode.languages.registerDocumentFormattingEditProvider("sql", {
-  //   provideDocumentFormattingEdits(
-  //     document: vscode.TextDocument,
-  //   ): vscode.TextEdit[] {
-  //     const firstLine = document.lineAt(0);
-  //     if (firstLine.text !== "42") {
-  //       return [vscode.TextEdit.insert(firstLine.range.start, "42\n")];
-  //     }
-  //   },
-  // });
-
-  // vscode.languages.registerCodeActionsProvider(
-  //   { language: "sql" },
-  //   new ExtractNotebookImports(),
-  //   {
-  //     providedCodeActionKinds: [ExtractNotebookImports.providedKind],
-  //   }
-  // )
-  // );
-
-  // vscode.window.registerWebviewViewProvider(
-  //   PlaygroundSidebarView.id,
-  //   new PlaygroundSidebarView(),
-  // );
-
-  subscriptions.push(
-    vscode.commands.registerCommand("github-login", async () => {
-      window.location.href = "/auth/github";
+      const { rows } = await pgliteService.query<{ version: string }>(
+        "select version()",
+      );
+      pgliteOutputChannel.appendLine(
+        rows[0]?.version ?? "failed fetching version",
+      );
     }),
   );
 
@@ -477,42 +409,57 @@ void getApi().then(async vscode => {
     vscode.commands.registerCommand(PGLITE_INTROSPECT, () => {
       refreshIntrospection();
       dbTreeView.reveal(undefined, { expand: true });
+      ERDPanelProvider.refresh();
+    }),
+  );
+
+  // ERD panel
+  subscriptions.push(
+    vscode.commands.registerCommand(ERD_SHOW, () => {
+      ERDPanelProvider.createOrShow(
+        vscode.Uri.parse(window.location.origin),
+        pgliteService,
+      );
     }),
   );
 });
 
-// const { data: me } = await api.me.get();
-// class PlaygroundSidebarView implements vscode.WebviewViewProvider {
-//   public static readonly id = PLAYGROUND_INFO;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic constraint requires any for proper variance
+function throttle<F extends (...args: any[]) => any>(
+  func: F,
+  wait: number,
+): [throttled: (...args: Parameters<F>) => void, cancel: () => void] {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let lastArgs: Parameters<F> | null = null;
 
-//   async #getHtmlForWebview(webview: vscode.Webview) {
-//     const userInfo = me
-//       ? `<p>hello ${me.username}</p>
-//         <form method="post" action="/api/logout">
-//           <button>logout</a>
-//         </form>`
-//       : '<button href="/auth/github">login</button>';
-//     return `
-//       <style type="text/css">${vscodeCss}</style>
-//       <h1>playground</h1>
-//       ${userInfo}
-//     `;
-//   }
+  const throttled = (...args: Parameters<F>) => {
+    lastArgs = args;
+    if (timeout === null) {
+      func(...lastArgs);
+      lastArgs = null;
+      timeout = setTimeout(() => {
+        timeout = null;
+        if (lastArgs) {
+          throttled(...lastArgs);
+        }
+      }, wait);
+    }
+  };
 
-//   resolveWebviewView(
-//     webviewView: vscode.WebviewView,
-//     context: vscode.WebviewViewResolveContext,
-//     token: vscode.CancellationToken,
-//   ): void {
-//     this.#getHtmlForWebview(webviewView.webview).then(html => {
-//       webviewView.webview.html = html;
-//       webviewView.show(true);
-//     });
-//   }
-// }
+  const cancel = () => {
+    if (timeout !== null) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
+    lastArgs = null;
+  };
+
+  return [throttled, cancel];
+}
+
 async function findFiles(
   dir: vscode.Uri,
-  predicate?: (x: [f: vscode.Uri, type: vscode.FileType]) => boolean
+  predicate?: (x: [f: vscode.Uri, type: vscode.FileType]) => boolean,
 ): Promise<vscode.Uri[]> {
   const readdir = await vscode.workspace.fs.readDirectory(dir);
   const files = [];
@@ -529,97 +476,16 @@ async function findFiles(
   return files;
 }
 
-// FIXME: put this somewhere else
-const vscodeCss = `
-:root {
-  --container-paddding: 20px;
-  --input-padding-vertical: 6px;
-  --input-padding-horizontal: 4px;
-  --input-margin-vertical: 4px;
-  --input-margin-horizontal: 0;
+// HMR support - dispose resources on hot reload
+if (import.meta.hot) {
+  import.meta.hot.dispose(async () => {
+    console.log("[HMR] Disposing postgres extension resources");
+    // Wait for all disposals to complete
+    await Promise.all(
+      subscriptions.map(async (d) => {
+        await d.dispose();
+      }),
+    );
+    subscriptions.length = 0;
+  });
 }
-
-body {
-  padding: 0 var(--container-paddding);
-  color: var(--vscode-foreground);
-  font-size: var(--vscode-font-size);
-  font-weight: var(--vscode-font-weight);
-  font-family: var(--vscode-font-family);
-  background-color: var(--vscode-editor-background);
-}
-
-ol,
-ul {
-  padding-left: var(--container-paddding);
-}
-
-body > *,
-form > * {
-  margin-block-start: var(--input-margin-vertical);
-  margin-block-end: var(--input-margin-vertical);
-}
-
-*:focus {
-  outline-color: var(--vscode-focusBorder) !important;
-}
-
-a {
-  color: var(--vscode-textLink-foreground);
-}
-
-a:hover,
-a:active {
-  color: var(--vscode-textLink-activeForeground);
-}
-
-code {
-  font-size: var(--vscode-editor-font-size);
-  font-family: var(--vscode-editor-font-family);
-}
-
-button {
-  border: none;
-  padding: var(--input-padding-vertical) var(--input-padding-horizontal);
-  width: 100%;
-  text-align: center;
-  outline: 1px solid transparent;
-  outline-offset: 2px !important;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-button-background);
-}
-
-button:hover {
-  cursor: pointer;
-  background: var(--vscode-button-hoverBackground);
-}
-
-button:focus {
-  outline-color: var(--vscode-focusBorder);
-}
-
-button.secondary {
-  color: var(--vscode-button-secondaryForeground);
-  background: var(--vscode-button-secondaryBackground);
-}
-
-button.secondary:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
-}
-
-input:not([type='checkbox']),
-textarea {
-  display: block;
-  width: 100%;
-  border: none;
-  font-family: var(--vscode-font-family);
-  padding: var(--input-padding-vertical) var(--input-padding-horizontal);
-  color: var(--vscode-input-foreground);
-  outline-color: var(--vscode-input-border);
-  background-color: var(--vscode-input-background);
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--vscode-input-placeholderForeground);
-}
-`;

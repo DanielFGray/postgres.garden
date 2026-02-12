@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
-import { Results } from "~/types.d";
-import { PGLITE_EXECUTE, PGLITE_INTROSPECT } from "../constants";
+import { PGLITE_EXECUTE, type ExtendedResults } from "../constants.js";
 
 export class SQLNotebookExecutionController {
   readonly #controller: vscode.NotebookController;
@@ -17,13 +16,13 @@ export class SQLNotebookExecutionController {
     this.#controller = controller;
   }
 
-  #execute(
-    cells: vscode.NotebookCell[],
-    _notebook: vscode.NotebookDocument,
-    _controller: vscode.NotebookController,
-  ): void {
+  dispose(): void {
+    this.#controller.dispose();
+  }
+
+  #execute(cells: vscode.NotebookCell[]): void {
     for (const cell of cells) {
-      this.#doExecution(cell);
+      void this.#doExecution(cell);
     }
   }
 
@@ -33,33 +32,45 @@ export class SQLNotebookExecutionController {
     if (text.trim().length < 1) return;
     execution.executionOrder = ++this.#executionOrder;
     execution.start(Date.now());
-    const results = await vscode.commands.executeCommand<Results[]>(
+    const results = await vscode.commands.executeCommand<ExtendedResults[]>(
       PGLITE_EXECUTE,
       text,
     );
     execution.replaceOutput(
-      results.map(result => {
+      results.map((result) => {
         if ("error" in result) {
           return new vscode.NotebookCellOutput([
             // TODO: find out why text/plain throws renderer error
             // vscode.NotebookCellOutputItem.error(result.error.message),
             vscode.NotebookCellOutputItem.text(
-              `<div style="font-weight:550;background:#f009;padding:0.25em;color;white;">${result.error.message}</div>`,
+              `<div style="font-weight:550;background:#f009;padding:0.25em;color;white;">${result.error?.message ?? "Unknown error"}</div>`,
               "text/markdown",
             ),
           ]);
         }
         if (result.fields.length > 0) {
           return new vscode.NotebookCellOutput([
+            vscode.NotebookCellOutputItem.json(
+              { ...result, query: text },
+              "application/vnd.pg-playground.sql-result+json",
+            ),
             vscode.NotebookCellOutputItem.text(
               renderRowsAsTable(result),
-              "text/markdown",
+              "text/html",
             ),
           ]);
         }
-        // TODO: find out why text/plain throws renderer error
+        // Show success message for statements that don't return rows
+        const message = result.statement || "Query executed successfully";
+        const affectedInfo =
+          result.affectedRows !== undefined && result.affectedRows >= 0
+            ? ` (${result.affectedRows} rows affected)`
+            : "";
         return new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text(result.statement, "text/markdown"),
+          vscode.NotebookCellOutputItem.text(
+            `✓ ${message}${affectedInfo}`,
+            "text/markdown",
+          ),
         ]);
       }),
     );
@@ -67,22 +78,29 @@ export class SQLNotebookExecutionController {
   }
 }
 
-function renderRowsAsTable({ rows, fields, statement }: Results): string {
-  return `<table>${
-    fields.length < 1
+function renderRowsAsTable(result: ExtendedResults): string {
+  if ("error" in result) {
+    return `Error: ${result.error?.message ?? "Unknown error"}`;
+  }
+
+  const { rows, fields, statement } = result;
+  return `<table>${fields.length < 1
       ? null
-      : `<thead><tr>${fields.map(col => `<th>${col.name}</th>`).join('')}</tr></thead>`
-  }<tbody>${
-    fields.length < 1
-      ? `<tr><td>${statement}</td></tr>`
+      : `<thead><tr>${fields.map((col) => `<th>${col.name}</th>`).join("")}</tr></thead>`
+    }<tbody>${fields.length < 1
+      ? `<tr><td>${statement || "No results"}</td></tr>`
       : rows.length < 1
         ? `<tr><td colspan=${fields.length}>No results</td></tr>`
-        : rows.map(
-            row =>
-              `<tr>${fields.map(f => {
-                const value = row[f.name];
-                return `<td style="white-space:pre">${["object"].includes(typeof value) ? JSON.stringify(value, null, 2) : value}</td>`;
-              }).join('')}</tr>`,
-          ).join('')
-  }</tbody></table>`;
+        : rows
+          .map(
+            (row) =>
+              `<tr>${fields
+                .map(
+                  (col) =>
+                    `<td>${row[col.name] === null ? "<i>null</i>" : row[col.name]}</td>`,
+                )
+                .join("")}</tr>`,
+          )
+          .join("")
+    }</tbody></table>`;
 }
