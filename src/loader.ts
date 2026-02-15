@@ -1,3 +1,4 @@
+import "./telemetry";
 import "./style.css";
 import "./features/router";
 import "./features/auth";

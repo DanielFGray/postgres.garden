@@ -29,6 +29,8 @@ export const envSchema = S.Struct({
   GITHUB_PAT: S.UndefinedOr(S.String),
   GITHUB_WEBHOOK_SECRET: S.UndefinedOr(S.String),
   VALKEY_URL: S.UndefinedOr(S.String),
+  OTEL_EXPORTER_OTLP_ENDPOINT: S.UndefinedOr(S.String),
+  VITE_OTEL_COLLECTOR_URL: S.UndefinedOr(S.String),
 });
 
 export type Env = typeof envSchema.Type;

@@ -1,7 +1,10 @@
 import * as pg from "pg";
 import { Elysia } from "elysia";
 import { cookie } from "@elysiajs/cookie";
+import { opentelemetry } from "@elysiajs/opentelemetry";
 import { logger } from "./logger.js";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import * as arctic from "arctic";
@@ -316,7 +319,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             "p.fork_hash",
             "p.name",
             "p.description",
-            "stars",
+            sql<string>`coalesce(star_counts.stars, '0')`.as("stars"),
             "p.created_at",
           ])
           .execute();
@@ -370,7 +373,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
                   fork_hash: eb.ref("p.fork_hash"),
                   name: eb.ref("p.name"),
                   description: eb.ref("p.description"),
-                  stars: eb.ref("stars"),
+                  stars: sql<string>`coalesce(star_counts.stars, '0')`,
                   created_at: eb.ref("p.created_at"),
                 }),
               )
@@ -421,7 +424,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             "p.fork_hash",
             "p.name",
             "p.description",
-            "stars",
+            sql<string>`coalesce(star_counts.stars, '0')`.as("stars"),
             "p.created_at",
             jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
           ])
@@ -1589,9 +1592,22 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
   },
 );
 
-// Combined app with both API routes (/api prefix) and auth routes (no prefix)
 export const app = new Elysia()
   .use(logger({ skip: ["/healthz"] }))
+  .use(
+    opentelemetry({
+      serviceName: "postgres-garden",
+      spanProcessors: env.OTEL_EXPORTER_OTLP_ENDPOINT
+        ? [
+          new BatchSpanProcessor(
+            new OTLPTraceExporter({
+              url: `${env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+            }),
+          ),
+        ]
+        : [],
+    }),
+  )
   .use(webhookRoutes)
   .use(authRoutes)
   .use(apiRoutes);
