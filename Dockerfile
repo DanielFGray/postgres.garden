@@ -15,23 +15,19 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-# Built client assets (Vite output)
+# Built output: esbuild server bundle + Vite client assets
 COPY --from=builder /app/dist ./dist
 
-# Server source (Bun runs TypeScript directly)
-COPY server ./server
-COPY lib ./lib
-COPY generated ./generated
-
-# Worker tasks and templates
+# Worker tasks
 COPY worker ./worker
 
 # Migrations and graphile-migrate config
 COPY migrations ./migrations
 COPY .gmrc ./
 
-# Scripts (for first-deploy db:init via Dokploy terminal)
+# Scripts + lib (for first-deploy db:init via Dokploy terminal)
 COPY scripts ./scripts
+COPY lib ./lib
 
 EXPOSE 3000
 CMD ["bun", "run", "start:prod"]

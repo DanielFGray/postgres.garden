@@ -26,7 +26,7 @@ const config: BuildOptions = {
   target: "node22",
   packages: "external",
   outfile: "./dist/server.js",
-  entryPoints: ["./server/index.ts"],
+  entryPoints: ["./server/prod-entry.ts"],
   sourcemap: true,
   // Define NODE_ENV for production builds to ensure isDev is correctly set
   define: isProductionBuild

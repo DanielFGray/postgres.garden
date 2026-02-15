@@ -124,7 +124,7 @@ const resolveField = (
     return Prompt.text({
       message: def.prompt.message,
       default: defaultValue,
-      validate: def.prompt.validate,
+      validate: def.prompt.validate ?? ((x) => Effect.succeed(x)),
     }).pipe(
       // Handle QuitException by returning undefined
       Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))),
