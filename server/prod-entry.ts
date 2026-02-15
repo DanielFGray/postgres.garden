@@ -19,10 +19,11 @@ export const app = new Elysia().use(appRoutes);
 
 console.log("🚀 Starting production server...");
 
-// Create production server with static file handling and mount it
-const prodServer = await createProdServer(app);
+// Mount production static file handling + SPA catch-all onto the main app
+// (must come after API/auth routes so specific routes take priority over /*)
+app.use(await createProdServer(app));
 
-const server = prodServer.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
 Production Server Running
 Local:   http://localhost:${PORT}

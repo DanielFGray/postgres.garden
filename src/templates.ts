@@ -71,7 +71,7 @@ create index on nums ((num % 2000));
 analyze;
 \`\`\`
 
-hint: use \`C-k\` to toggle comments on the current line
+hint: use \`Ctrl+/\` to toggle comments on the current line
 
 \`\`\`sql
 -- explain (analyze, costs, verbose, buffers, format json)
