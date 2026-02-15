@@ -287,6 +287,12 @@ void getApi()
             cancellable: false,
           },
           async (progress) => {
+            progress.report({ message: "Saving files..." });
+
+            // Flush all unsaved editor buffers to the virtual filesystem
+            // so scanWorkspace() picks up the latest content
+            await vscode.workspace.saveAll(false);
+
             progress.report({ message: "Scanning files..." });
 
             // Scan all files

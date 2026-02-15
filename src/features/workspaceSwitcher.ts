@@ -23,8 +23,8 @@ const SharedWorkspacePayload = S.Struct({
   files: S.Array(S.Struct({ path: S.String, content: S.String })),
   activeFile: S.NullishOr(S.String),
 });
-// Note: userDataProvider import removed - we don't use reset() anymore
-// because it clears the PGlite IndexedDB database causing errors
+// Note: Storage is now fully ephemeral (see ephemeralStorageProvider in setup.common.ts).
+// VS Code no longer restores session state from IndexedDB between page loads.
 
 export interface WorkspaceFile {
   path: string;
@@ -586,6 +586,24 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
   );
 
   try {
+    // Close all open editors and clear existing files before restoring
+    // (IndexedDB may have stale files from a previous session)
+    await vscode.commands.executeCommand(WORKBENCH_ACTION_CLOSE_ALL_EDITORS);
+    const allFiles = await vscode.workspace.findFiles(
+      "**/*",
+      "**/node_modules/**",
+    );
+    for (const file of allFiles) {
+      try {
+        await vscode.workspace.fs.delete(file);
+      } catch (err) {
+        console.warn(
+          `[WorkspaceSwitcher] Failed to delete ${file.path}:`,
+          err,
+        );
+      }
+    }
+
     let restoredCount = 0;
     let errorCount = 0;
 

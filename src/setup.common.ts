@@ -36,7 +36,9 @@ import getSearchServiceOverride from "@codingame/monaco-vscode-search-service-ov
 import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-override";
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override";
 import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override";
-import getStorageServiceOverride from "@codingame/monaco-vscode-storage-service-override";
+import getStorageServiceOverride, {
+  type IStorageProvider,
+} from "@codingame/monaco-vscode-storage-service-override";
 import getExtensionServiceOverride from "@codingame/monaco-vscode-extensions-service-override";
 import getRemoteAgentServiceOverride from "@codingame/monaco-vscode-remote-agent-service-override";
 import getEnvironmentServiceOverride from "@codingame/monaco-vscode-environment-service-override";
@@ -165,6 +167,18 @@ await Promise.all([
   initUserKeybindings(defaultKeybindings),
 ]);
 
+// Ephemeral storage provider — prevents VS Code from restoring previous session state.
+// All workbench state (open editors, layout, sidebar) starts fresh on every page load.
+// User configuration and keybindings are still applied via initUserConfiguration above.
+const ephemeralStorageProvider: IStorageProvider = {
+  read() {
+    return undefined;
+  },
+  async write() {
+    // no-op — don't persist state
+  },
+};
+
 export const constructOptions: IWorkbenchConstructionOptions = {
   // remoteAuthority,
   enableWorkspaceTrust: false,
@@ -251,6 +265,7 @@ export const commonServices: IEditorOverrideServices = {
   ...getAccessibilityServiceOverride(),
   ...getLanguageDetectionWorkerServiceOverride(),
   ...getStorageServiceOverride({
+    customProvider: ephemeralStorageProvider,
     fallbackOverride: {
       "workbench.activity.showAccounts": true,
     },

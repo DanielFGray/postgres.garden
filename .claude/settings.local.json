@@ -42,5 +42,6 @@
       "Bash(bun run build:webviews:*)",
       "WebFetch(domain:github.com)"
     ]
-  }
+  },
+  "prefersReducedMotion": true
 }

@@ -87,7 +87,19 @@ const router = createRouter({
 // Handle the initial route on page load (after VSCode API is ready)
 // The router doesn't automatically call onRouteChange for the initial route
 // Wait for window.vscodeReady to be set before handling initial route
+//
+// NOTE: When SSR provides commit data (__INITIAL_DATA__.commit), the workspace
+// is loaded by loadWorkspaceFromInitialData() in postgres.ts — the router should
+// NOT re-load it (which would make redundant API calls and race with the SSR load).
+// The router only handles initial routes for shared URLs (where SSR defers to client).
 const waitForVSCode = async () => {
+  // Skip if SSR already loaded workspace data
+  const initialData = window.__INITIAL_DATA__;
+  if (initialData?.commit) {
+    console.log("Skipping initial route — SSR already loaded workspace data");
+    return;
+  }
+
   // If VSCode API is already ready, handle route immediately
   if (window.vscodeReady) {
     const initialRoute = parseRoute(window.location.href);
