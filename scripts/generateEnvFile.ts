@@ -86,7 +86,7 @@ const fieldDefs: Record<string, FieldDef> = {
   },
   SHADOW_DATABASE_URL: {
     derive: ctx =>
-      `postgres://${ctx.DATABASE_NAME}_shadow:${ctx.SHADOW_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}`,
+      `postgres://${ctx.DATABASE_NAME}_shadow:${ctx.SHADOW_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}_shadow`,
   },
 
   // App config

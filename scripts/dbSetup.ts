@@ -10,6 +10,7 @@ const {
   DATABASE_VISITOR,
   DATABASE_AUTHENTICATOR,
   DATABASE_AUTHENTICATOR_PASSWORD,
+  SHADOW_DATABASE_PASSWORD,
   ROOT_DATABASE_URL,
 } = process.env;
 
@@ -126,6 +127,7 @@ const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
       `drop role if exists ${DATABASE_AUTHENTICATOR}`,
     );
     yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_OWNER}`);
+    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_NAME}_shadow`);
 
     // Create databases
     yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}`);
@@ -176,6 +178,13 @@ const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
       `grant ${DATABASE_VISITOR} to ${DATABASE_AUTHENTICATOR}`,
     );
     yield* Effect.log(`GRANT ${DATABASE_VISITOR} TO ${DATABASE_AUTHENTICATOR}`);
+
+    // Create shadow role for graphile-migrate
+    yield* executeQuery(
+      rootPgPool,
+      `create role ${DATABASE_NAME}_shadow with login password '${SHADOW_DATABASE_PASSWORD}' superuser`,
+    );
+    yield* Effect.log(`CREATE ROLE ${DATABASE_NAME}_shadow`);
   });
 
 // Main program
@@ -193,6 +202,7 @@ const program = Effect.gen(function*() {
       yield* Effect.log(`DROP ROLE ${DATABASE_VISITOR}`);
       yield* Effect.log(`DROP ROLE ${DATABASE_AUTHENTICATOR}`);
       yield* Effect.log(`DROP ROLE ${DATABASE_OWNER}`);
+      yield* Effect.log(`DROP ROLE ${DATABASE_NAME}_shadow`);
 
       // Get user confirmation
       yield* confirmAction;
