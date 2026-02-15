@@ -46,7 +46,6 @@ export class PGliteService {
       });
 
       const worker = await PGliteWorker.create(this.worker, {
-        dataDir: "idb://postgres-garden",
         extensions: {
           live, // Client-side extension for live queries
         },

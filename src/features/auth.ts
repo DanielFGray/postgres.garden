@@ -13,7 +13,7 @@ import { api } from "../api-client";
 import {
   GITHUB_SIGNIN,
   GITHUB_ACCOUNT_MENU,
-  WORKBENCH_ACCOUNTS_LOGOUT,
+  GITHUB_SIGNOUT,
 } from "./constants";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
@@ -382,6 +382,19 @@ void getApi().then((vsapi) => {
     }
   });
 
+  // Register sign out command — single source of truth for logout
+  vsapi.commands.registerCommand(GITHUB_SIGNOUT, async () => {
+    const confirmed = await vscode.window.showWarningMessage(
+      "Are you sure you want to sign out?",
+      { modal: true },
+      "Sign Out",
+    );
+    if (confirmed !== "Sign Out") return;
+
+    await provider.removeSession();
+    window.location.reload();
+  });
+
   // Register account menu command
   vsapi.commands.registerCommand(GITHUB_ACCOUNT_MENU, async () => {
     try {
@@ -393,8 +406,8 @@ void getApi().then((vsapi) => {
       if (!sessions) return;
 
       const menuItems: AccountMenuItem[] = [
-        { label: "$(account) Profile", value: "profile" },
-        { label: "$(gear) Settings", value: "settings" },
+        // { label: "$(account) Profile", value: "profile" },
+        // { label: "$(gear) Settings", value: "settings" },
         { label: "$(sign-out) Sign Out", value: "signout" },
       ];
 
@@ -405,36 +418,13 @@ void getApi().then((vsapi) => {
       if (!selected) return;
 
       switch (selected.value) {
-        case "profile":
-          void vscode.window.showInformationMessage("Profile not implemented yet");
+        // case "profile":
+        //   break;
+        // case "settings":
+        //   break;
+        case "signout":
+          await vsapi.commands.executeCommand(GITHUB_SIGNOUT);
           break;
-        case "settings":
-          void vscode.window.showInformationMessage("Settings not implemented yet");
-          break;
-        case "signout": {
-          const confirmed = await vscode.window.showWarningMessage(
-            "Are you sure you want to sign out?",
-            { modal: true },
-            "Sign Out",
-          );
-
-          if (confirmed === "Sign Out") {
-            const session = await vscode.authentication.getSession(
-              GitHubAuthProvider.id,
-              [],
-              { createIfNone: false },
-            );
-
-            if (session) {
-              await vsapi.commands.executeCommand(
-                WORKBENCH_ACCOUNTS_LOGOUT,
-                GitHubAuthProvider.id,
-                session.id,
-              );
-            }
-          }
-          break;
-        }
       }
     } catch (error) {
       void vscode.window.showErrorMessage(`Account menu failed: ${error instanceof Error ? error.message : String(error)}`);

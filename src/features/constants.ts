@@ -9,6 +9,7 @@ export const LATEST_POSTS = "pg-playground.latestPosts";
 
 // Auth Commands
 export const GITHUB_SIGNIN = "github.signin";
+export const GITHUB_SIGNOUT = "github.signout";
 export const GITHUB_ACCOUNT_MENU = "github.accountmenu";
 
 // Server Sync Commands
@@ -38,7 +39,7 @@ export const VSCODE_OPEN = "vscode.open";
 export const VSCODE_DIFF = "vscode.diff";
 export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS =
   "workbench.action.closeAllEditors";
-export const WORKBENCH_ACCOUNTS_LOGOUT = "workbench.accounts.logout";
+
 
 // View IDs
 export const DATABASE_EXPLORER = "databaseExplorer";
