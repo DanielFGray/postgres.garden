@@ -104,6 +104,11 @@ services:
     depends_on:
       signoz-zookeeper:
         condition: service_healthy
+    environment:
+      - CLICKHOUSE_DB=signoz
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+      - CLICKHOUSE_PASSWORD=
     volumes:
       - signoz-clickhouse:/var/lib/clickhouse/
     healthcheck:
@@ -116,7 +121,7 @@ services:
 
   signoz-schema-migrator-sync:
     image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
-    command: ["--dsn=tcp://signoz-clickhouse:9000", "--verbose"]
+    command: ["sync", "--dsn=tcp://signoz-clickhouse:9000"]
     depends_on:
       signoz-clickhouse:
         condition: service_healthy
@@ -125,7 +130,7 @@ services:
 
   signoz-schema-migrator-async:
     image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
-    command: ["--dsn=tcp://signoz-clickhouse:9000", "--up=async", "--verbose"]
+    command: ["async", "--dsn=tcp://signoz-clickhouse:9000"]
     depends_on:
       signoz-schema-migrator-sync:
         condition: service_completed_successfully
