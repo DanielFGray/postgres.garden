@@ -33,8 +33,5 @@ COPY .gmrc ./
 # Scripts (for first-deploy db:init via Dokploy terminal)
 COPY scripts ./scripts
 
-# Notebook renderer (pre-built, checked into repo)
-COPY src/features/notebook/renderer-dist ./src/features/notebook/renderer-dist
-
 EXPOSE 3000
 CMD ["bun", "run", "start:prod"]
