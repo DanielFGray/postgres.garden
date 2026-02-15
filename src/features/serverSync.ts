@@ -53,7 +53,7 @@ interface ForkHistoryItem {
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const { getApi } = registerExtension(
   {
-    name: "server-sync",
+    name: "postgres-garden",
     publisher: "postgres-garden",
     engines: {
       vscode: "*",
@@ -271,286 +271,294 @@ void getApi()
       }
     }
 
+    /** Sentinel thrown to break out of withProgress before showing sign-in prompt */
+    class SignInRequired extends Error { }
+
     /**
      * Commit workspace to server
      */
-    async function commitWorkspace(message?: string) {
-      // Note: We don't check authentication upfront because:
-      // 1. Anonymous playground creation is allowed
-      // 2. The server will return 401 if auth is required for existing playgrounds
-      // 3. We'll handle auth prompts when the server returns 401
+    async function commitWorkspace(message?: unknown) {
+      try {
+        // Show progress
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Syncing workspace to server...",
+            cancellable: false,
+          },
+          async (progress) => {
+            progress.report({ message: "Scanning files..." });
 
-      // Show progress
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "Syncing workspace to server...",
-          cancellable: false,
-        },
-        async (progress) => {
-          progress.report({ message: "Scanning files..." });
+            // Scan all files
+            const files = await scanWorkspace();
 
-          // Scan all files
-          const files = await scanWorkspace();
-
-          if (files.length === 0) {
-            vscode.window.showWarningMessage("No files to sync");
-            return;
-          }
-
-          progress.report({ message: `Uploading ${files.length} files...` });
-
-          // Get the currently active editor file path
-          const activeEditor = vscode.window.activeTextEditor;
-          const activeFile = activeEditor?.document.uri.path || null;
-
-          // Prepare commit message
-          const commitMessage =
-            message ||
-            scm.inputBox.value ||
-            `Workspace snapshot at ${new Date().toISOString()}`;
-
-          // Generate unique name (slug) for the playground
-          // Format: workspace_YYYYMMDD_HHMMSS_milliseconds
-          const now = new Date();
-          const playgroundName = `workspace_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}_${now.getMilliseconds()}`;
-
-          // Send to server using Eden Treaty for type safety
-          console.log("[ServerSync] Sending commit request:", {
-            playground_hash: currentPlaygroundHash,
-            fileCount: files.length,
-            message: commitMessage,
-          });
-
-          // Check if user is authenticated by querying the server
-          // We check with the server instead of just the local auth provider
-          // because the session cookie is the source of truth for authentication
-          let isAuthenticated = false;
-          const response = await api("/api/me", {
-            credentials: "include",
-          });
-          if (response.error) {
-            console.warn("[ServerSync] Failed to check auth status:", response.error);
-          } else {
-            const me = response.data && !("error" in response.data) ? response.data : null;
-            isAuthenticated = !!me?.user?.id;
-            console.log("[ServerSync] Auth check:", {
-              isAuthenticated,
-              userId: me?.user?.id,
-              username: me?.user?.username,
-            });
-          }
-
-          // Strategy:
-          // - Authenticated users: Save to server (update existing or create new)
-          // - Anonymous users: Encode workspace as base64 URL (no server storage)
-          //   Falls back to server-side anonymous save if payload > 16KB
-
-          if (!isAuthenticated) {
-            // Encode workspace as base64url for anonymous sharing
-            // (base64url replaces +→- /→_ and strips = padding to be URL-safe)
-            const payload = JSON.stringify({ files, activeFile });
-            const encoded = btoa(unescape(encodeURIComponent(payload)))
-              .replace(/\+/g, "-")
-              .replace(/\//g, "_")
-              .replace(/=+$/, "");
-
-            if (encoded.length <= 16384) {
-              // Navigate to shared URL
-              router.updateCurrentRoute({
-                type: "shared",
-                params: { data: encoded },
-                path: `/s/${encoded}`,
-              });
-              replaceTo("shared", { data: encoded });
-
-              // Update baseline
-              baselineFiles.clear();
-              files.forEach((f) => baselineFiles.set(f.path, f.content));
-              changedFiles.clear();
-              updateSCMView();
-              await refreshQuickDiff();
-
-              scm.inputBox.value = "";
-
-              vscode.window.showInformationMessage(
-                `Shareable link created! Share the URL to let others load this workspace.`,
-              );
+            if (files.length === 0) {
+              vscode.window.showWarningMessage("No files to sync");
               return;
             }
-            // Payload too large for URL — fall through to server-side save
-          }
 
-          const { data: result, error } = await (currentPlaygroundHash &&
-            isAuthenticated
-            ? api("/api/playgrounds/:hash/commits", {
-              method: "POST",
-              params: { hash: currentPlaygroundHash },
-              body: {
-                message: commitMessage,
-                files,
-                activeFile,
-              },
-            })
-            : api("/api/playgrounds", {
-              method: "POST",
-              body: {
-                name: playgroundName,
-                message: commitMessage,
-                description: "New playground",
-                files,
-                activeFile,
-              },
-            }));
+            progress.report({ message: `Uploading ${files.length} files...` });
 
-          if (error) {
-            console.error("[ServerSync] Commit failed:", error);
+            // Get the currently active editor file path
+            const activeEditor = vscode.window.activeTextEditor;
+            const activeFile = activeEditor?.document.uri.path || null;
 
-            // If 401 Unauthorized, prompt to sign in
-            if (error.status === 401) {
-              const choice = await vscode.window.showWarningMessage(
-                "Your session has expired. Please sign in again to sync.",
-                "Sign In",
-                "Cancel",
+            // Prepare commit message
+            // Note: when invoked from editor/title menu, VS Code passes the
+            // active editor URI as the first arg — ignore non-string values
+            const commitMessage =
+              (typeof message === "string" ? message : undefined) ||
+              scm.inputBox.value ||
+              `Workspace snapshot at ${new Date().toISOString()}`;
+
+            // Generate unique name (slug) for the playground
+            // Format: workspace_YYYYMMDD_HHMMSS_milliseconds
+            const now = new Date();
+            const playgroundName = `workspace_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}_${now.getMilliseconds()}`;
+
+            // Send to server using Eden Treaty for type safety
+            console.log("[ServerSync] Sending commit request:", {
+              playground_hash: currentPlaygroundHash,
+              fileCount: files.length,
+              message: commitMessage,
+            });
+
+            // Check if user is authenticated by querying the server
+            // We check with the server instead of just the local auth provider
+            // because the session cookie is the source of truth for authentication
+            let isAuthenticated = false;
+            const response = await api("/api/me", {
+              credentials: "include",
+            });
+            if (response.error) {
+              console.warn("[ServerSync] Failed to check auth status:", response.error);
+            } else {
+              const me = response.data && !("error" in response.data) ? response.data : null;
+              isAuthenticated = !!me?.user?.id;
+              console.log("[ServerSync] Auth check:", {
+                isAuthenticated,
+                userId: me?.user?.id,
+                username: me?.user?.username,
+              });
+            }
+
+            // Strategy:
+            // - Authenticated users: Save to server (update existing or create new)
+            // - Anonymous users: Encode workspace as base64 URL (no server storage)
+            //   Falls back to server-side anonymous save if payload > 16KB
+
+            if (!isAuthenticated) {
+              // Encode workspace as base64url for anonymous sharing
+              // (base64url replaces +→- /→_ and strips = padding to be URL-safe)
+              const payload = JSON.stringify({ files, activeFile });
+              const encoded = btoa(unescape(encodeURIComponent(payload)))
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_")
+                .replace(/=+$/, "");
+
+              if (encoded.length <= 8192) {
+                const shareUrl = `${window.location.origin}/s/${encoded}`;
+                await navigator.clipboard.writeText(shareUrl);
+                vscode.window.showInformationMessage(
+                  "Shareable link copied to clipboard! Sign in for shorter, permanent URLs.",
+                );
+                return;
+              }
+
+              // Payload too large for URL — signal to prompt sign-in after progress closes
+              throw new SignInRequired();
+            }
+
+            const { data: result, error } = await (currentPlaygroundHash &&
+              isAuthenticated
+              ? api("/api/playgrounds/:hash/commits", {
+                method: "POST",
+                params: { hash: currentPlaygroundHash },
+                body: {
+                  message: commitMessage,
+                  files,
+                  activeFile,
+                },
+              })
+              : api("/api/playgrounds", {
+                method: "POST",
+                body: {
+                  name: playgroundName,
+                  message: commitMessage,
+                  description: "New playground",
+                  files,
+                  activeFile,
+                },
+              }));
+
+            if (error) {
+              console.error("[ServerSync] Commit failed:", error);
+
+              // If 401 Unauthorized, prompt to sign in
+              if (error.status === 401) {
+                const choice = await vscode.window.showWarningMessage(
+                  "Your session has expired. Please sign in again to sync.",
+                  "Sign In",
+                  "Cancel",
+                );
+
+                if (choice === "Sign In") {
+                  try {
+                    await vscode.authentication.getSession("github-auth", [], {
+                      createIfNone: true,
+                      forceNewSession: true,
+                    });
+                    vscode.window.showInformationMessage(
+                      "Signed in successfully. Please try syncing again.",
+                    );
+                  } catch {
+                    vscode.window.showErrorMessage(
+                      "Authentication failed. Please try again.",
+                    );
+                  }
+                }
+                return;
+              }
+
+              throw new Error(
+                `Failed to commit workspace: ${error.status} ${JSON.stringify(error.value)}`,
+              );
+            }
+
+            if (!result) {
+              throw new Error("Failed to commit workspace: no response data");
+            }
+
+            // Type-safe access (error case already handled above)
+            const commitResult = result as unknown as {
+              commit_id: string;
+              playground_hash: string;
+              forked?: boolean;
+            };
+
+            // API returns { commit_id, playground_hash, parent_id, message, created_at }
+            if (!commitResult.commit_id) {
+              throw new Error("Failed to commit workspace");
+            }
+
+            console.log("[ServerSync] Commit successful:", commitResult);
+            console.log(
+              "[ServerSync] Files committed:",
+              files.map((f) => ({ path: f.path, size: f.content.length })),
+            );
+
+            // Check if playground hash changed (new playground created)
+            const playgroundHashChanged =
+              currentPlaygroundHash !== commitResult.playground_hash;
+            const wasForked = commitResult.forked === true;
+
+            // Update current commit and playground tracking
+            currentCommitId = commitResult.commit_id;
+            currentPlaygroundHash = commitResult.playground_hash;
+
+            // Navigate to the playground URL if hash changed
+            // This happens for:
+            // - First sync (no previous hash)
+            // - Anonymous user syncing (always creates new playground)
+            // - Authenticated user forking (anonymous or other user's playground)
+            if (playgroundHashChanged && commitResult.playground_hash) {
+              console.log(
+                "[ServerSync] Playground hash changed - updating URL to:",
+                commitResult.playground_hash,
+                wasForked
+                  ? "(forked)"
+                  : isAuthenticated
+                    ? "(first sync)"
+                    : "(anonymous snapshot)",
               );
 
-              if (choice === "Sign In") {
+              // Update router state to reflect the new playground
+              // This prevents the router from intercepting and reloading the workspace
+              router.updateCurrentRoute({
+                type: "playground",
+                params: { playgroundId: commitResult.playground_hash },
+                path: `/playgrounds/${commitResult.playground_hash}`,
+              });
+
+              // Now update the URL using history replace
+              // Router will see routes as equal and won't intercept
+              replaceTo("playground", {
+                playgroundId: commitResult.playground_hash,
+              });
+            }
+
+            // Clear input box
+            scm.inputBox.value = "";
+
+            // Update baseline (like Git after commit - now everything is "clean")
+            baselineFiles.clear();
+            files.forEach((f) => baselineFiles.set(f.path, f.content));
+
+            // Clear changed files list (like Git - nothing is changed after commit)
+            changedFiles.clear();
+            updateSCMView();
+
+            // Refresh quick diff decorations to reflect new baseline
+            await refreshQuickDiff();
+
+            // Show success message with appropriate context
+            if (wasForked) {
+              // Authenticated user forked the playground
+              vscode.window.showInformationMessage(
+                `Playground forked: ${files.length} file(s) saved. You now own this copy and can continue making commits.`,
+              );
+            } else if (!isAuthenticated && playgroundHashChanged) {
+              // Anonymous user created a new snapshot
+              const action = await vscode.window.showInformationMessage(
+                `Anonymous snapshot created: ${files.length} file(s) saved. Each sync creates a new shareable link.`,
+                "Sign In for Continuous Sync",
+              );
+
+              if (action === "Sign In for Continuous Sync") {
                 try {
                   await vscode.authentication.getSession("github-auth", [], {
                     createIfNone: true,
-                    forceNewSession: true,
                   });
                   vscode.window.showInformationMessage(
-                    "Signed in successfully. Please try syncing again.",
+                    "Signed in! Future syncs will update this playground.",
                   );
                 } catch {
-                  vscode.window.showErrorMessage(
-                    "Authentication failed. Please try again.",
-                  );
+                  // User cancelled, ignore
                 }
               }
-              return;
+            } else {
+              // Authenticated user committing to their own playground
+              vscode.window.showInformationMessage(
+                `Workspace synced: ${files.length} file(s) saved`,
+              );
             }
 
-            throw new Error(
-              `Failed to commit workspace: ${error.status} ${error.value}`,
-            );
+            // Refresh commit history and status bar
+            commitHistoryProvider.refresh();
+            forkHistoryProvider.refresh();
+            void updateStatusBar();
           }
-
-          if (!result) {
-            throw new Error("Failed to commit workspace: no response data");
-          }
-
-          // Type-safe access (error case already handled above)
-          const commitResult = result as unknown as {
-            commit_id: string;
-            playground_hash: string;
-            forked?: boolean;
-          };
-
-          // API returns { commit_id, playground_hash, parent_id, message, created_at }
-          if (!commitResult.commit_id) {
-            throw new Error("Failed to commit workspace");
-          }
-
-          console.log("[ServerSync] Commit successful:", commitResult);
-          console.log(
-            "[ServerSync] Files committed:",
-            files.map((f) => ({ path: f.path, size: f.content.length })),
+        );
+      } catch (err) {
+        if (err instanceof SignInRequired) {
+          const choice = await vscode.window.showWarningMessage(
+            "Workspace is too large to share anonymously. Sign in to save to the server.",
+            "Sign In",
+            "Cancel",
           );
-
-          // Check if playground hash changed (new playground created)
-          const playgroundHashChanged =
-            currentPlaygroundHash !== commitResult.playground_hash;
-          const wasForked = commitResult.forked === true;
-
-          // Update current commit and playground tracking
-          currentCommitId = commitResult.commit_id;
-          currentPlaygroundHash = commitResult.playground_hash;
-
-          // Navigate to the playground URL if hash changed
-          // This happens for:
-          // - First sync (no previous hash)
-          // - Anonymous user syncing (always creates new playground)
-          // - Authenticated user forking (anonymous or other user's playground)
-          if (playgroundHashChanged && commitResult.playground_hash) {
-            console.log(
-              "[ServerSync] Playground hash changed - updating URL to:",
-              commitResult.playground_hash,
-              wasForked
-                ? "(forked)"
-                : isAuthenticated
-                  ? "(first sync)"
-                  : "(anonymous snapshot)",
-            );
-
-            // Update router state to reflect the new playground
-            // This prevents the router from intercepting and reloading the workspace
-            router.updateCurrentRoute({
-              type: "playground",
-              params: { playgroundId: commitResult.playground_hash },
-              path: `/playgrounds/${commitResult.playground_hash}`,
-            });
-
-            // Now update the URL using history replace
-            // Router will see routes as equal and won't intercept
-            replaceTo("playground", {
-              playgroundId: commitResult.playground_hash,
-            });
-          }
-
-          // Clear input box
-          scm.inputBox.value = "";
-
-          // Update baseline (like Git after commit - now everything is "clean")
-          baselineFiles.clear();
-          files.forEach((f) => baselineFiles.set(f.path, f.content));
-
-          // Clear changed files list (like Git - nothing is changed after commit)
-          changedFiles.clear();
-          updateSCMView();
-
-          // Refresh quick diff decorations to reflect new baseline
-          await refreshQuickDiff();
-
-          // Show success message with appropriate context
-          if (wasForked) {
-            // Authenticated user forked the playground
-            vscode.window.showInformationMessage(
-              `Playground forked: ${files.length} file(s) saved. You now own this copy and can continue making commits.`,
-            );
-          } else if (!isAuthenticated && playgroundHashChanged) {
-            // Anonymous user created a new snapshot
-            const action = await vscode.window.showInformationMessage(
-              `Anonymous snapshot created: ${files.length} file(s) saved. Each sync creates a new shareable link.`,
-              "Sign In for Continuous Sync",
-            );
-
-            if (action === "Sign In for Continuous Sync") {
-              try {
-                await vscode.authentication.getSession("github-auth", [], {
-                  createIfNone: true,
-                });
-                vscode.window.showInformationMessage(
-                  "Signed in! Future syncs will update this playground.",
-                );
-              } catch {
-                // User cancelled, ignore
-              }
+          if (choice === "Sign In") {
+            try {
+              await vscode.authentication.getSession("github-auth", [], {
+                createIfNone: true,
+              });
+            } catch {
+              // User cancelled sign-in
             }
-          } else {
-            // Authenticated user committing to their own playground
-            vscode.window.showInformationMessage(
-              `Workspace synced: ${files.length} file(s) saved`,
-            );
           }
-
-          // Refresh commit history and status bar
-          commitHistoryProvider.refresh();
-          forkHistoryProvider.refresh();
-          void updateStatusBar();
+          return;
         }
-      );
+        throw err;
+      }
     }
 
     /**

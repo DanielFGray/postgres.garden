@@ -13,6 +13,7 @@ import {
   DATABASE_MIGRATE,
   LATEST_POSTS,
   ERD_SHOW,
+  SERVER_SYNC_COMMIT,
 } from "./constants.js";
 import { SQLNotebookExecutionController } from "./notebook/controller.js";
 import { SQLSerializer } from "./notebook/sql.js";
@@ -28,6 +29,7 @@ const { getApi, registerFileUrl } = registerExtension(
   {
     name: "postgres.garden",
     publisher: "postgres.garden",
+    description: "postgres.garden",
     version: "1.0.0",
     engines: { vscode: "*" },
     capabilities: { virtualWorkspaces: true },
@@ -143,6 +145,11 @@ const { getApi, registerFileUrl } = registerExtension(
           icon: "$(notebook-execute)",
         },
         {
+          command: SERVER_SYNC_COMMIT,
+          title: "Save",
+          icon: "$(cloud-upload)",
+        },
+        {
           command: PGLITE_INTROSPECT,
           title: "Refresh introspection data",
           icon: "$(repo-sync)",
@@ -190,7 +197,7 @@ const { getApi, registerFileUrl } = registerExtension(
         "editor/title": [
           // { command: "sql.format", group: "1_run" },
           { command: DATABASE_MIGRATE, group: "1_run" },
-          { command: PGLITE_EXECUTE, group: "1_run" },
+          { command: SERVER_SYNC_COMMIT, group: "1_run" },
           { command: ERD_SHOW, group: "1_run" },
           { command: PGLITE_RESET, group: "5_close" },
         ],

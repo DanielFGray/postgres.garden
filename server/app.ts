@@ -420,8 +420,8 @@ const apiRoutes = new Elysia({ prefix: "/api" })
 
   .post(
     "/playgrounds",
-    async ({ body, session, status }) => {
-      // Anonymous playground creation is now allowed
+    async ({ body, session, user, status }) => {
+      if (!session || !user) return status(401, { error: "Unauthorized" });
       try {
         return await withAuthContext(session?.id, async (tx) => {
           // Call the Postgres function to atomically create playground + commit

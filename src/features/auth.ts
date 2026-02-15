@@ -44,8 +44,7 @@ class GitHubAuthSession implements vscode.AuthenticationSession {
  * Uses localStorage for persistence and syncs with server via cookies
  */
 export class GitHubAuthProvider
-  implements vscode.AuthenticationProvider, vscode.Disposable
-{
+  implements vscode.AuthenticationProvider, vscode.Disposable {
   static id = "github-auth";
   static label = "GitHub";
   private static storageKey = "github-username";
@@ -315,8 +314,9 @@ export let authProviderInstance: GitHubAuthProvider | undefined;
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const { getApi } = registerExtension(
   {
-    name: "postgres-garden-auth-provider",
-    publisher: "postgres-garden",
+    name: "postgres.garden",
+    publisher: "postgres.garden",
+    description: "postgres.garden",
     version: "1.0.0",
     engines: {
       vscode: "*",
