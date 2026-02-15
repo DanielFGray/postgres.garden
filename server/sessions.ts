@@ -1,24 +1,39 @@
 import crypto from "crypto";
 import { rootDb } from "./db.js";
+import { valkey } from "./valkey.js";
 import { env } from "./assertEnv.js";
 
 export const sessionCookieName = "session";
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+function sessionKey(id: string) {
+  return `session:${id}`;
+}
 
 export async function createSession(userId: string) {
+  // Fetch user data from Postgres (once, at login time)
+  const user = await rootDb
+    .selectFrom("app_public.users")
+    .select(["id", "username", "role", "is_verified"])
+    .where("id", "=", userId)
+    .executeTakeFirstOrThrow();
+
   const id = generateSecureRandomString();
   const secret = generateSecureRandomString();
+  const secretHash = hashSecret(secret).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-  await rootDb
-    .insertInto("app_private.sessions")
-    .values({
-      id,
-      user_id: userId,
-      secret_hash: hashSecret(secret),
-      expires_at: expiresAt,
-    })
-    .execute();
+  const key = sessionKey(id);
+  await valkey.hset(key, {
+    secret_hash: secretHash,
+    user_id: user.id,
+    username: user.username,
+    role: user.role,
+    is_verified: user.is_verified ? "1" : "0",
+  });
+  await valkey.expire(key, SESSION_TTL_SECONDS);
+
   return { token: `${id}.${secret}`, id, expiresAt };
 }
 
@@ -56,39 +71,28 @@ export async function validateSessionToken(token?: string) {
   if (!(id && secret)) {
     return { user: null, session: null } as const;
   }
-  const row = await rootDb
-    .selectFrom("app_private.sessions as s")
-    .innerJoin("app_public.users as u", "u.id", "s.user_id")
-    .select([
-      "s.id as sid",
-      "s.user_id as suid",
-      "s.secret_hash as shash",
-      "s.expires_at",
-      "u.id as uid",
-      "u.username",
-      "u.role",
-      "u.is_verified",
-    ])
-    .where("s.id", "=", id)
-    .where("s.expires_at", ">", new Date())
-    .executeTakeFirst();
-  if (!row) {
+
+  const data = await valkey.hgetall(sessionKey(id));
+  if (!data || !data.secret_hash) {
     return { user: null, session: null } as const;
   }
+
   const incomingHash = hashSecret(secret);
-  if (!constantTimeEqual(incomingHash, row.shash as unknown as Uint8Array)) {
+  const storedHash = Buffer.from(data.secret_hash, "hex");
+  if (!constantTimeEqual(incomingHash, storedHash)) {
     return { user: null, session: null } as const;
   }
+
   const user = {
-    id: row.uid,
-    username: row.username,
-    role: row.role,
-    is_verified: row.is_verified,
+    id: data.user_id ?? "",
+    username: data.username ?? "",
+    role: data.role ?? "visitor",
+    is_verified: data.is_verified === "1",
   };
   const session = {
-    id: row.sid,
-    user_id: row.suid,
-    expires_at: row.expires_at,
+    id,
+    user_id: data.user_id ?? "",
+    expires_at: new Date(), // TTL is managed by Valkey
   };
   return { user, session } as const;
 }
@@ -105,8 +109,5 @@ export function buildSessionCookie(token: string, expiresAt: Date) {
 }
 
 export async function deleteSession(id: string) {
-  await rootDb
-    .deleteFrom("app_private.sessions")
-    .where("id", "=", id)
-    .execute();
+  await valkey.del(sessionKey(id));
 }

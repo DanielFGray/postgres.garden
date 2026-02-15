@@ -1,6 +1,7 @@
 import * as pg from "pg";
 import { Elysia } from "elysia";
 import { cookie } from "@elysiajs/cookie";
+import { logger } from "./logger.js";
 import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import * as arctic from "arctic";
@@ -291,12 +292,18 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         const result = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
-          .crossJoinLateral((eb) =>
-            eb
-              .selectFrom("app_public.playground_stars as s")
-              .select((eb) => [eb.fn.countAll().as("stars")])
-              .where("playground_hash", "=", eb.ref("p.hash"))
-              .as("get_stars"),
+          .leftJoin(
+            (eb) =>
+              eb
+                .selectFrom("app_public.playground_stars")
+                .select((eb) => [
+                  "playground_hash",
+                  eb.fn.countAll<string>().as("stars"),
+                ])
+                .groupBy("playground_hash")
+                .as("star_counts"),
+            (join) =>
+              join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
           .orderBy(
             sql.ref(query.sort ?? "created_at"),
@@ -334,12 +341,18 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         const playgrounds = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
-          .crossJoinLateral((eb) =>
-            eb
-              .selectFrom("app_public.playground_stars as s")
-              .select((eb) => [eb.fn.countAll().as("stars")])
-              .where("playground_hash", "=", eb.ref("p.hash"))
-              .as("get_stars"),
+          .leftJoin(
+            (eb) =>
+              eb
+                .selectFrom("app_public.playground_stars")
+                .select((eb) => [
+                  "playground_hash",
+                  eb.fn.countAll<string>().as("stars"),
+                ])
+                .groupBy("playground_hash")
+                .as("star_counts"),
+            (join) =>
+              join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
           .orderBy(
             sql.ref(query.sort ?? "created_at"),
@@ -385,12 +398,18 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         const result = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
-          .crossJoinLateral((eb) =>
-            eb
-              .selectFrom("app_public.playground_stars as s")
-              .select((eb) => [eb.fn.countAll().as("stars")])
-              .where("playground_hash", "=", eb.ref("p.hash"))
-              .as("get_stars"),
+          .leftJoin(
+            (eb) =>
+              eb
+                .selectFrom("app_public.playground_stars")
+                .select((eb) => [
+                  "playground_hash",
+                  eb.fn.countAll<string>().as("stars"),
+                ])
+                .groupBy("playground_hash")
+                .as("star_counts"),
+            (join) =>
+              join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
           .orderBy(
             sql.ref(query.sort ?? "created_at"),
@@ -494,17 +513,23 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             "fork_parent.user_id",
             "fork_owner.id",
           )
-          .crossJoinLateral((eb) =>
-            eb
-              .selectFrom("app_public.playground_stars as s")
-              .select((eb) => [eb.fn.countAll().as("stars")])
-              .where("playground_hash", "=", eb.ref("p.hash"))
-              .as("get_stars"),
+          .leftJoin(
+            (eb) =>
+              eb
+                .selectFrom("app_public.playground_stars")
+                .select((eb) => [
+                  "playground_hash",
+                  eb.fn.countAll<string>().as("stars"),
+                ])
+                .groupBy("playground_hash")
+                .as("star_counts"),
+            (join) =>
+              join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
           .selectAll("p")
           .select((eb) => [
             jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
-            "stars",
+            sql<string>`coalesce(star_counts.stars, '0')`.as("stars"),
             // Include fork_of info when this is a forked playground
             eb
               .case()
@@ -979,6 +1004,45 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         commit_id: S.String,
       }).pipe(S.standardSchemaV1),
     },
+  )
+
+  .post(
+    "/playgrounds/:hash/star",
+    async ({ params, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return await withAuthContext(session.id, async (tx) => {
+        try {
+          await tx
+            .insertInto("app_public.playground_stars")
+            .values({ playground_hash: params.hash })
+            .execute();
+          return { starred: true };
+        } catch (e) {
+          if (e instanceof pg.DatabaseError && e.code === "23505") {
+            return { starred: true }; // already starred
+          }
+          throw e;
+        }
+      });
+    },
+    { params: S.Struct({ hash: S.String }).pipe(S.standardSchemaV1) },
+  )
+
+  .delete(
+    "/playgrounds/:hash/star",
+    async ({ params, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return await withAuthContext(session.id, async (tx) => {
+        await tx
+          .deleteFrom("app_public.playground_stars")
+          .where("playground_hash", "=", params.hash)
+          .execute();
+        return { starred: false };
+      });
+    },
+    { params: S.Struct({ hash: S.String }).pipe(S.standardSchemaV1) },
   )
 
   .delete(
@@ -1527,6 +1591,7 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
 
 // Combined app with both API routes (/api prefix) and auth routes (no prefix)
 export const app = new Elysia()
+  .use(logger({ skip: ["/healthz"] }))
   .use(webhookRoutes)
   .use(authRoutes)
   .use(apiRoutes);

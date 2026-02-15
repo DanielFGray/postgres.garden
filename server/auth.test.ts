@@ -8,6 +8,7 @@ import { treaty } from "@elysiajs/eden";
 import { app as baseApp } from "./app";
 import { testingServer } from "./testing";
 import { rootDb } from "./db";
+import { valkey } from "./valkey";
 
 // Mount testing commands on the app
 const app = baseApp.use(testingServer);
@@ -116,12 +117,8 @@ describe("Session Validation", () => {
       const sessionCookie = setCookie!.split(";")[0]!;
       const sessionId = sessionCookie.split("=")[1]!.split(".")[0]!;
 
-      // Manually expire the session in database
-      await rootDb
-        .updateTable("app_private.sessions")
-        .set({ expires_at: new Date(Date.now() - 1000) }) // 1 second ago
-        .where("id", "=", sessionId)
-        .execute();
+      // Delete the session from Valkey to simulate expiration
+      await valkey.del(`session:${sessionId}`);
 
       // Try to use the expired session
       const { status, data } = await client.me.get({

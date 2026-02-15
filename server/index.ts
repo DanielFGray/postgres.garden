@@ -6,13 +6,18 @@
  * Production: Serves pre-built static assets with data injection
  */
 
+import { Effect } from "effect";
 import { app } from "./app.js";
 import { createDevServer } from "./dev.js";
 import { createProdServer } from "./prod.js";
+import { waitForDependencies } from "./ready.js";
 
 const isDev = process.env.NODE_ENV !== "production";
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
+
+// Wait for Postgres and Valkey before starting
+await Effect.runPromise(waitForDependencies);
 
 export { app };
 

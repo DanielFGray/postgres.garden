@@ -5,6 +5,7 @@ import { edenFetch } from "@elysiajs/eden";
 import pg from "pg";
 import * as S from "effect/Schema";
 import { rootDb } from "./db.js";
+import { valkey } from "./valkey.js";
 import { env } from "./assertEnv.js";
 import { AppPublicUsers, AppPublicOrganizations } from "../generated/db.js";
 import {
@@ -37,6 +38,9 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
       .deleteFrom("app_public.users")
       .where("username", "like", "test%")
       .execute();
+    // Clear orphaned Valkey sessions (test-only, safe to flush all)
+    const keys = await valkey.keys("session:*");
+    if (keys.length > 0) await valkey.del(...keys);
     return { success: true };
   })
 

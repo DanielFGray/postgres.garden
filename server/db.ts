@@ -11,12 +11,18 @@ import type {
 
 export type { User, Organization, Playground, Commit };
 
-export const rootPg = new pg.Pool({ connectionString: env.DATABASE_URL });
+export const rootPg = new pg.Pool({
+  connectionString: env.DATABASE_URL,
+  max: 50,
+});
 export const rootDb = new Kysely<DB>({
   dialect: new PostgresDialect({ pool: rootPg }),
 });
 
-export const authPg = new pg.Pool({ connectionString: env.AUTH_DATABASE_URL });
+export const authPg = new pg.Pool({
+  connectionString: env.AUTH_DATABASE_URL,
+  max: 50,
+});
 export const authDb = new Kysely<DB>({
   dialect: new PostgresDialect({ pool: authPg }),
 });

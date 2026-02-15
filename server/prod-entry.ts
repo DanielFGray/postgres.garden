@@ -6,16 +6,20 @@
  * It only imports production dependencies and avoids dev-only code like Vite
  */
 
+import { Effect } from "effect";
 import { Elysia } from "elysia";
 import { app as appRoutes } from "./app.js";
 import { createProdServer } from "./prod.js";
+import { waitForDependencies } from "./ready.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
 
+// Wait for Postgres and Valkey before starting
+await Effect.runPromise(waitForDependencies);
+
 // Create shared API app with real backend routes
 export const app = new Elysia().use(appRoutes);
-
 
 console.log("🚀 Starting production server...");
 

@@ -17,5 +17,12 @@ services:
     ports:
       - ${DATABASE_PORT}:5432
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports:
+      - 6379:6379
+    networks:
+      - appnet
+
 networks:
   appnet:

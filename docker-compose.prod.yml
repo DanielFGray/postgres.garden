@@ -6,6 +6,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     networks:
       - internal
       - dokploy-network
@@ -38,6 +40,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      valkey:
+        condition: service_healthy
     networks:
       - internal
 
@@ -62,8 +66,21 @@ services:
       timeout: 5s
       retries: 10
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    volumes:
+      - valkeydata:/data
+    command: valkey-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
 volumes:
   pgdata:
+  valkeydata:
 
 networks:
   internal:

@@ -28,6 +28,7 @@ export const envSchema = S.Struct({
   GITHUB_CLIENT_SECRET: S.UndefinedOr(S.String),
   GITHUB_PAT: S.UndefinedOr(S.String),
   GITHUB_WEBHOOK_SECRET: S.UndefinedOr(S.String),
+  VALKEY_URL: S.UndefinedOr(S.String),
 });
 
 export type Env = typeof envSchema.Type;
