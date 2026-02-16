@@ -1,27 +1,47 @@
-# Local development SigNoz stack
-# Usage: docker compose -f docker-compose.signoz.yml up -d
-# UI: http://localhost:8080
+# Local development: infra services only, app runs outside Docker.
+# Usage: docker compose -f docker-compose.dev.yml up -d
+
 services:
-  signoz-init-clickhouse:
-    image: clickhouse/clickhouse-server:25.5.6
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${ROOT_DATABASE_USER}
+      - POSTGRES_PASSWORD=${ROOT_DATABASE_PASSWORD}
     command:
-      - bash
+      - postgres
       - -c
-      - |
-        version="v0.0.1"
-        node_os=$$(uname -s | tr '[:upper:]' '[:lower:]')
-        node_arch=$$(uname -m | sed s/aarch64/arm64/ | sed s/x86_64/amd64/)
-        cd /tmp
-        wget -O histogram-quantile.tar.gz "https://github.com/SigNoz/signoz/releases/download/histogram-quantile%2F$${version}/histogram-quantile_$${node_os}_$${node_arch}.tar.gz"
-        tar -xvzf histogram-quantile.tar.gz
-        mv histogram-quantile /var/lib/clickhouse/user_scripts/histogramQuantile
-    restart: on-failure
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - log_destination=stderr
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
     volumes:
-      - ./signoz/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ROOT_DATABASE_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkeydata:/data
+    command: valkey-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- SigNoz observability stack ---
 
   signoz-zookeeper:
     image: signoz/zookeeper:3.7.1
-    user: root
     volumes:
       - signoz-zookeeper:/bitnami/zookeeper
     environment:
@@ -29,56 +49,51 @@ services:
       - ALLOW_ANONYMOUS_LOGIN=yes
       - ZOO_AUTOPURGE_INTERVAL=1
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -m 2 http://localhost:8080/commands/ruok | grep error | grep null"]
-      interval: 30s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/commands/ruok || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
   signoz-clickhouse:
     image: clickhouse/clickhouse-server:25.5.6
     depends_on:
-      signoz-init-clickhouse:
-        condition: service_completed_successfully
       signoz-zookeeper:
         condition: service_healthy
     environment:
       - CLICKHOUSE_SKIP_USER_SETUP=1
     volumes:
+      - signoz-clickhouse:/var/lib/clickhouse/
       - ./signoz/clickhouse/config.xml:/etc/clickhouse-server/config.xml
       - ./signoz/clickhouse/users.xml:/etc/clickhouse-server/users.xml
       - ./signoz/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml
       - ./signoz/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
       - ./signoz/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml
-      - signoz-clickhouse:/var/lib/clickhouse/
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "0.0.0.0:8123/ping"]
-      interval: 30s
+      test: ["CMD-SHELL", "wget --spider -q 0.0.0.0:8123/ping || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 10
 
   signoz-schema-migrator-sync:
-    image: signoz/signoz-schema-migrator:v0.142.0
+    image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
+    restart: on-failure
     command: ["sync", "--dsn=tcp://signoz-clickhouse:9000", "--up="]
     depends_on:
       signoz-clickhouse:
         condition: service_healthy
-    restart: on-failure
 
   signoz-schema-migrator-async:
-    image: signoz/signoz-schema-migrator:v0.142.0
+    image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
+    restart: on-failure
     command: ["async", "--dsn=tcp://signoz-clickhouse:9000", "--up="]
     depends_on:
-      signoz-clickhouse:
-        condition: service_healthy
       signoz-schema-migrator-sync:
         condition: service_completed_successfully
-    restart: on-failure
 
   signoz:
-    image: signoz/signoz:v0.111.0
-    command: ["--config=/root/config/prometheus.yml"]
-    ports:
-      - "8080:8080"
+    image: signoz/signoz:${SIGNOZ_TAG:-v0.111.0}
+    command:
+      - --config=/root/config/prometheus.yml
     environment:
       - SIGNOZ_ALERTMANAGER_PROVIDER=signoz
       - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://signoz-clickhouse:9000
@@ -87,45 +102,47 @@ services:
       - STORAGE=clickhouse
       - GODEBUG=netdns=go
       - DEPLOYMENT_TYPE=docker-standalone-amd
+    ports:
+      - "${SIGNOZ_PORT:-3301}:8080"
     volumes:
+      - signoz-sqlite:/var/lib/signoz/
       - ./signoz/signoz/prometheus.yml:/root/config/prometheus.yml
       - ./signoz/dashboards:/root/config/dashboards
-      - signoz-sqlite:/var/lib/signoz/
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "localhost:8080/api/v1/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "wget --spider -q localhost:8080/api/v1/health || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 10
     depends_on:
       signoz-clickhouse:
         condition: service_healthy
       signoz-schema-migrator-sync:
         condition: service_completed_successfully
+      signoz-schema-migrator-async:
+        condition: service_completed_successfully
 
   signoz-otel-collector:
-    image: signoz/signoz-otel-collector:v0.142.0
+    image: signoz/signoz-otel-collector:${OTELCOL_TAG:-v0.142.0}
     command:
       - "--config=/etc/otel-collector-config.yaml"
       - "--manager-config=/etc/manager-config.yaml"
       - "--copy-path=/var/tmp/collector-config.yaml"
     ports:
-      - "4317:4317"
-      - "4318:4318"
-    environment:
-      - OTEL_RESOURCE_ATTRIBUTES=host.name=signoz-host,os.type=linux
-      - LOW_CARDINAL_EXCEPTION_GROUPING=false
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
     volumes:
       - ./signoz/otel-collector-config.yaml:/etc/otel-collector-config.yaml
       - ./signoz/signoz/otel-collector-opamp-config.yaml:/etc/manager-config.yaml
+    environment:
+      - OTEL_RESOURCE_ATTRIBUTES=host.name=signoz-host,os.type=linux
+      - LOW_CARDINAL_EXCEPTION_GROUPING=false
     depends_on:
       signoz:
         condition: service_healthy
-      signoz-clickhouse:
-        condition: service_healthy
-      signoz-schema-migrator-sync:
-        condition: service_completed_successfully
 
 volumes:
+  pgdata:
+  valkeydata:
   signoz-clickhouse:
   signoz-sqlite:
   signoz-zookeeper:
