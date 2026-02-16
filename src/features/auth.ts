@@ -25,6 +25,16 @@ const AuthMessage = S.Struct({
 });
 const isAuthMessage = S.is(AuthMessage);
 
+const InitialDataUserSchema = S.Struct({
+  id: S.String,
+  username: S.String,
+  role: S.NullishOr(S.String),
+});
+const InitialDataUpdateSchema = S.Struct({
+  user: S.NullishOr(InitialDataUserSchema),
+});
+const isInitialDataUpdate = S.is(InitialDataUpdateSchema);
+
 /**
  * GitHub authentication session
  */
@@ -116,6 +126,18 @@ export class GitHubAuthProvider
     }
 
     this._onDidChangeSessions.fire({ added, removed, changed });
+  }
+
+  syncFromInitialData(user: InitialDataUser | null): void {
+    this.ensureInitialized();
+
+    if (user?.username) {
+      localStorage.setItem(GitHubAuthProvider.storageKey, user.username);
+    } else {
+      localStorage.removeItem(GitHubAuthProvider.storageKey);
+    }
+
+    this.checkForUpdates();
   }
 
   getSessions(): Promise<vscode.AuthenticationSession[]> {
@@ -442,6 +464,20 @@ void getApi().then((vsapi) => {
     if (e.provider.id === GitHubAuthProvider.id) {
       void updateStatusBar();
     }
+  });
+
+  window.addEventListener("pg-initial-data-updated", (event) => {
+    if (!(event instanceof CustomEvent)) return;
+    const detail: unknown = event.detail;
+    if (!isInitialDataUpdate(detail)) return;
+    const normalizedUser: InitialDataUser | null = detail.user
+      ? {
+          id: detail.user.id,
+          username: detail.user.username,
+          role: detail.user.role ?? undefined,
+        }
+      : null;
+    provider.syncFromInitialData(normalizedUser);
   });
 
   // Initial status bar update

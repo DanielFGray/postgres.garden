@@ -19,39 +19,39 @@ declare module "*?raw" {
   export default content;
 }
 
-/** Shape of server-injected initial data (see server/ssr.ts) */
-interface InitialDataRoute {
-  type: "home" | "playground" | "commit" | "shared";
-  playgroundHash?: string;
-  commitId?: string;
-  params?: { playgroundId?: string; commitId?: string; data?: string };
-}
-
-interface InitialDataCommit {
-  id: string;
-  message: string;
-  created_at: string;
-  playground_hash: string;
-  parent_id: string | null;
-  files: Array<{ path: string; content: string }>;
-  activeFile: string | null;
-  timestamp: number;
-}
-
-interface InitialDataUser {
-  id: string;
-  username: string;
-  role?: string;
-}
-
-interface InitialData {
-  user: InitialDataUser | null;
-  route: InitialDataRoute | null;
-  commit: InitialDataCommit | null;
-}
-
-// Global window object extensions
 declare global {
+  /** Shape of server-injected initial data (see server/ssr.ts) */
+  interface InitialDataRoute {
+    type: "home" | "playground" | "commit" | "shared";
+    playgroundHash?: string;
+    commitId?: string;
+    params?: { playgroundId?: string; commitId?: string; data?: string };
+  }
+
+  interface InitialDataCommit {
+    id: string;
+    message: string;
+    created_at: string;
+    playground_hash: string;
+    parent_id: string | null;
+    files: Array<{ path: string; content: string }>;
+    activeFile: string | null;
+    timestamp: number;
+  }
+
+  interface InitialDataUser {
+    id: string;
+    username: string;
+    role?: string;
+  }
+
+  interface InitialData {
+    user: InitialDataUser | null;
+    route: InitialDataRoute | null;
+    commit: InitialDataCommit | null;
+  }
+
+  // Global window object extensions
   interface Window {
     /**
      * Initial data injected by the server during SSR

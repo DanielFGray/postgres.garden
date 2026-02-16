@@ -11,6 +11,11 @@ import {
 import * as S from "effect/Schema";
 import { api } from "../api-client";
 import { getSmallExampleWorkspace } from "../templates";
+import { getNetworkState } from "./network";
+import {
+  cachePlaygroundCommit,
+  getCachedPlaygroundCommit,
+} from "./playground/localStore";
 import {
   PLAYGROUND_SHOW_BROWSER,
   SERVER_SYNC_WORKSPACE_LOADED,
@@ -199,18 +204,32 @@ export async function loadWorkspace(
       async (progress) => {
         progress.report({ message: "Fetching data..." });
 
+        const isOffline = getNetworkState() === "offline";
         let result: {
           id: string;
           message: string;
           created_at: string | Date;
           playground_hash: string;
-          parent_id: string | null;
+          parent_id: string | null | undefined;
           files: Array<{ path: string; content: string }>;
-          activeFile: string | null;
+          activeFile: string | null | undefined;
           timestamp: number;
         };
 
-        if (commitId) {
+        if (isOffline) {
+          progress.report({ message: "Loading cached data..." });
+          const cachedCommit = await getCachedPlaygroundCommit({
+            playgroundHash,
+            commitId,
+          });
+          if (!cachedCommit) {
+            vscode.window.showWarningMessage(
+              "You're offline and no cached playground data is available.",
+            );
+            return;
+          }
+          result = { ...cachedCommit, files: [...cachedCommit.files] };
+        } else if (commitId) {
           // Loading a specific commit - GET /playgrounds/:hash/commits/:commit_id
           const { data, error } = await api(
             "/api/playgrounds/:hash/commits/:commit_id",
@@ -314,6 +333,22 @@ export async function loadWorkspace(
         }
 
         const data = result;
+        const createdAt =
+          typeof data.created_at === "string"
+            ? data.created_at
+            : data.created_at.toISOString();
+        const commitForCache: InitialDataCommit = {
+          ...data,
+          created_at: createdAt,
+          parent_id: data.parent_id ?? null,
+          activeFile: data.activeFile ?? null,
+          files: [...data.files],
+        };
+        void cachePlaygroundCommit({
+          playgroundHash,
+          commit: commitForCache,
+          isLatest: !commitId,
+        });
         const workspace: WorkspaceData = {
           id: data.id,
           name: data.message || `Playground ${playgroundHash}`,
@@ -559,6 +594,19 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
 
   // Use the new route-aware data structure
   const { route, commit } = initialData;
+  const isOffline = getNetworkState() === "offline";
+  const routePlaygroundId = route?.params?.playgroundId ?? null;
+  let commitToLoad = commit;
+
+  if (isOffline && routePlaygroundId) {
+    const cachedCommit = await getCachedPlaygroundCommit({
+      playgroundHash: routePlaygroundId,
+      commitId: route?.params?.commitId,
+    });
+    if (cachedCommit) {
+      commitToLoad = cachedCommit;
+    }
+  }
 
   // Shared routes: data is in the URL, handled by the router
   if (route?.type === "shared") {
@@ -566,7 +614,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
     return;
   }
 
-  if (!commit || !route) {
+  if (!commitToLoad || !route) {
     console.log("[WorkspaceSwitcher] No workspace data to load");
     // Check if user has existing work before deciding what to do
     if (await hasExistingWork()) {
@@ -581,8 +629,8 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
   console.log(
     "[WorkspaceSwitcher] Loading from initial data:",
     route.type,
-    route.playgroundHash,
-    route.commitId,
+    routePlaygroundId,
+    route?.params?.commitId,
   );
 
   try {
@@ -608,7 +656,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
     let errorCount = 0;
 
     // Restore each file
-    for (const file of commit.files) {
+    for (const file of commitToLoad.files) {
       try {
         const uri = vscode.Uri.file(file.path);
         const content = new TextEncoder().encode(file.content);
@@ -641,7 +689,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
     );
 
     // Open the active file if specified
-    const activeFile = (commit).activeFile;
+    const activeFile = commitToLoad.activeFile;
     if (activeFile) {
       try {
         const activeUri = vscode.Uri.file(activeFile);
@@ -655,10 +703,10 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
           err,
         );
       }
-    } else if (commit.files.length > 0) {
+    } else if (commitToLoad.files.length > 0) {
       // No active file specified, open the first file as fallback
       try {
-        const firstFile = commit.files[0]!;
+        const firstFile = commitToLoad.files[0]!;
         const firstUri = vscode.Uri.file(firstFile.path);
         await vscode.commands.executeCommand(VSCODE_OPEN, firstUri);
         console.log(
@@ -674,17 +722,23 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
 
     // Notify serverSync about the loaded workspace
     vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
-      commitId: commit.id,
-      playgroundHash: route.playgroundHash || commit.id,
-      files: commit.files,
+      commitId: commitToLoad.id,
+      playgroundHash: routePlaygroundId ?? commitToLoad.playground_hash,
+      files: commitToLoad.files,
     });
 
     if (restoredCount > 0) {
       // Show a subtle notification
       vscode.window.showInformationMessage(
-        `Workspace restored: ${restoredCount} file(s) from ${new Date(commit.timestamp).toLocaleString()}`,
+        `Workspace restored: ${restoredCount} file(s) from ${new Date(commitToLoad.timestamp).toLocaleString()}`,
       );
     }
+
+    void cachePlaygroundCommit({
+      playgroundHash: routePlaygroundId ?? commitToLoad.playground_hash,
+      commit: commitToLoad,
+      isLatest: route.type === "playground",
+    });
   } catch (err) {
     console.error("[WorkspaceSwitcher] Failed to restore workspace:", err);
     vscode.window.showErrorMessage(

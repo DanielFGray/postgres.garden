@@ -5,6 +5,7 @@ import "./style.css";
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   void navigator.serviceWorker.register("/sw.js");
 }
+import "./features/initialDataCache";
 import "./features/router";
 import "./features/auth";
 import "./features/network";
