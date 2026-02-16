@@ -14,7 +14,9 @@ import {
   GITHUB_SIGNIN,
   GITHUB_ACCOUNT_MENU,
   GITHUB_SIGNOUT,
+  ACCOUNT_SETTINGS_OPEN,
 } from "./constants";
+import { AccountSettingsPanelProvider } from "./account/AccountSettingsPanelProvider";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
 const AuthMessage = S.Struct({
@@ -395,6 +397,12 @@ void getApi().then((vsapi) => {
     window.location.reload();
   });
 
+  // Register account settings command
+  const extensionUri = vscode.Uri.parse(window.location.origin);
+  vsapi.commands.registerCommand(ACCOUNT_SETTINGS_OPEN, () => {
+    AccountSettingsPanelProvider.createOrShow(extensionUri);
+  });
+
   // Register account menu command
   vsapi.commands.registerCommand(GITHUB_ACCOUNT_MENU, async () => {
     try {
@@ -406,8 +414,7 @@ void getApi().then((vsapi) => {
       if (!sessions) return;
 
       const menuItems: AccountMenuItem[] = [
-        // { label: "$(account) Profile", value: "profile" },
-        // { label: "$(gear) Settings", value: "settings" },
+        { label: "$(account) Account Settings", value: "settings" },
         { label: "$(sign-out) Sign Out", value: "signout" },
       ];
 
@@ -418,10 +425,9 @@ void getApi().then((vsapi) => {
       if (!selected) return;
 
       switch (selected.value) {
-        // case "profile":
-        //   break;
-        // case "settings":
-        //   break;
+        case "settings":
+          await vsapi.commands.executeCommand(ACCOUNT_SETTINGS_OPEN);
+          break;
         case "signout":
           await vsapi.commands.executeCommand(GITHUB_SIGNOUT);
           break;
