@@ -1608,6 +1608,7 @@ export const app = new Elysia()
         : [],
     }),
   )
+  .get("/healthz", () => ({ ok: true }))
   .use(webhookRoutes)
   .use(authRoutes)
   .use(apiRoutes);

@@ -46,7 +46,8 @@
     "dist",
     "src/features/notebook/renderer/pev2",
     "src/debugServer.ts",
-    "src/features/erd"
+    "src/features/erd",
+    "src/sw.ts"
   ],
   "include": [
     "src",

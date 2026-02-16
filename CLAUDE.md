@@ -52,3 +52,21 @@ Bun + Elysia backend. SSR injects data via `window.__INITIAL_DATA__`.
 - Don't leave `async` on functions that don't `await` — use `Promise.resolve()` if the interface requires it
 - Eden API error objects need `JSON.stringify(error.value)` in template literals
 - `registerExtension` destructuring needs `// eslint-disable-next-line @typescript-eslint/unbound-method`
+
+## Task Tracking
+
+This project uses **prog** for cross-session task management. **Do NOT use internal TodoWrite/TaskCreate/TaskUpdate tools** — use `prog` for all task tracking.
+Run `prog prime` for workflow context, or configure hooks for auto-injection.
+
+**Quick reference:**
+```
+prog ready                      # Find unblocked work
+prog add "Title" -p pg.garden   # Create task
+prog start <id>                 # Claim work
+prog log <id> "msg"             # Log progress
+prog done <id>                  # Complete work
+```
+
+MUST use `-p pg.garden` for all commands that dont have an <id>
+
+For full workflow: `prog prime`
