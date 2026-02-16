@@ -104,11 +104,12 @@ const bootstrap = Effect.gen(function* () {
 const main = bootstrap.pipe(
   Effect.provide(MainLayer),
   Effect.scoped,
-  Effect.catchAll((error) =>
+  Effect.tapError((error) =>
     Effect.sync(() => {
       console.error(error);
     }),
   ),
+  Effect.orDie,
 );
 Effect.runFork(main);
 
