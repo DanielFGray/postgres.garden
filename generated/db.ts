@@ -7,6 +7,20 @@ import type { ColumnType } from "kysely";
 
 export type AppPublicPrivacy = "private" | "public" | "secret";
 
+export type AppPublicPlaygroundReportReason =
+  | "illegal_content"
+  | "pii_exposure"
+  | "spam"
+  | "harassment"
+  | "copyright"
+  | "other";
+
+export type AppPublicPlaygroundReportStatus =
+  | "pending"
+  | "reviewed"
+  | "dismissed"
+  | "actioned";
+
 export type AppPublicUserRole = "admin" | "pro" | "sponsor" | "user";
 
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
@@ -105,6 +119,19 @@ export interface AppPublicPlaygroundComments {
   user_id: Generated<string>;
 }
 
+export interface AppPublicPlaygroundReports {
+  created_at: Generated<Timestamp>;
+  details: string | null;
+  id: Generated<string>;
+  playground_hash: string;
+  reason: AppPublicPlaygroundReportReason;
+  reporter_id: Generated<string>;
+  resolution_notes: string | null;
+  reviewed_by: string | null;
+  status: Generated<AppPublicPlaygroundReportStatus>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AppPublicPlaygroundCommits {
   created_at: Generated<Timestamp>;
   data: Json;
@@ -177,6 +204,7 @@ export interface DB {
   "app_public.organizations": AppPublicOrganizations;
   "app_public.playground_comments": AppPublicPlaygroundComments;
   "app_public.playground_commits": AppPublicPlaygroundCommits;
+  "app_public.playground_reports": AppPublicPlaygroundReports;
   "app_public.playground_stars": AppPublicPlaygroundStars;
   "app_public.playgrounds": AppPublicPlaygrounds;
   "app_public.user_authentications": AppPublicUserAuthentications;

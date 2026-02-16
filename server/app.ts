@@ -21,6 +21,7 @@ import {
   buildSessionCookie,
   deleteSession,
 } from "./sessions.js";
+import { valkey } from "./valkey.js";
 import type { AppPublicUsers, AppPublicUserEmails } from "generated/db";
 
 const gql = templateHack;
@@ -31,6 +32,9 @@ const PositiveNumber = S.Number.pipe(
 );
 const LessThan = <T extends number>(than: number) =>
   S.filter<S.Schema<T, T>>((n) => n < than || "a number less than 100");
+
+const REPORT_RATE_LIMIT_MAX = 10;
+const REPORT_RATE_LIMIT_TTL_SECONDS = 60 * 60;
 
 const getGithubSponsorInfo = gql`
   query ($user: String!, $repo: String!, $owner: String!) {
@@ -555,6 +559,92 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         return result;
       }),
     { params: S.Struct({ hash: S.String }).pipe(S.standardSchemaV1) },
+  )
+
+  .post(
+    "/playgrounds/:hash/report",
+    async ({ params, body, session, user, status }) => {
+      if (!session || !user) return status(401, { error: "Unauthorized" });
+
+      if (body.details && body.details.length > 1000) {
+        return status(400, { error: "Details must be 1000 characters or less" });
+      }
+
+      const rateKey = `ratelimit:report:${user.id}`;
+      try {
+        const count = await valkey.incr(rateKey);
+        if (count === 1) {
+          await valkey.expire(rateKey, REPORT_RATE_LIMIT_TTL_SECONDS);
+        }
+        if (count > REPORT_RATE_LIMIT_MAX) {
+          return status(429, { error: "Report rate limit exceeded" });
+        }
+      } catch (err) {
+        console.error("[Report] Rate limit check failed:", err);
+      }
+
+      try {
+        return await withAuthContext(session.id, async (tx) => {
+          const playground = await tx
+            .selectFrom("app_public.playgrounds")
+            .select(["hash", "user_id", "privacy"])
+            .where("hash", "=", params.hash)
+            .executeTakeFirst();
+
+          if (!playground) {
+            return status(404, { error: "Playground not found" });
+          }
+
+          if (playground.user_id === user.id) {
+            return status(403, { error: "Cannot report your own playground" });
+          }
+
+          if (playground.privacy === "private") {
+            return status(403, { error: "Playground is private" });
+          }
+
+          const details = body.details?.trim();
+          const report = await tx
+            .insertInto("app_public.playground_reports")
+            .values({
+              playground_hash: params.hash,
+              reporter_id: user.id,
+              reason: body.reason,
+              details: details && details.length > 0 ? details : null,
+            })
+            .returning(["id", "status", "created_at"])
+            .executeTakeFirst();
+
+          if (!report) {
+            return status(500, { error: "Failed to create report" });
+          }
+
+          return status(201, report);
+        });
+      } catch (e) {
+        if (e instanceof pg.DatabaseError && e.code === "23505") {
+          return status(409, { error: "Playground already reported" });
+        }
+        const { code, error } = handleDbError(e, "Failed to report playground");
+        return status(code, { error });
+      }
+    },
+    {
+      params: S.Struct({
+        hash: S.String,
+      }).pipe(S.standardSchemaV1),
+      body: S.Struct({
+        reason: S.Union(
+          S.Literal("illegal_content"),
+          S.Literal("pii_exposure"),
+          S.Literal("spam"),
+          S.Literal("harassment"),
+          S.Literal("copyright"),
+          S.Literal("other"),
+        ),
+        details: S.NullishOr(S.String),
+      }).pipe(S.standardSchemaV1),
+    },
   )
 
   .post(

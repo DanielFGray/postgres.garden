@@ -10,6 +10,7 @@ import "./features/auth";
 import "./features/network";
 import "./features/postgres";
 import "./features/serverSync";
+import "./features/playgroundReport";
 import "./features/playground/extension";
 import "@codingame/monaco-vscode-configuration-editing-default-extension";
 import "@codingame/monaco-vscode-ipynb-default-extension";
