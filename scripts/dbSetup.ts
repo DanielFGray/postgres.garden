@@ -1,6 +1,8 @@
 import { Effect, Schedule, pipe, Duration, Schema } from "effect";
+import { Prompt } from "@effect/cli";
+import { NodeContext, NodeRuntime } from "@effect/platform-node";
+import { Terminal } from "@effect/platform";
 import pg from "pg";
-import * as Prompt from "../lib/prompt.js";
 
 // Environment variables
 const {
@@ -95,11 +97,17 @@ const acquireConnection = (pool: pg.Pool) =>
   );
 
 // Prompt user for confirmation
-const confirmAction = Effect.gen(function*() {
+const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.gen(function*() {
+  if (process.env.NOCONFIRM) {
+    return true;
+  }
+
   const result = yield* Prompt.confirm({
     message: "press y to continue:",
-    default: true,
-  });
+    initial: true,
+  }).pipe(
+    Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))),
+  );
 
   if (!result) {
     yield* Effect.sync(() => process.exit(0));
@@ -228,5 +236,5 @@ const program = Effect.gen(function*() {
   );
 });
 
-// Run the program - Effect runtime handles SIGINT/SIGTERM automatically
-Effect.runFork(program);
+// Run the program
+program.pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain);
