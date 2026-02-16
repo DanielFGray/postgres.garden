@@ -1,5 +1,4 @@
 import { signal } from "@preact/signals";
-import { sendInitialized } from "./api";
 import { ProfileSection } from "./sections/ProfileSection";
 
 type SectionId = "profile" | "emails" | "security" | "linked-accounts" | "danger-zone";
@@ -19,9 +18,6 @@ const sections: NavSection[] = [
 ];
 
 const activeSection = signal<SectionId>("profile");
-
-// Tell extension we're ready
-sendInitialized();
 
 function renderSection() {
   switch (activeSection.value) {

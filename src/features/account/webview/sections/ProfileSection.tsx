@@ -1,20 +1,31 @@
 import { signal, effect } from "@preact/signals";
-import type { UserProfile } from "../../types";
-import { apiRequest } from "../api";
+import { Effect } from "effect";
+import type { ApiError } from "../api";
+import { apiRequest, formatApiError } from "../api";
+import { AccountMeResponseSchema, type AccountUser } from "../models";
 
-const profile = signal<UserProfile | null>(null);
+const profile = signal<AccountUser | null>(null);
 const error = signal<string | null>(null);
 const loading = signal(true);
 
 function loadProfile() {
   loading.value = true;
   error.value = null;
-  apiRequest<UserProfile>("/api/me")
+  void Effect.runPromise(apiRequest("/api/me", AccountMeResponseSchema))
     .then((data) => {
-      profile.value = data;
+      if (!data.user) {
+        profile.value = null;
+        error.value = "No active session";
+        return;
+      }
+      profile.value = data.user;
     })
     .catch((err: unknown) => {
-      error.value = err instanceof Error ? err.message : String(err);
+      if (err && typeof err === "object" && "_tag" in err) {
+        error.value = formatApiError(err as ApiError);
+      } else {
+        error.value = err instanceof Error ? err.message : String(err);
+      }
     })
     .finally(() => {
       loading.value = false;
@@ -24,14 +35,6 @@ function loadProfile() {
 effect(() => {
   loadProfile();
 });
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
 
 export function ProfileSection() {
   if (loading.value) {
@@ -67,34 +70,6 @@ export function ProfileSection() {
         </div>
 
         <div class="field">
-          <label>Display Name</label>
-          <div class="field-value">
-            {p.name ?? <span class="field-empty">Not set</span>}
-          </div>
-        </div>
-
-        <div class="field">
-          <label>Bio</label>
-          <div class="field-value">
-            {p.bio || <span class="field-empty">No bio</span>}
-          </div>
-        </div>
-
-        <div class="field">
-          <label>Avatar URL</label>
-          <div class="field-value">
-            {p.avatar_url ? (
-              <div class="avatar-preview">
-                <img src={p.avatar_url} alt="Avatar" class="avatar-img" />
-                <span class="avatar-url">{p.avatar_url}</span>
-              </div>
-            ) : (
-              <span class="field-empty">Not set</span>
-            )}
-          </div>
-        </div>
-
-        <div class="field">
           <label>Role</label>
           <div class="field-value">
             <span class={`badge badge-${p.role}`}>{p.role}</span>
@@ -115,8 +90,10 @@ export function ProfileSection() {
         </div>
 
         <div class="field">
-          <label>Member Since</label>
-          <div class="field-value">{formatDate(String(p.created_at))}</div>
+          <label>Account ID</label>
+          <div class="field-value">
+            <span class="field-mono">{p.id}</span>
+          </div>
         </div>
       </div>
     </div>

@@ -323,6 +323,22 @@ const { getApi } = registerExtension(
     engines: {
       vscode: "*",
     },
+    contributes: {
+      commands: [
+        {
+          command: ACCOUNT_SETTINGS_OPEN,
+          title: "Open Account Settings",
+          category: "Account",
+        },
+      ],
+      keybindings: [
+        {
+          command: ACCOUNT_SETTINGS_OPEN,
+          key: "ctrl+shift+u",
+          mac: "cmd+shift+u",
+        },
+      ],
+    },
   },
   ExtensionHostKind.LocalProcess,
 );

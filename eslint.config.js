@@ -20,6 +20,7 @@ export default [
       "worker/**",
       "src/features/notebook/renderer/pev2/**",
       "src/features/notebook/renderer-dist/**",
+      "src/features/account/panel-dist/**",
       "src/webview-dist/**",
       "src/features/remoteExtensionExample/**",
       "src/debugServer.ts",

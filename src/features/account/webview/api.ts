@@ -1,61 +1,164 @@
-declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
-const vscode = acquireVsCodeApi();
+import { Effect } from "effect";
+import * as S from "effect/Schema";
 
-type PendingRequest = {
-  resolve: (data: unknown) => void;
-  reject: (error: Error) => void;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const apiBase =
+  document
+    .getElementById("root")
+    ?.getAttribute("data-api-base")
+    ?.replace(/\/$/, "") ??
+  "";
+
+class ApiHttpError extends S.TaggedError<ApiHttpError>()("ApiHttpError", {
+  status: S.Number,
+  statusText: S.String,
+  message: S.String,
+}) {}
+
+class ApiNetworkError extends S.TaggedError<ApiNetworkError>()(
+  "ApiNetworkError",
+  {
+    message: S.String,
+  },
+) {}
+
+class ApiTimeoutError extends S.TaggedError<ApiTimeoutError>()(
+  "ApiTimeoutError",
+  {
+    message: S.String,
+  },
+) {}
+
+class ApiDecodeError extends S.TaggedError<ApiDecodeError>()("ApiDecodeError", {
+  message: S.String,
+}) {}
+
+export type ApiError =
+  | ApiHttpError
+  | ApiNetworkError
+  | ApiTimeoutError
+  | ApiDecodeError;
+
+type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+const parseJsonSafe = (text: string): unknown => {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 };
 
-const pending = new Map<string, PendingRequest>();
-let requestId = 0;
-
-window.addEventListener("message", (event) => {
-  const msg = event.data as { type: string; id?: string; data?: unknown; error?: { code: string; message: string } };
-
-  if (msg.type === "data" && msg.id) {
-    const req = pending.get(msg.id);
-    if (req) {
-      pending.delete(msg.id);
-      req.resolve(msg.data);
-    }
-  } else if (msg.type === "error" && msg.id) {
-    const req = pending.get(msg.id);
-    if (req) {
-      pending.delete(msg.id);
-      req.reject(new Error(msg.error?.message ?? "Unknown error"));
-    }
-  } else if (msg.type === "offline") {
-    // Reject all pending requests
-    for (const [id, req] of pending) {
-      pending.delete(id);
-      req.reject(new Error("You're offline"));
+const extractErrorMessage = (payload: unknown, fallback: string) => {
+  if (typeof payload === "string") return payload;
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const errorValue = (payload as { error?: unknown }).error;
+    if (typeof errorValue === "string") return errorValue;
+    try {
+      return JSON.stringify(errorValue);
+    } catch {
+      return String(errorValue);
     }
   }
-});
+  return fallback;
+};
 
-export function apiRequest<T>(endpoint: string, method = "GET", body?: unknown): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const id = String(++requestId);
-    const timeout = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error("Request timed out"));
-    }, 15_000);
+const fetchResponse = (endpoint: string, method: ApiMethod, body?: unknown) => {
+  const url = endpoint.startsWith("http") ? endpoint : `${apiBase}${endpoint}`;
+  return Effect.tryPromise({
+    try: async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-    pending.set(id, {
-      resolve: (data) => {
+      try {
+        const headers: Record<string, string> = {};
+        const payload = body === undefined ? undefined : JSON.stringify(body);
+        if (payload !== undefined) {
+          headers["Content-Type"] = "application/json";
+        }
+
+        return await fetch(url, {
+          method,
+          credentials: "include",
+          headers,
+          body: payload,
+          signal: controller.signal,
+        });
+      } finally {
         clearTimeout(timeout);
-        resolve(data as T);
-      },
-      reject: (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      },
+      }
+    },
+    catch: (error) => {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return new ApiTimeoutError({ message: "Request timed out" });
+      }
+      return new ApiNetworkError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+};
+
+export const apiRequest = <A>(
+  endpoint: string,
+  schema: S.Schema<A>,
+  method: ApiMethod = "GET",
+  body?: unknown,
+) =>
+  Effect.gen(function* () {
+    const response = yield* fetchResponse(endpoint, method, body);
+    const text = yield* Effect.tryPromise({
+      try: () => response.text(),
+      catch: (error) =>
+        new ApiNetworkError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
     });
 
-    vscode.postMessage({ type: "request", id, endpoint, method, body });
-  });
-}
+    const payload = parseJsonSafe(text);
 
-export function sendInitialized() {
-  vscode.postMessage({ type: "initialized" });
-}
+    if (!response.ok) {
+      const message = extractErrorMessage(
+        payload,
+        response.statusText || "Request failed",
+      );
+      return yield* Effect.fail(
+        new ApiHttpError({
+          status: response.status,
+          statusText: response.statusText,
+          message,
+        }),
+      );
+    }
+
+    return yield* Effect.try({
+      try: () => S.decodeUnknownSync(schema)(payload),
+      catch: (error) =>
+        new ApiDecodeError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+  }).pipe(
+    Effect.withSpan("account.settings.api", {
+      attributes: {
+        "http.method": method,
+        "http.url": endpoint,
+      },
+    }),
+  );
+
+export const formatApiError = (error: ApiError) => {
+  switch (error._tag) {
+    case "ApiHttpError":
+      return `${error.status} ${error.statusText}: ${error.message}`;
+    case "ApiTimeoutError":
+      return error.message;
+    case "ApiNetworkError":
+      return error.message;
+    case "ApiDecodeError":
+      return `Response validation failed: ${error.message}`;
+    default:
+      return "Unknown error";
+  }
+};

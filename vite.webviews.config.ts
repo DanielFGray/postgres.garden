@@ -12,7 +12,6 @@ export default defineConfig({
         'playground-view': resolve(__dirname, 'src/features/playground/webview/view-preact/index.tsx'),
         'playground-panel': resolve(__dirname, 'src/features/playground/webview/panel-preact/index.tsx'),
         'erd-viewer': resolve(__dirname, 'src/features/erd/webview/entry.tsx'),
-        'account-settings': resolve(__dirname, 'src/features/account/webview/index.tsx'),
       },
       formats: ['es'],
       fileName: (format, entryName) => `${entryName}.js`,

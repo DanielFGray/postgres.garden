@@ -1,4 +1,4 @@
-body {
+:host {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
@@ -7,12 +7,17 @@ body {
   padding: 0;
   overflow: hidden;
   height: 100vh;
+  display: block;
+}
+
+.settings-root {
+  height: 100%;
 }
 
 /* Layout */
 .settings-container {
   display: flex;
-  height: 100vh;
+  height: 100%;
 }
 
 /* Sidebar nav */
@@ -110,6 +115,11 @@ body {
   font-style: italic;
 }
 
+.field-mono {
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size);
+}
+
 /* Avatar */
 .avatar-preview {
   display: flex;
@@ -141,6 +151,7 @@ body {
 }
 
 .badge-user { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.badge-visitor { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .badge-sponsor { background: var(--vscode-charts-purple); color: #fff; }
 .badge-pro { background: var(--vscode-charts-blue); color: #fff; }
 .badge-admin { background: var(--vscode-charts-red); color: #fff; }
