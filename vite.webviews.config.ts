@@ -16,7 +16,7 @@ export default defineConfig({
       formats: ['es'],
       fileName: (format, entryName) => `${entryName}.js`,
     },
-    outDir: 'src/features/playground/webview-dist',
+    outDir: 'src/webview-dist',
     emptyOutDir: true,
     minify: false, // Easier debugging during development
     sourcemap: true,

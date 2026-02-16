@@ -206,9 +206,9 @@ export class PlaygroundPanelProvider {
   private _getHtmlForWebview(webview: vscode.Webview) {
     // In monaco-vscode-api (browser environment), construct URLs directly
     const baseUri = this._extensionUri.toString().replace(/\/$/, ""); // Remove trailing slash
-    const scriptUri = `${baseUri}/src/features/playground/webview-dist/playground-panel.js`;
-    const signalsUri = `${baseUri}/src/features/playground/webview-dist/signals.module.js`;
-    const styleUri = `${baseUri}/src/features/playground/webview-dist/postgres-garden.css`;
+    const scriptUri = `${baseUri}/src/webview-dist/playground-panel.js`;
+    const signalsUri = `${baseUri}/src/webview-dist/signals.module.js`;
+    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
     const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
 
     const nonce = getNonce();
