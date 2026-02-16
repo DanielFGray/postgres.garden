@@ -24,7 +24,8 @@ import "@codingame/monaco-vscode-search-result-default-extension";
 import "@codingame/monaco-vscode-simple-browser-default-extension";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
 import "@codingame/monaco-vscode-theme-seti-default-extension";
-import { setupWorkbench } from "./setup.workbench";
+import { Effect } from "effect";
+import { MainLayer, Workbench } from "./workbenchEffect";
 
 const searchParams = new URLSearchParams(window.location.search);
 const locale = searchParams.get("locale");
@@ -74,15 +75,41 @@ const localeLoader: Partial<Record<string, () => Promise<void>>> = {
   },
 };
 
-if (locale != null) {
-  const loader = localeLoader[locale];
-  if (loader != null) {
-    await loader();
-  } else {
-    console.error(`Unknown locale ${locale}`);
+const loadLocale = (targetLocale: string) => {
+  const loader = localeLoader[targetLocale];
+  if (loader == null) {
+    return Effect.sync(() => {
+      console.error(`Unknown locale ${targetLocale}`);
+    });
   }
-}
 
-await setupWorkbench();
+  return Effect.tryPromise({
+    try: () => loader(),
+    catch: (error) =>
+      new Error(
+        `Failed to load locale ${targetLocale}: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+  });
+};
+
+const bootstrap = Effect.gen(function* () {
+  if (locale != null) {
+    yield* loadLocale(locale);
+  }
+
+  yield* Workbench;
+  return yield* Effect.never;
+});
+
+const main = bootstrap.pipe(
+  Effect.provide(MainLayer),
+  Effect.scoped,
+  Effect.catchAll((error) =>
+    Effect.sync(() => {
+      console.error(error);
+    }),
+  ),
+);
+Effect.runFork(main);
 
 export { };
