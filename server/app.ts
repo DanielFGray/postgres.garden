@@ -5,6 +5,7 @@ import { opentelemetry } from "@elysiajs/opentelemetry";
 import { logger } from "./logger.js";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
 import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import * as arctic from "arctic";
@@ -1597,6 +1598,7 @@ export const app = new Elysia()
   .use(
     opentelemetry({
       serviceName: "postgres-garden",
+      instrumentations: [new PgInstrumentation()],
       spanProcessors: env.OTEL_EXPORTER_OTLP_ENDPOINT
         ? [
           new BatchSpanProcessor(

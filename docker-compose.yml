@@ -1,28 +1,227 @@
+x-restart: &restart
+  restart: unless-stopped
+
+x-internal: &internal
+  networks:
+    - internal
+
 services:
+  app:
+    build: .
+    <<: [*restart, *internal]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      signoz-otel-collector:
+        condition: service_started
+    networks:
+      - internal
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.postgres-garden.loadbalancer.server.port=3000"
+      # Shared middlewares
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Embedder-Policy=credentialless"
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Opener-Policy=same-origin"
+      - "traefik.http.middlewares.postgres-garden-headers.headers.customresponseheaders.Cross-Origin-Resource-Policy=cross-origin"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.average=10"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.burst=20"
+      - "traefik.http.middlewares.postgres-garden-ratelimit.ratelimit.period=1s"
+      # Main router: static assets + SPA (headers only, no rate limit)
+      - "traefik.http.routers.postgres-garden.rule=Host(`postgres.garden`)"
+      - "traefik.http.routers.postgres-garden.entrypoints=websecure"
+      - "traefik.http.routers.postgres-garden.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden.middlewares=postgres-garden-headers"
+      # API router: /api, /auth, /webhooks (rate limited)
+      - "traefik.http.routers.postgres-garden-api.rule=Host(`postgres.garden`) && (PathPrefix(`/api`) || PathPrefix(`/auth`) || PathPrefix(`/webhooks`))"
+      - "traefik.http.routers.postgres-garden-api.entrypoints=websecure"
+      - "traefik.http.routers.postgres-garden-api.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden-api.middlewares=postgres-garden-ratelimit,postgres-garden-headers"
+
+  worker:
+    build: .
+    <<: [*restart, *internal]
+    command: ["sh", "-c", "cd worker && bun graphile-worker"]
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
   db:
     image: postgres:17-alpine
+    <<: [*restart, *internal]
     environment:
       - POSTGRES_USER=${ROOT_DATABASE_USER}
       - POSTGRES_PASSWORD=${ROOT_DATABASE_PASSWORD}
-    command: postgres
-      -c shared_preload_libraries=pg_stat_statements
-      -c pg_stat_statements.track=all
-      -c log_destination=stderr
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
     volumes:
-      - /var/run/postgresql:/var/run/postgresql
-    #   - ./pgscripts:/docker-entrypoint-initdb.d
-    #   - ./data:/var/lib/postgresql/data
-    networks:
-      - appnet
-    ports:
-      - ${DATABASE_PORT}:5432
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ROOT_DATABASE_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   valkey:
     image: valkey/valkey:8-alpine
-    ports:
-      - 6379:6379
+    <<: [*restart, *internal]
+    volumes:
+      - valkeydata:/data
+    command: valkey-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- SigNoz observability stack ---
+
+  signoz-zookeeper:
+    image: signoz/zookeeper:3.7.1
+    <<: [*restart, *internal]
+    volumes:
+      - signoz-zookeeper:/bitnami/zookeeper
+    environment:
+      - ZOO_SERVER_ID=1
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOO_AUTOPURGE_INTERVAL=1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/commands/ruok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  signoz-clickhouse:
+    image: clickhouse/clickhouse-server:25.5.6
+    <<: [*restart, *internal]
+    depends_on:
+      signoz-zookeeper:
+        condition: service_healthy
+    environment:
+      - CLICKHOUSE_SKIP_USER_SETUP=1
+    volumes:
+      - signoz-clickhouse:/var/lib/clickhouse/
+      - ./signoz/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+      - ./signoz/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+      - ./signoz/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml
+      - ./signoz/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
+      - ./signoz/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q 0.0.0.0:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  signoz-schema-migrator-sync:
+    image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
+    <<: *internal
+    restart: on-failure
+    command: ["sync", "--dsn=tcp://signoz-clickhouse:9000", "--up="]
+    depends_on:
+      signoz-clickhouse:
+        condition: service_healthy
+
+  signoz-schema-migrator-async:
+    image: signoz/signoz-schema-migrator:${OTELCOL_TAG:-v0.142.0}
+    <<: *internal
+    restart: on-failure
+    command: ["async", "--dsn=tcp://signoz-clickhouse:9000", "--up="]
+    depends_on:
+      signoz-schema-migrator-sync:
+        condition: service_completed_successfully
+
+  signoz:
+    image: signoz/signoz:${SIGNOZ_TAG:-v0.111.0}
+    <<: *restart
+    command:
+      - --config=/root/config/prometheus.yml
+    environment:
+      - SIGNOZ_ALERTMANAGER_PROVIDER=signoz
+      - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://signoz-clickhouse:9000
+      - SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db
+      - DASHBOARDS_PATH=/root/config/dashboards
+      - STORAGE=clickhouse
+      - GODEBUG=netdns=go
+      - DEPLOYMENT_TYPE=docker-standalone-amd
+    volumes:
+      - signoz-sqlite:/var/lib/signoz/
+      - ./signoz/signoz/prometheus.yml:/root/config/prometheus.yml
+      - ./signoz/dashboards:/root/config/dashboards
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q localhost:8080/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      signoz-clickhouse:
+        condition: service_healthy
+      signoz-schema-migrator-sync:
+        condition: service_completed_successfully
+      signoz-schema-migrator-async:
+        condition: service_completed_successfully
     networks:
-      - appnet
+      - internal
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.signoz.loadbalancer.server.port=8080"
+      - "traefik.http.routers.signoz.rule=Host(`signoz.postgres.garden`)"
+      - "traefik.http.routers.signoz.entrypoints=websecure"
+      - "traefik.http.routers.signoz.tls.certResolver=letsencrypt"
+
+  signoz-otel-collector:
+    image: signoz/signoz-otel-collector:${OTELCOL_TAG:-v0.142.0}
+    <<: *restart
+    command:
+      - "--config=/etc/otel-collector-config.yaml"
+      - "--manager-config=/etc/manager-config.yaml"
+      - "--copy-path=/var/tmp/collector-config.yaml"
+    volumes:
+      - ./signoz/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./signoz/signoz/otel-collector-opamp-config.yaml:/etc/manager-config.yaml
+    environment:
+      - OTEL_RESOURCE_ATTRIBUTES=host.name=signoz-host,os.type=linux
+      - LOW_CARDINAL_EXCEPTION_GROUPING=false
+    depends_on:
+      signoz:
+        condition: service_healthy
+    networks:
+      - internal
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.signoz-otel.loadbalancer.server.port=4318"
+      # OTLP HTTP router for browser traces
+      - "traefik.http.routers.signoz-otel.rule=Host(`otel.postgres.garden`)"
+      - "traefik.http.routers.signoz-otel.entrypoints=websecure"
+      - "traefik.http.routers.signoz-otel.tls.certResolver=letsencrypt"
+      # CORS middleware for browser OTEL SDK
+      - "traefik.http.middlewares.signoz-otel-cors.headers.accesscontrolallowmethods=GET,POST,OPTIONS"
+      - "traefik.http.middlewares.signoz-otel-cors.headers.accesscontrolalloworiginlist=https://postgres.garden,http://localhost:3000"
+      - "traefik.http.middlewares.signoz-otel-cors.headers.accesscontrolallowheaders=content-type,x-requested-with"
+      - "traefik.http.middlewares.signoz-otel-cors.headers.accesscontrolmaxage=3600"
+      - "traefik.http.routers.signoz-otel.middlewares=signoz-otel-cors"
+
+volumes:
+  pgdata:
+  valkeydata:
+  signoz-clickhouse:
+  signoz-sqlite:
+  signoz-zookeeper:
 
 networks:
-  appnet:
+  internal:
+  dokploy-network:
+    external: true
