@@ -471,6 +471,23 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             return status(500, { error: "Failed to create commit" });
           }
 
+          try {
+            const payload = {
+              playground_hash: result.playground_hash,
+              commit_id: result.commit_id,
+            };
+            await sql`
+              select graphile_worker.add_job(
+                'scan_playground_content',
+                ${JSON.stringify(payload)}::jsonb,
+                job_key := ${`scan_playground_content:${result.playground_hash}`},
+                job_key_mode := 'replace'
+              )
+            `.execute(tx);
+          } catch (error) {
+            console.warn("Failed to enqueue content scan job", error);
+          }
+
           return {
             commit_id: result.commit_id,
             playground_hash: result.playground_hash,
@@ -702,6 +719,23 @@ const apiRoutes = new Elysia({ prefix: "/api" })
               return status(500, { error: "Failed to create commit" });
             }
 
+            try {
+              const payload = {
+                playground_hash: result.playground_hash,
+                commit_id: result.commit_id,
+              };
+              await sql`
+                select graphile_worker.add_job(
+                  'scan_playground_content',
+                  ${JSON.stringify(payload)}::jsonb,
+                  job_key := ${`scan_playground_content:${result.playground_hash}`},
+                  job_key_mode := 'replace'
+                )
+              `.execute(tx);
+            } catch (error) {
+              console.warn("Failed to enqueue content scan job", error);
+            }
+
             return {
               commit_id: result.commit_id,
               playground_hash: result.playground_hash,
@@ -730,6 +764,23 @@ const apiRoutes = new Elysia({ prefix: "/api" })
 
           if (!result) {
             return status(500, { error: "Failed to fork playground" });
+          }
+
+          try {
+            const payload = {
+              playground_hash: result.playground_hash,
+              commit_id: result.commit_id,
+            };
+            await sql`
+              select graphile_worker.add_job(
+                'scan_playground_content',
+                ${JSON.stringify(payload)}::jsonb,
+                job_key := ${`scan_playground_content:${result.playground_hash}`},
+                job_key_mode := 'replace'
+              )
+            `.execute(tx);
+          } catch (error) {
+            console.warn("Failed to enqueue content scan job", error);
           }
 
           return {
