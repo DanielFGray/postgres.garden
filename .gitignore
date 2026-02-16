@@ -30,4 +30,4 @@ dist-ssr
 monaco-vscode-api
 vscode-extension-samples
 src/features/notebook/renderer-dist
-src/features/playground/webview-dist
+src/webview-dist

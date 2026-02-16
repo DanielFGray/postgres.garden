@@ -197,9 +197,9 @@ export class PlaygroundBrowserPanel {
 
   private getHtmlForWebview(webview: vscode.Webview): string {
     const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/features/playground/webview-dist/playground-view.js`;
-    const signalsUri = `${baseUri}/src/features/playground/webview-dist/signals.module.js`;
-    const styleUri = `${baseUri}/src/features/playground/webview-dist/postgres-garden.css`;
+    const scriptUri = `${baseUri}/src/webview-dist/playground-view.js`;
+    const signalsUri = `${baseUri}/src/webview-dist/signals.module.js`;
+    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
     const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
 
     const nonce = getNonce();

@@ -55,8 +55,6 @@ export class ERDPanelProvider {
           vscode.Uri.joinPath(
             extensionUri,
             "src",
-            "features",
-            "playground",
             "webview-dist",
           ),
         ],
@@ -141,8 +139,8 @@ export class ERDPanelProvider {
 
    private _getHtmlForWebview(webview: vscode.Webview) {
     const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/features/playground/webview-dist/erd-viewer.js`;
-    const styleUri = `${baseUri}/src/features/playground/webview-dist/postgres-garden.css`;
+    const scriptUri = `${baseUri}/src/webview-dist/erd-viewer.js`;
+    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
 
     const nonce = getNonce();
 
