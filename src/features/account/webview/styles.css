@@ -1,0 +1,201 @@
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Layout */
+.settings-container {
+  display: flex;
+  height: 100vh;
+}
+
+/* Sidebar nav */
+.settings-nav {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background);
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.nav-header {
+  padding: 8px 16px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-sideBarSectionHeader-foreground);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border: none;
+  background: none;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.nav-item-active {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* Content area */
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  max-width: 700px;
+}
+
+/* Section headers */
+.section-header h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+/* Profile fields */
+.profile-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+}
+
+.field-value {
+  padding: 6px 8px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  color: var(--vscode-input-foreground);
+}
+
+.field-readonly {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.8;
+}
+
+.field-empty {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+/* Avatar */
+.avatar-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.avatar-url {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  word-break: break-all;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.badge-user { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.badge-sponsor { background: var(--vscode-charts-purple); color: #fff; }
+.badge-pro { background: var(--vscode-charts-blue); color: #fff; }
+.badge-admin { background: var(--vscode-charts-red); color: #fff; }
+.badge-verified { background: var(--vscode-charts-green); color: #fff; }
+.badge-unverified { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+
+/* Placeholder sections */
+.placeholder-section .section-description {
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 8px;
+}
+
+.placeholder-section .section-coming-soon {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* Loading / error states */
+.section-loading {
+  padding: 16px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.section-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+  border-radius: 2px;
+  color: var(--vscode-errorForeground);
+}
+
+/* Button */
+.button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
