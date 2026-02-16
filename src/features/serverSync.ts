@@ -17,6 +17,19 @@ import { api } from "../api-client";
 import { router } from "./router";
 import { replaceTo } from "../navigation";
 import {
+  deleteLocalCommit,
+  deleteLocalPlayground,
+  getLocalPlayground,
+  getLocalPlaygroundByServerHash,
+  markLocalCommitSynced,
+  saveLocalCommit,
+  saveLocalPlayground,
+  type LocalCommit,
+  type LocalCommitSyncStatus,
+  type LocalPlayground,
+  type LocalPlaygroundSyncStatus,
+} from "./playground/localStore";
+import {
   SERVER_SYNC_COMMIT,
   SERVER_SYNC_REFRESH,
   SERVER_SYNC_REFRESH_HISTORY,
@@ -303,7 +316,7 @@ void getApi()
               return;
             }
 
-            progress.report({ message: `Uploading ${files.length} files...` });
+            progress.report({ message: "Saving locally..." });
 
             // Get the currently active editor file path
             const activeEditor = vscode.window.activeTextEditor;
@@ -321,6 +334,90 @@ void getApi()
             // Format: workspace_YYYYMMDD_HHMMSS_milliseconds
             const now = new Date();
             const playgroundName = `workspace_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}_${now.getMilliseconds()}`;
+
+            const localPlaygroundLookup = currentPlaygroundHash
+              ? await getLocalPlayground(currentPlaygroundHash)
+              : null;
+            const localPlaygroundByServer =
+              !localPlaygroundLookup && currentPlaygroundHash
+                ? await getLocalPlaygroundByServerHash(currentPlaygroundHash)
+                : null;
+            const resolvedLocalPlayground =
+              localPlaygroundLookup ?? localPlaygroundByServer;
+
+            const localPlaygroundHash =
+              resolvedLocalPlayground?.hash ??
+              currentPlaygroundHash ??
+              `local-${crypto.randomUUID()}`;
+
+            const localSyncStatus: LocalPlaygroundSyncStatus = resolvedLocalPlayground
+              ? resolvedLocalPlayground.sync_status === "synced"
+                ? "modified"
+                : resolvedLocalPlayground.sync_status
+              : currentPlaygroundHash
+                ? "modified"
+                : "local_only";
+
+            const localServerHash =
+              resolvedLocalPlayground?.server_hash ??
+              (currentPlaygroundHash && !currentPlaygroundHash.startsWith("local-")
+                ? currentPlaygroundHash
+                : null);
+
+            const localPlayground: LocalPlayground = {
+              hash: localPlaygroundHash,
+              name: resolvedLocalPlayground?.name ?? playgroundName,
+              description: resolvedLocalPlayground?.description ?? "New playground",
+              privacy: resolvedLocalPlayground?.privacy ?? "private",
+              files,
+              created_at: resolvedLocalPlayground?.created_at ?? now.toISOString(),
+              updated_at: now.toISOString(),
+              sync_status: localSyncStatus,
+              server_hash: localServerHash,
+            };
+
+            const localCommitId = `local-${crypto.randomUUID()}`;
+            const localCommit: LocalCommit = {
+              id: localCommitId,
+              playground_hash: localPlaygroundHash,
+              parent_id: currentCommitId,
+              files,
+              message: commitMessage,
+              created_at: now.toISOString(),
+              activeFile,
+              timestamp: now.getTime(),
+              sync_status: "local_only" as LocalCommitSyncStatus,
+            };
+
+            await saveLocalPlayground(localPlayground);
+            await saveLocalCommit(localCommit);
+
+            const localPlaygroundHashChanged =
+              currentPlaygroundHash !== localPlaygroundHash;
+
+            currentCommitId = localCommitId;
+            currentPlaygroundHash = localPlaygroundHash;
+
+            // Update baseline after local save (local-first)
+            baselineFiles.clear();
+            files.forEach((f) => baselineFiles.set(f.path, f.content));
+            changedFiles.clear();
+            updateSCMView();
+            await refreshQuickDiff();
+
+            if (localPlaygroundHashChanged) {
+              router.updateCurrentRoute({
+                type: "playground",
+                params: { playgroundId: localPlaygroundHash },
+                path: `/playgrounds/${localPlaygroundHash}`,
+              });
+
+              replaceTo("playground", {
+                playgroundId: localPlaygroundHash,
+              });
+            }
+
+            progress.report({ message: `Uploading ${files.length} files...` });
 
             // Send to server using Eden Treaty for type safety
             console.log("[ServerSync] Sending commit request:", {
@@ -375,11 +472,16 @@ void getApi()
               throw new SignInRequired();
             }
 
-            const { data: result, error } = await (currentPlaygroundHash &&
+            const serverPlaygroundHash =
+              localServerHash && !localServerHash.startsWith("local-")
+                ? localServerHash
+                : null;
+
+            const { data: result, error } = await (serverPlaygroundHash &&
               isAuthenticated
               ? api("/api/playgrounds/:hash/commits", {
                 method: "POST",
-                params: { hash: currentPlaygroundHash },
+                params: { hash: serverPlaygroundHash },
                 body: {
                   message: commitMessage,
                   files,
@@ -426,9 +528,10 @@ void getApi()
                 return;
               }
 
-              throw new Error(
-                `Failed to commit workspace: ${error.status} ${JSON.stringify(error.value)}`,
+              vscode.window.showWarningMessage(
+                `Saved locally, but failed to sync: ${error.status} ${JSON.stringify(error.value)}`,
               );
+              return;
             }
 
             if (!result) {
@@ -452,6 +555,40 @@ void getApi()
               "[ServerSync] Files committed:",
               files.map((f) => ({ path: f.path, size: f.content.length })),
             );
+
+            const syncTimestamp = new Date().toISOString();
+
+            const syncedCommit: LocalCommit = {
+              id: commitResult.commit_id,
+              playground_hash: commitResult.playground_hash,
+              parent_id: localCommit.parent_id ?? null,
+              files,
+              message: commitMessage,
+              created_at: syncTimestamp,
+              activeFile,
+              timestamp: new Date(syncTimestamp).getTime(),
+              sync_status: "synced" as LocalCommitSyncStatus,
+            };
+
+            const syncedPlayground: LocalPlayground = {
+              ...localPlayground,
+              hash: commitResult.playground_hash,
+              server_hash: commitResult.playground_hash,
+              updated_at: syncTimestamp,
+              sync_status: "synced",
+            };
+
+            await saveLocalCommit(syncedCommit);
+            await saveLocalPlayground(syncedPlayground);
+
+            if (localCommitId !== commitResult.commit_id) {
+              await deleteLocalCommit(localCommitId);
+            }
+            if (localPlaygroundHash !== commitResult.playground_hash) {
+              await deleteLocalPlayground(localPlaygroundHash);
+            } else {
+              await markLocalCommitSynced(commitResult.commit_id);
+            }
 
             // Check if playground hash changed (new playground created)
             const playgroundHashChanged =

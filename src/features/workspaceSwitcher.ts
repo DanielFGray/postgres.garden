@@ -17,6 +17,15 @@ import {
   VSCODE_OPEN,
   WORKBENCH_ACTION_CLOSE_ALL_EDITORS,
 } from "./constants";
+import {
+  getLatestLocalCommit,
+  getLocalCommit,
+  getLocalPlayground,
+  saveLocalCommit,
+  saveLocalPlayground,
+  type LocalCommit,
+  type LocalPlayground,
+} from "./playground/localStore";
 
 /** Schema for base64-encoded shared workspace payloads */
 const SharedWorkspacePayload = S.Struct({
@@ -209,8 +218,23 @@ export async function loadWorkspace(
           activeFile: string | null;
           timestamp: number;
         };
+        let loadedFromLocal = false;
 
         if (commitId) {
+          const localCommit = await getLocalCommit(commitId);
+          if (localCommit) {
+            result = {
+              id: localCommit.id,
+              message: localCommit.message,
+              created_at: localCommit.created_at,
+              playground_hash: localCommit.playground_hash,
+              parent_id: localCommit.parent_id,
+              files: localCommit.files,
+              activeFile: localCommit.activeFile,
+              timestamp: localCommit.timestamp,
+            };
+            loadedFromLocal = true;
+          } else {
           // Loading a specific commit - GET /playgrounds/:hash/commits/:commit_id
           const { data, error } = await api(
             "/api/playgrounds/:hash/commits/:commit_id",
@@ -241,7 +265,22 @@ export async function loadWorkspace(
           }
 
           result = data;
+          }
         } else {
+          const localCommit = await getLatestLocalCommit(playgroundHash);
+          if (localCommit) {
+            result = {
+              id: localCommit.id,
+              message: localCommit.message,
+              created_at: localCommit.created_at,
+              playground_hash: localCommit.playground_hash,
+              parent_id: localCommit.parent_id,
+              files: localCommit.files,
+              activeFile: localCommit.activeFile,
+              timestamp: localCommit.timestamp,
+            };
+            loadedFromLocal = true;
+          } else {
           // Loading a playground's latest commit
           // First, get all commits for this playground - GET /playgrounds/:hash/commits
           const { data: commits, error: commitsError } = await api(
@@ -311,9 +350,68 @@ export async function loadWorkspace(
           }
 
           result = data;
+          }
         }
 
         const data = result;
+        if (!loadedFromLocal) {
+          const createdAt =
+            typeof data.created_at === "string"
+              ? data.created_at
+              : data.created_at.toISOString();
+          const commitTimestamp =
+            typeof data.timestamp === "number"
+              ? data.timestamp
+              : new Date(createdAt).getTime();
+
+          const localCommit: LocalCommit = {
+            id: data.id,
+            playground_hash: data.playground_hash,
+            parent_id: data.parent_id,
+            files: data.files,
+            message: data.message,
+            created_at: createdAt,
+            activeFile: data.activeFile ?? null,
+            timestamp: commitTimestamp,
+            sync_status: "synced",
+          };
+
+          await saveLocalCommit(localCommit);
+
+          const existingPlayground = await getLocalPlayground(playgroundHash);
+          let playgroundName = existingPlayground?.name ?? null;
+          let playgroundDescription = existingPlayground?.description ?? null;
+          let playgroundPrivacy = existingPlayground?.privacy ?? "private";
+          let playgroundCreatedAt = existingPlayground?.created_at ?? createdAt;
+          let playgroundUpdatedAt = existingPlayground?.updated_at ?? createdAt;
+
+          const { data: playgroundData, error: playgroundError } = await api(
+            "/api/playgrounds/:hash",
+            { method: "GET", params: { hash: data.playground_hash } },
+          );
+
+          if (!playgroundError && playgroundData) {
+            playgroundName = playgroundData.name ?? playgroundName;
+            playgroundDescription = playgroundData.description ?? playgroundDescription;
+            playgroundPrivacy = playgroundData.privacy ?? playgroundPrivacy;
+            playgroundCreatedAt = String(playgroundData.created_at ?? playgroundCreatedAt);
+            playgroundUpdatedAt = String(playgroundData.updated_at ?? playgroundUpdatedAt);
+          }
+
+          const localPlayground: LocalPlayground = {
+            hash: data.playground_hash,
+            name: playgroundName,
+            description: playgroundDescription,
+            privacy: playgroundPrivacy,
+            files: data.files,
+            created_at: playgroundCreatedAt,
+            updated_at: playgroundUpdatedAt,
+            sync_status: "synced",
+            server_hash: data.playground_hash,
+          };
+
+          await saveLocalPlayground(localPlayground);
+        }
         const workspace: WorkspaceData = {
           id: data.id,
           name: data.message || `Playground ${playgroundHash}`,
