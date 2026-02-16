@@ -41,6 +41,9 @@ export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS =
   "workbench.action.closeAllEditors";
 
 
+// Network Commands
+export const NETWORK_STATUS_SHOW = "network.showStatus";
+
 // View IDs
 export const DATABASE_EXPLORER = "databaseExplorer";
 export const PLAYGROUND_METADATA = "playground.metadata";

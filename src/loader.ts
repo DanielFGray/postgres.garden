@@ -1,7 +1,13 @@
 import "./telemetry";
 import "./style.css";
+
+// Register service worker for offline support + COI header injection
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  void navigator.serviceWorker.register("/sw.js");
+}
 import "./features/router";
 import "./features/auth";
+import "./features/network";
 import "./features/postgres";
 import "./features/serverSync";
 import "./features/playground/extension";

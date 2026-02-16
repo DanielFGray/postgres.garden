@@ -149,6 +149,17 @@ export async function createProdServer(rootApp: App) {
     set.headers["Cross-Origin-Resource-Policy"] = "cross-origin";
   });
 
+  // Service worker must never be long-cached — browsers need to detect updates
+  const swPath = path.join(DIST_DIR, "sw.js");
+  if (fs.existsSync(swPath)) {
+    app.get("/sw.js", () => new Response(Bun.file(swPath), {
+      headers: {
+        "Content-Type": "application/javascript",
+        "Cache-Control": "no-cache",
+      },
+    }));
+  }
+
   // Serve static assets from dist directory FIRST
   // Static routes must be registered before the catch-all
   app.use(

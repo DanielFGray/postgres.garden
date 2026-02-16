@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { VitePWA } from 'vite-plugin-pwa'
 import importMetaUrlPlugin from '@codingame/esbuild-import-meta-url-plugin'
 import * as fs from 'fs'
 import path from 'path'
@@ -72,7 +73,22 @@ export default defineConfig({
           })
         }
       }
-    }
+    },
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectRegister: false,
+      manifest: false,
+      injectManifest: {
+        // Precache app shell only — JS is runtime-cached (CacheFirst) since it's content-hashed
+        globPatterns: ['**/*.{css,html,ico,svg,woff,woff2}'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
+      devOptions: {
+        enabled: false,
+      },
+    }),
   ],
   esbuild: {
     minifySyntax: false

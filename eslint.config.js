@@ -26,6 +26,7 @@ export default [
       "server/debugServer.ts",
       "server/vendor/**",
       "src/features/erd/**",
+      "src/sw.ts",
     ],
   },
 
