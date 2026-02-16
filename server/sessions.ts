@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { rootDb } from "./db.js";
+import { runRootDb } from "./db.js";
 import { valkey } from "./valkey.js";
 import { env } from "./assertEnv.js";
 
@@ -13,11 +13,13 @@ function sessionKey(id: string) {
 
 export async function createSession(userId: string) {
   // Fetch user data from Postgres (once, at login time)
-  const user = await rootDb
-    .selectFrom("app_public.users")
-    .select(["id", "username", "role", "is_verified"])
-    .where("id", "=", userId)
-    .executeTakeFirstOrThrow();
+  const user = await runRootDb((db) =>
+    db
+      .selectFrom("app_public.users")
+      .select(["id", "username", "role", "is_verified"])
+      .where("id", "=", userId)
+      .executeTakeFirstOrThrow(),
+  );
 
   const id = generateSecureRandomString();
   const secret = generateSecureRandomString();

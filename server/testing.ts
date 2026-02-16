@@ -2,9 +2,8 @@ import { Selectable, sql } from "kysely";
 import { Elysia, t } from "elysia";
 import { cookie } from "@elysiajs/cookie";
 import { edenFetch } from "@elysiajs/eden";
-import pg from "pg";
+import { DatabaseError, runRootDb } from "./db.js";
 import * as S from "effect/Schema";
-import { rootDb } from "./db.js";
 import { valkey } from "./valkey.js";
 import { env } from "./assertEnv.js";
 import { AppPublicUsers, AppPublicOrganizations } from "../generated/db.js";
@@ -34,10 +33,12 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
   })
 
   .get("/clearTestUsers", async () => {
-    await rootDb
-      .deleteFrom("app_public.users")
-      .where("username", "like", "test%")
-      .execute();
+    await runRootDb((db) =>
+      db
+        .deleteFrom("app_public.users")
+        .where("username", "like", "test%")
+        .execute(),
+    );
     // Clear orphaned Valkey sessions (test-only, safe to flush all)
     const keys = await valkey.keys("session:*");
     if (keys.length > 0) await valkey.del(...keys);
@@ -45,10 +46,12 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
   })
 
   .get("/clearTestOrganizations", async () => {
-    await rootDb
-      .deleteFrom("app_public.organizations")
-      .where("slug", "like", "test%")
-      .execute();
+    await runRootDb((db) =>
+      db
+        .deleteFrom("app_public.organizations")
+        .where("slug", "like", "test%")
+        .execute(),
+    );
     return { success: true };
   })
 
@@ -112,15 +115,17 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
       try {
         const {
           rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.really_create_user(
-            username => ${username}::citext,
-            email => ${email}::citext,
-            email_is_verified => false,
-            password => ${password}::text
-          ) u
-          where not (u is null);
-        `.execute(rootDb);
+        } = await runRootDb((db) =>
+          sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.really_create_user(
+              username => ${username}::citext,
+              email => ${email}::citext,
+              email_is_verified => false,
+              password => ${password}::text
+            ) u
+            where not (u is null);
+          `.execute(db),
+        );
 
         if (!user?.id) throw new Error("Registration failed");
 
@@ -132,10 +137,8 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
 
         return redirect(redirectTo || "/");
       } catch (e) {
-        if (e instanceof pg.DatabaseError) {
-          if (e.code === "23505") {
-            throw new Error("Username already exists", { cause: e });
-          }
+        if (e instanceof DatabaseError && e.code === "23505") {
+          throw new Error("Username already exists", { cause: e });
         }
         console.error(e);
         throw new Error("Registration failed", { cause: e });
@@ -159,10 +162,12 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
       try {
         const {
           rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.login(${id}::citext, ${password}) u
-          where not (u is null)
-        `.execute(rootDb);
+        } = await runRootDb((db) =>
+          sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.login(${id}::citext, ${password}) u
+            where not (u is null)
+          `.execute(db),
+        );
 
         if (!user?.id) {
           throw new Error("Invalid credentials");
@@ -256,11 +261,13 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
     "/verifyUser",
     async ({ query }) => {
       const { username = "testuser" } = query;
-      await rootDb
-        .updateTable("app_public.users")
-        .set({ is_verified: true })
-        .where("username", "=", username)
-        .execute();
+      await runRootDb((db) =>
+        db
+          .updateTable("app_public.users")
+          .set({ is_verified: true })
+          .where("username", "=", username)
+          .execute(),
+      );
       return { success: true };
     },
     {
@@ -300,48 +307,53 @@ async function reallyCreateUser({
   const finalEmail = email ?? `${finalUsername}@example.com`;
   const finalName = name ?? finalUsername;
 
-  const user = await rootDb
-    .selectFrom(
-      sql<Selectable<AppPublicUsers>>`app_private.really_create_user(
-        username => ${finalUsername}::citext,
-        email => ${finalEmail},
-        email_is_verified => ${verified ?? false},
-        name => ${finalName},
-        avatar_url => ${avatarUrl ?? null},
-        password => ${password}::text
-      )`.as("u"),
-    )
-    .selectAll()
-    .executeTakeFirstOrThrow();
+  const user = await runRootDb((db) =>
+    db
+      .selectFrom(
+        sql<Selectable<AppPublicUsers>>`app_private.really_create_user(
+          username => ${finalUsername}::citext,
+          email => ${finalEmail},
+          email_is_verified => ${verified ?? false},
+          name => ${finalName},
+          avatar_url => ${avatarUrl ?? null},
+          password => ${password}::text
+        )`.as("u"),
+      )
+      .selectAll()
+      .executeTakeFirstOrThrow(),
+  );
 
   const sessionData = await createSession(user.id);
 
   // Only create testuser_other and orgs if orgs array is provided
   if (orgs && orgs.length > 0) {
-    const otherUser = await rootDb
-      .selectFrom(
-        sql<Selectable<AppPublicUsers>>`app_private.really_create_user(
-          username => 'testuser_other'::citext,
-          email => 'testuser_other@example.com',
-          email_is_verified => true,
-          name => 'testuser_other',
-          avatar_url => null,
-          password => 'DOESNT MATTER'::text
-        )`.as("u"),
-      )
-      .selectAll()
-      .executeTakeFirstOrThrow();
+    const otherUser = await runRootDb((db) =>
+      db
+        .selectFrom(
+          sql<Selectable<AppPublicUsers>>`app_private.really_create_user(
+            username => 'testuser_other'::citext,
+            email => 'testuser_other@example.com',
+            email_is_verified => true,
+            name => 'testuser_other',
+            avatar_url => null,
+            password => 'DOESNT MATTER'::text
+          )`.as("u"),
+        )
+        .selectAll()
+        .executeTakeFirstOrThrow(),
+    );
 
     const otherSession = await createSession(otherUser.id);
 
-    await rootDb.transaction().execute(async (trx) => {
-      async function setSession(sess: typeof sessionData) {
-        await sql`
-          select
-            set_config('role', ${env.DATABASE_VISITOR}, false),
-            set_config('my.session_id', ${sess.id}, true)
-        `.execute(trx);
-      }
+    await runRootDb((db) =>
+      db.transaction().execute(async (trx) => {
+        async function setSession(sess: typeof sessionData) {
+          await sql`
+            select
+              set_config('role', ${env.DATABASE_VISITOR}, false),
+              set_config('my.session_id', ${sess.id}, true)
+          `.execute(trx);
+        }
 
       await setSession(sessionData);
       await Promise.all(
@@ -368,7 +380,8 @@ async function reallyCreateUser({
           },
         ),
       );
-    });
+    }),
+    );
   }
 
   return { user, session: sessionData };
@@ -376,32 +389,36 @@ async function reallyCreateUser({
 
 async function getUserSecrets(username: string) {
   // join user_secrets with users to fetch combined row
-  const result = await rootDb
-    .selectFrom("app_private.user_secrets as us")
-    .innerJoin("app_public.users as u", "us.user_id", "u.id")
-    .selectAll("us")
-    .select(["u.id as user_id", "u.username"])
-    .where("u.username", "=", username)
-    .executeTakeFirst();
+  const result = await runRootDb((db) =>
+    db
+      .selectFrom("app_private.user_secrets as us")
+      .innerJoin("app_public.users as u", "us.user_id", "u.id")
+      .selectAll("us")
+      .select(["u.id as user_id", "u.username"])
+      .where("u.username", "=", username)
+      .executeTakeFirst(),
+  );
   return result;
 }
 
 async function getUserEmailSecrets(email: string) {
-  const result = await rootDb
-    .selectFrom("app_private.user_email_secrets")
-    .selectAll()
-    .where((eb) =>
-      eb(
-        "user_email_id",
-        "=",
-        eb
-          .selectFrom("app_public.user_emails")
-          .where("email", "=", email)
-          .select("id")
-          .orderBy("id", "desc")
-          .limit(1),
-      ),
-    )
-    .executeTakeFirstOrThrow();
+  const result = await runRootDb((db) =>
+    db
+      .selectFrom("app_private.user_email_secrets")
+      .selectAll()
+      .where((eb) =>
+        eb(
+          "user_email_id",
+          "=",
+          eb
+            .selectFrom("app_public.user_emails")
+            .where("email", "=", email)
+            .select("id")
+            .orderBy("id", "desc")
+            .limit(1),
+        ),
+      )
+      .executeTakeFirstOrThrow(),
+  );
   return result;
 }

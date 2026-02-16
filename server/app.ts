@@ -1,4 +1,3 @@
-import * as pg from "pg";
 import { Elysia } from "elysia";
 import { cookie } from "@elysiajs/cookie";
 import { opentelemetry } from "@elysiajs/opentelemetry";
@@ -10,7 +9,12 @@ import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import * as arctic from "arctic";
 import "./assertEnv";
-import { rootDb, withAuthContext, handleDbError } from "./db.js";
+import {
+  runRootDb,
+  runWithAuthContext,
+  handleDbError,
+  DatabaseError,
+} from "./db.js";
 import { env } from "./assertEnv.js";
 import * as S from "effect/Schema";
 import { templateHack } from "lib/index.js";
@@ -93,24 +97,28 @@ const apiRoutes = new Elysia({ prefix: "/api" })
 
       try {
         if (!query.token) {
-          const result = await rootDb
-            .selectNoFrom((eb) =>
-              eb
-                .fn<boolean>("app_public.request_account_deletion", [])
-                .as("request_account_deletion"),
-            )
-            .executeTakeFirst();
+          const result = await runRootDb((db) =>
+            db
+              .selectNoFrom((eb) =>
+                eb
+                  .fn<boolean>("app_public.request_account_deletion", [])
+                  .as("request_account_deletion"),
+              )
+              .executeTakeFirst(),
+          );
           return { success: result?.request_account_deletion === true };
         }
-        const result = await rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.confirm_account_deletion", [
-                eb.val(query.token),
-              ])
-              .as("confirm_account_deletion"),
-          )
-          .executeTakeFirst();
+        const result = await runRootDb((db) =>
+          db
+            .selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.confirm_account_deletion", [
+                  eb.val(query.token),
+                ])
+                .as("confirm_account_deletion"),
+            )
+            .executeTakeFirst(),
+        );
         return { success: result?.confirm_account_deletion === true };
       } catch (e) {
         const { code, error } = handleDbError(e, "Account deletion failed");
@@ -128,15 +136,17 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/forgotPassword",
     async ({ body, status }) => {
       try {
-        await rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<void>("app_public.forgot_password", [
-                sql`${body.email}::citext`,
-              ])
-              .as("forgot_password"),
-          )
-          .executeTakeFirst();
+        await runRootDb((db) =>
+          db
+            .selectNoFrom((eb) =>
+              eb
+                .fn<void>("app_public.forgot_password", [
+                  sql`${body.email}::citext`,
+                ])
+                .as("forgot_password"),
+            )
+            .executeTakeFirst(),
+        );
         return { success: true };
       } catch (e) {
         const { code, error } = handleDbError(
@@ -157,17 +167,19 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/resetPassword",
     async ({ body, status }) => {
       try {
-        const result = await rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_private.reset_password", [
-                sql`${body.userId}::uuid`,
-                eb.val(body.token),
-                eb.val(body.password),
-              ])
-              .as("reset_password"),
-          )
-          .executeTakeFirst();
+        const result = await runRootDb((db) =>
+          db
+            .selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_private.reset_password", [
+                  sql`${body.userId}::uuid`,
+                  eb.val(body.token),
+                  eb.val(body.password),
+                ])
+                .as("reset_password"),
+            )
+            .executeTakeFirst(),
+        );
         return { success: result?.reset_password === true };
       } catch (e) {
         const { code, error } = handleDbError(e, "Failed to reset password");
@@ -188,7 +200,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     ({ body, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return withAuthContext(session.id, async (tx) => {
+      return runWithAuthContext(session.id, async (tx) => {
         try {
           const result = await tx
             .selectNoFrom((eb) =>
@@ -218,16 +230,18 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .post(
     "/verifyEmail",
     async ({ body }) => {
-      const result = await rootDb
-        .selectNoFrom((eb) =>
-          eb
-            .fn<boolean>("app_public.verify_email", [
-              sql`${body.emailId}::uuid`,
-              eb.val(body.token),
-            ])
-            .as("verify_email"),
-        )
-        .executeTakeFirst();
+      const result = await runRootDb((db) =>
+        db
+          .selectNoFrom((eb) =>
+            eb
+              .fn<boolean>("app_public.verify_email", [
+                sql`${body.emailId}::uuid`,
+                eb.val(body.token),
+              ])
+              .as("verify_email"),
+          )
+          .executeTakeFirst(),
+      );
       return { success: result?.verify_email === true };
     },
     {
@@ -243,7 +257,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     ({ body, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return withAuthContext(session.id, async (tx) => {
+      return runWithAuthContext(session.id, async (tx) => {
         try {
           const result = await tx
             .selectFrom((eb) =>
@@ -273,7 +287,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     ({ body, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return withAuthContext(session.id, async (tx) => {
+      return runWithAuthContext(session.id, async (tx) => {
         const result = await tx
           .selectNoFrom((eb) =>
             eb
@@ -292,7 +306,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .get(
     "/user/:username",
     ({ query, session, params }) =>
-      withAuthContext(session?.id, async (tx) => {
+      runWithAuthContext(session?.id, async (tx) => {
         const result = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
@@ -341,7 +355,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .get(
     "/user/:username/playgrounds",
     ({ query, session, params }) =>
-      withAuthContext(session?.id, async (tx) => {
+      runWithAuthContext(session?.id, async (tx) => {
         const playgrounds = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
@@ -398,7 +412,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .get(
     "/playgrounds",
     ({ session, query }) =>
-      withAuthContext(session?.id, async (tx) => {
+      runWithAuthContext(session?.id, async (tx) => {
         const result = await tx
           .selectFrom("app_public.playgrounds as p")
           .innerJoin("app_public.users as u", "p.user_id", "u.id")
@@ -446,7 +460,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     async ({ body, session, user, status }) => {
       if (!session || !user) return status(401, { error: "Unauthorized" });
       try {
-        return await withAuthContext(session?.id, async (tx) => {
+        return await runWithAuthContext(session?.id, async (tx) => {
           // Call the Postgres function to atomically create playground + commit
           const result = await tx
             .selectFrom(
@@ -502,7 +516,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .get(
     "/playgrounds/:hash",
     ({ params, session, status }) =>
-      withAuthContext(session?.id, async (tx) => {
+      runWithAuthContext(session?.id, async (tx) => {
         const result = await tx
           .selectFrom("app_public.playgrounds as p")
           .leftJoin("app_public.users as u", "p.user_id", "u.id")
@@ -562,7 +576,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     async ({ params, body, session, user, status }) => {
       if (!session || !user) return status(401, { error: "Unauthorized" });
       try {
-        return await withAuthContext(session.id, async (tx) => {
+        return await runWithAuthContext(session.id, async (tx) => {
           const result = await tx
             .selectFrom(
               sql<{
@@ -588,7 +602,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           };
         });
       } catch (e) {
-        if (e instanceof pg.DatabaseError && e.code === "23505") {
+        if (e instanceof DatabaseError && e.code === "23505") {
           return status(409, { error: "Fork name already exists" });
         }
         const { code, error } = handleDbError(e, "Failed to fork playground");
@@ -620,7 +634,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         });
       }
 
-      return await withAuthContext(session.id, async (tx) => {
+      return await runWithAuthContext(session.id, async (tx) => {
         let query = tx
           .updateTable("app_public.playgrounds")
           .where("hash", "=", params.hash);
@@ -663,7 +677,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
       if (!session || !user) return status(401, { error: "Unauthorized" });
 
       try {
-        return await withAuthContext(session.id, async (tx) => {
+        return await runWithAuthContext(session.id, async (tx) => {
           const playgroundHash = params.hash;
 
           // Check playground ownership
@@ -766,7 +780,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/playgrounds/:hash/commits",
     async ({ params, session, status }) => {
       try {
-        return await withAuthContext(session?.id, async (tx) => {
+        return await runWithAuthContext(session?.id, async (tx) => {
           const playgroundHash = params.hash;
           const commits = await tx
             .selectFrom("app_public.playground_commits as c")
@@ -803,7 +817,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/playgrounds/:hash/commits/:commit_id",
     async ({ params, session, status }) => {
       try {
-        return await withAuthContext(session?.id, async (tx) => {
+        return await runWithAuthContext(session?.id, async (tx) => {
           const playgroundHash = params.hash;
           const commit = await tx
             .selectFrom("app_public.playground_commits")
@@ -853,7 +867,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/playgrounds/:hash/commits/:commit_id/history",
     async ({ params, query, session, status }) => {
       try {
-        return await withAuthContext(session?.id, async (tx) => {
+        return await runWithAuthContext(session?.id, async (tx) => {
           const playgroundHash = params.hash;
           const limit = query.limit || 50;
 
@@ -940,7 +954,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     "/playgrounds/:hash/commits/:commit_id/diff",
     async ({ params, session, status }) => {
       try {
-        return await withAuthContext(session?.id, async (tx) => {
+        return await runWithAuthContext(session?.id, async (tx) => {
           const playgroundHash = params.hash;
           const commit = await tx
             .selectFrom("app_public.playground_commits")
@@ -1015,7 +1029,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     async ({ params, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return await withAuthContext(session.id, async (tx) => {
+      return await runWithAuthContext(session.id, async (tx) => {
         try {
           await tx
             .insertInto("app_public.playground_stars")
@@ -1023,7 +1037,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             .execute();
           return { starred: true };
         } catch (e) {
-          if (e instanceof pg.DatabaseError && e.code === "23505") {
+          if (e instanceof DatabaseError && e.code === "23505") {
             return { starred: true }; // already starred
           }
           throw e;
@@ -1038,7 +1052,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     async ({ params, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return await withAuthContext(session.id, async (tx) => {
+      return await runWithAuthContext(session.id, async (tx) => {
         await tx
           .deleteFrom("app_public.playground_stars")
           .where("playground_hash", "=", params.hash)
@@ -1054,7 +1068,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
     async ({ params, session, status }) => {
       if (!session) return status(401, { error: "Unauthorized" });
 
-      return await withAuthContext(session.id, async (tx) => {
+      return await runWithAuthContext(session.id, async (tx) => {
         const result = await tx
           .deleteFrom("app_public.playgrounds")
           .where("hash", "=", params.hash)
@@ -1082,15 +1096,17 @@ const authRoutes = new Elysia()
       try {
         const {
           rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.really_create_user(
-            username => ${body.username}::citext,
-            email => ${body.email}::citext,
-            email_is_verified => false,
-            password => ${body.password}::text
-          ) u
-          where not (u is null);
-        `.execute(rootDb);
+        } = await runRootDb((db) =>
+          sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.really_create_user(
+              username => ${body.username}::citext,
+              email => ${body.email}::citext,
+              email_is_verified => false,
+              password => ${body.password}::text
+            ) u
+            where not (u is null);
+          `.execute(db),
+        );
 
         if (!user?.id) {
           return status(400, { error: "Registration failed" });
@@ -1104,7 +1120,7 @@ const authRoutes = new Elysia()
           username: user.username,
         };
       } catch (e) {
-        if (e instanceof pg.DatabaseError && e.code === "23505") {
+        if (e instanceof DatabaseError && e.code === "23505") {
           return status(409, { error: "Username or email already exists" });
         }
         console.error("Registration error:", e);
@@ -1125,10 +1141,12 @@ const authRoutes = new Elysia()
       try {
         const {
           rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.login(${body.id}::citext, ${body.password}) u
-          where not (u is null)
-        `.execute(rootDb);
+        } = await runRootDb((db) =>
+          sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.login(${body.id}::citext, ${body.password}) u
+            where not (u is null)
+          `.execute(db),
+        );
 
         if (!user?.id) {
           return status(401, { error: "Invalid credentials" });
@@ -1377,18 +1395,20 @@ function installOauthProvider({
           code,
         });
         // Use subquery to properly expand the composite type returned by the function
-        const linkedUser = await rootDb
-          .selectFrom(
-            sql<Selectable<AppPublicUsers>>`app_private.link_or_register_user(
-              f_user_id => ${currentUser?.id ?? null},
-              f_service => ${serviceName},
-              f_identifier => ${identifier},
-              f_profile => ${JSON.stringify(profile)},
-              f_auth_details => ${JSON.stringify(tokens)}
-            )`.as("linked_user"),
-          )
-          .selectAll()
-          .executeTakeFirst();
+        const linkedUser = await runRootDb((db) =>
+          db
+            .selectFrom(
+              sql<Selectable<AppPublicUsers>>`app_private.link_or_register_user(
+                f_user_id => ${currentUser?.id ?? null},
+                f_service => ${serviceName},
+                f_identifier => ${identifier},
+                f_profile => ${JSON.stringify(profile)},
+                f_auth_details => ${JSON.stringify(tokens)}
+              )`.as("linked_user"),
+            )
+            .selectAll()
+            .executeTakeFirst(),
+        );
 
         if (!linkedUser || !linkedUser.id) {
           throw new Error("Failed to link or register user");
@@ -1578,16 +1598,18 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
     }
 
     const payload: unknown = JSON.parse(body);
-    await rootDb
-      .selectNoFrom((eb) =>
-        eb
-          .fn("graphile_worker.add_job", [
-            eb.val("sponsor_webhook"),
-            sql`${JSON.stringify(payload)}::json`,
-          ])
-          .as("add_job"),
-      )
-      .executeTakeFirst();
+    await runRootDb((db) =>
+      db
+        .selectNoFrom((eb) =>
+          eb
+            .fn("graphile_worker.add_job", [
+              eb.val("sponsor_webhook"),
+              sql`${JSON.stringify(payload)}::json`,
+            ])
+            .as("add_job"),
+        )
+        .executeTakeFirst(),
+    );
 
     return { ok: true };
   },

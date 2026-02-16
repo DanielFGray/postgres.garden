@@ -1,6 +1,6 @@
 import { Effect, Schedule, pipe, Duration, Schema } from "effect";
-import type * as pg from "pg";
-import { rootPg, authPg } from "./db.js";
+import * as pg from "pg";
+import { env } from "./assertEnv.js";
 import { valkey } from "./valkey.js";
 
 class PostgresNotReady extends Schema.TaggedError<PostgresNotReady>()(
@@ -19,9 +19,25 @@ const retrySchedule = pipe(
   Schedule.compose(Schedule.recurs(20)),
 );
 
-function testPool(pool: pg.Pool, name: string) {
-  return pipe(
-    Effect.tryPromise({
+function testPool(connectionString: string, name: string) {
+  const makePool = Effect.acquireRelease(
+    Effect.sync(
+      () =>
+        new pg.Pool({
+          connectionString,
+          max: 2,
+        }),
+    ),
+    (pool) =>
+      Effect.tryPromise({
+        try: () => pool.end(),
+        catch: () => undefined,
+      }).pipe(Effect.ignore),
+  );
+
+  const queryReady = Effect.gen(function* () {
+    const pool = yield* makePool;
+    return yield* Effect.tryPromise({
       try: async () => {
         const client = await pool.connect();
         try {
@@ -36,7 +52,11 @@ function testPool(pool: pg.Pool, name: string) {
           message: `${name}: ${err.message ?? String(e)}`,
         });
       },
-    }),
+    });
+  });
+
+  return pipe(
+    Effect.scoped(queryReady),
     Effect.retry(retrySchedule),
     Effect.catchTag("PostgresNotReady", (e) =>
       Effect.die(new Error(`Postgres not ready after retries: ${e.message}`)),
@@ -45,9 +65,15 @@ function testPool(pool: pg.Pool, name: string) {
 }
 
 const waitForPostgres = pipe(
-  Effect.all([testPool(rootPg, "rootPg"), testPool(authPg, "authPg")], {
+  Effect.all(
+    [
+      testPool(env.DATABASE_URL, "rootPg"),
+      testPool(env.AUTH_DATABASE_URL, "authPg"),
+    ],
+    {
     concurrency: "unbounded",
-  }),
+    },
+  ),
   Effect.tap(() => Effect.log("Postgres is ready")),
 );
 

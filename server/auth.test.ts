@@ -7,7 +7,7 @@ import { describe, it, expect } from "bun:test";
 import { treaty } from "@elysiajs/eden";
 import { app as baseApp } from "./app";
 import { testingServer } from "./testing";
-import { rootDb } from "./db";
+import { runRootDb } from "./db";
 import { valkey } from "./valkey";
 
 // Mount testing commands on the app
@@ -28,10 +28,12 @@ const generateStr = (length: number) =>
 
 // Helper to clean up a specific user
 const cleanupUser = async (username: string) => {
-  await rootDb
-    .deleteFrom("app_public.users")
-    .where("username", "=", username)
-    .execute();
+  await runRootDb((db) =>
+    db
+      .deleteFrom("app_public.users")
+      .where("username", "=", username)
+      .execute(),
+  );
 };
 
 describe("Session Validation", () => {
@@ -207,13 +209,15 @@ describe("Testing Command Endpoints", () => {
     await cleanupUser(username);
 
     // Create a test user with the test% prefix
-    await rootDb
-      .insertInto("app_public.users")
-      .values({
-        username,
-        is_verified: true,
-      })
-      .execute();
+    await runRootDb((db) =>
+      db
+        .insertInto("app_public.users")
+        .values({
+          username,
+          is_verified: true,
+        })
+        .execute(),
+    );
 
     const { data, status } = await client.api.testingCommand.clearTestUsers.get();
 
@@ -221,11 +225,13 @@ describe("Testing Command Endpoints", () => {
     expect(data).toHaveProperty("success", true);
 
     // Verify user was deleted
-    const user = await rootDb
-      .selectFrom("app_public.users")
-      .where("username", "=", username)
-      .selectAll()
-      .executeTakeFirst();
+    const user = await runRootDb((db) =>
+      db
+        .selectFrom("app_public.users")
+        .where("username", "=", username)
+        .selectAll()
+        .executeTakeFirst(),
+    );
 
     expect(user).toBeUndefined();
   });
@@ -294,11 +300,13 @@ describe("Testing Command Endpoints", () => {
       expect(data).toHaveProperty("success", true);
 
       // Verify it worked in DB
-      const user = await rootDb
-        .selectFrom("app_public.users")
-        .where("username", "=", username)
-        .select("is_verified")
-        .executeTakeFirst();
+      const user = await runRootDb((db) =>
+        db
+          .selectFrom("app_public.users")
+          .where("username", "=", username)
+          .select("is_verified")
+          .executeTakeFirst(),
+      );
 
       expect(user?.is_verified).toBe(true);
     } finally {
