@@ -193,6 +193,7 @@ export async function loadWorkspace(
   options: LoadWorkspaceOptions,
 ): Promise<void> {
   const { playgroundHash, commitId, updateUrl = false } = options;
+  const currentUserId = window.__INITIAL_DATA__?.user?.id ?? null;
 
   try {
     await vscode.window.withProgress(
@@ -221,6 +222,7 @@ export async function loadWorkspace(
           const cachedCommit = await getCachedPlaygroundCommit({
             playgroundHash,
             commitId,
+            userId: currentUserId,
           });
           if (!cachedCommit) {
             vscode.window.showWarningMessage(
@@ -348,6 +350,7 @@ export async function loadWorkspace(
           playgroundHash,
           commit: commitForCache,
           isLatest: !commitId,
+          userId: currentUserId,
         });
         const workspace: WorkspaceData = {
           id: data.id,
@@ -594,6 +597,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
 
   // Use the new route-aware data structure
   const { route, commit } = initialData;
+  const currentUserId = initialData.user?.id ?? null;
   const isOffline = getNetworkState() === "offline";
   const routePlaygroundId = route?.params?.playgroundId ?? null;
   let commitToLoad = commit;
@@ -602,6 +606,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
     const cachedCommit = await getCachedPlaygroundCommit({
       playgroundHash: routePlaygroundId,
       commitId: route?.params?.commitId,
+      userId: currentUserId,
     });
     if (cachedCommit) {
       commitToLoad = cachedCommit;
@@ -738,6 +743,7 @@ export async function loadWorkspaceFromInitialData(): Promise<void> {
       playgroundHash: routePlaygroundId ?? commitToLoad.playground_hash,
       commit: commitToLoad,
       isLatest: route.type === "playground",
+      userId: currentUserId,
     });
   } catch (err) {
     console.error("[WorkspaceSwitcher] Failed to restore workspace:", err);

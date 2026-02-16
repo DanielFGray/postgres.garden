@@ -2,11 +2,12 @@ import * as S from "effect/Schema";
 import { parseRoute } from "../routes";
 import { api } from "../api-client";
 import { onDidChangeNetworkState } from "./network";
+import { clearPlaygroundCache } from "./playground/localStore";
+import { emitInitialDataUpdate } from "./initialDataEvents";
 
 const CACHE_DB_NAME = "pg-garden-initial-data";
 const CACHE_STORE_NAME = "initial-data";
 const CACHE_KEY = "cached_initial_data";
-const INITIAL_DATA_EVENT = "pg-initial-data-updated";
 
 const InitialDataUserSchema = S.Struct({
   id: S.String,
@@ -44,6 +45,7 @@ const InitialDataSchema = S.Struct({
 
 const CachedInitialDataSchema = S.Struct({
   cachedAt: S.Number,
+  userId: S.NullishOr(S.String),
   value: InitialDataSchema,
 });
 
@@ -155,7 +157,9 @@ function openCacheDb(): Promise<IDBDatabase> {
   });
 }
 
-async function readCachedInitialData(): Promise<InitialData | null> {
+async function readCachedInitialData(
+  currentUserId: string | null,
+): Promise<InitialData | null> {
   if (typeof indexedDB === "undefined") return null;
 
   try {
@@ -167,9 +171,16 @@ async function readCachedInitialData(): Promise<InitialData | null> {
       request.onsuccess = () => {
         const result: unknown = request.result;
         db.close();
-        resolve(
-          isCachedInitialData(result) ? normalizeInitialData(result.value) : null,
-        );
+        if (!isCachedInitialData(result)) {
+          resolve(null);
+          return;
+        }
+        const cachedUserId = result.userId ?? null;
+        if (currentUserId && cachedUserId !== currentUserId) {
+          resolve(null);
+          return;
+        }
+        resolve(normalizeInitialData(result.value));
       };
       request.onerror = () => {
         console.warn("[InitialDataCache] Failed to read cache:", request.error);
@@ -200,10 +211,37 @@ async function writeCachedInitialData(initialData: InitialData): Promise<void> {
         resolve();
       };
       const store = tx.objectStore(CACHE_STORE_NAME);
-      store.put({ cachedAt: Date.now(), value: initialData }, CACHE_KEY);
+      store.put(
+        { cachedAt: Date.now(), userId: initialData.user?.id ?? null, value: initialData },
+        CACHE_KEY,
+      );
     });
   } catch (err) {
     console.warn("[InitialDataCache] Failed to open cache for write:", err);
+  }
+}
+
+async function clearInitialDataCache(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+
+  try {
+    const db = await openCacheDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(CACHE_STORE_NAME, "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        console.warn("[InitialDataCache] Failed to clear cache:", tx.error);
+        db.close();
+        resolve();
+      };
+      const store = tx.objectStore(CACHE_STORE_NAME);
+      store.delete(CACHE_KEY);
+    });
+  } catch (err) {
+    console.warn("[InitialDataCache] Failed to open cache for clear:", err);
   }
 }
 
@@ -284,14 +322,10 @@ function mergeInitialData(
   };
 }
 
-function dispatchInitialDataUpdate(user: InitialDataUser | null): void {
-  window.dispatchEvent(
-    new CustomEvent(INITIAL_DATA_EVENT, { detail: { user } }),
-  );
-}
 
 async function hydrateInitialData(): Promise<void> {
-  const cached = await readCachedInitialData();
+  const currentUserId = window.__INITIAL_DATA__?.user?.id ?? null;
+  const cached = await readCachedInitialData(currentUserId);
   const current = window.__INITIAL_DATA__ ?? null;
   const routeFromUrl = buildRouteFromUrl();
   const merged = mergeInitialData(current, cached, routeFromUrl);
@@ -336,6 +370,16 @@ async function revalidateSession(): Promise<void> {
       isMeResponse(meResponse) ? meResponse.user ?? null : null,
     );
     const prevUser = window.__INITIAL_DATA__?.user ?? null;
+    const prevUserId = prevUser?.id ?? null;
+    const nextUserId = nextUser?.id ?? null;
+    const userChanged =
+      prevUserId !== null && nextUserId !== null && prevUserId !== nextUserId;
+    const signedOut = prevUserId !== null && nextUserId === null;
+
+    if (userChanged || signedOut) {
+      await clearInitialDataCache();
+      await clearPlaygroundCache();
+    }
 
     const current = window.__INITIAL_DATA__ ?? {
       user: null,
@@ -349,7 +393,7 @@ async function revalidateSession(): Promise<void> {
     };
 
     await writeCachedInitialData(window.__INITIAL_DATA__);
-    dispatchInitialDataUpdate(nextUser);
+    emitInitialDataUpdate({ user: nextUser });
 
     if (prevUser && !nextUser) {
       await showReauthNeeded();

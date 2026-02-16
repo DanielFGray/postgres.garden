@@ -16,6 +16,7 @@ const CommitSchema = S.Struct({
 
 const CachedCommitSchema = S.Struct({
   key: S.String,
+  userId: S.NullishOr(S.String),
   playgroundHash: S.String,
   commitId: S.String,
   cachedAt: S.Number,
@@ -48,7 +49,10 @@ function buildLatestKey(playgroundHash: string): string {
   return `playground:${playgroundHash}:latest`;
 }
 
-async function readCachedCommit(key: string): Promise<InitialDataCommit | null> {
+async function readCachedCommit(
+  key: string,
+  userId: string | null,
+): Promise<InitialDataCommit | null> {
   if (typeof indexedDB === "undefined") return null;
 
   try {
@@ -61,6 +65,11 @@ async function readCachedCommit(key: string): Promise<InitialDataCommit | null> 
         const result: unknown = request.result;
         db.close();
         if (!isCachedCommit(result)) {
+          resolve(null);
+          return;
+        }
+        const cachedUserId = result.userId ?? null;
+        if (cachedUserId !== userId) {
           resolve(null);
           return;
         }
@@ -87,6 +96,7 @@ async function writeCachedCommit(
   key: string,
   playgroundHash: string,
   commit: InitialDataCommit,
+  userId: string | null,
 ): Promise<void> {
   if (typeof indexedDB === "undefined") return;
 
@@ -106,6 +116,7 @@ async function writeCachedCommit(
       const store = tx.objectStore(CACHE_STORE_NAME);
       store.put({
         key,
+        userId,
         playgroundHash,
         commitId: commit.id,
         cachedAt: Date.now(),
@@ -121,24 +132,60 @@ export async function cachePlaygroundCommit(options: {
   playgroundHash: string;
   commit: InitialDataCommit;
   isLatest: boolean;
+  userId: string | null;
 }): Promise<void> {
-  const { playgroundHash, commit, isLatest } = options;
+  const { playgroundHash, commit, isLatest, userId } = options;
 
-  await writeCachedCommit(buildCommitKey(commit.id), playgroundHash, commit);
+  await writeCachedCommit(
+    buildCommitKey(commit.id),
+    playgroundHash,
+    commit,
+    userId,
+  );
   if (isLatest) {
-    await writeCachedCommit(buildLatestKey(playgroundHash), playgroundHash, commit);
+    await writeCachedCommit(
+      buildLatestKey(playgroundHash),
+      playgroundHash,
+      commit,
+      userId,
+    );
   }
 }
 
 export async function getCachedPlaygroundCommit(options: {
   playgroundHash: string;
   commitId?: string;
+  userId: string | null;
 }): Promise<InitialDataCommit | null> {
-  const { playgroundHash, commitId } = options;
+  const { playgroundHash, commitId, userId } = options;
 
   if (commitId) {
-    return await readCachedCommit(buildCommitKey(commitId));
+    return await readCachedCommit(buildCommitKey(commitId), userId);
   }
 
-  return await readCachedCommit(buildLatestKey(playgroundHash));
+  return await readCachedCommit(buildLatestKey(playgroundHash), userId);
+}
+
+export async function clearPlaygroundCache(): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+
+  try {
+    const db = await openCacheDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(CACHE_STORE_NAME, "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        console.warn("[PlaygroundCache] Failed to clear cache:", tx.error);
+        db.close();
+        resolve();
+      };
+      const store = tx.objectStore(CACHE_STORE_NAME);
+      store.clear();
+    });
+  } catch (err) {
+    console.warn("[PlaygroundCache] Failed to open cache for clear:", err);
+  }
 }

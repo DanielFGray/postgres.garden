@@ -17,6 +17,7 @@ import {
   ACCOUNT_SETTINGS_OPEN,
 } from "./constants";
 import { AccountSettingsPanelProvider } from "./account/AccountSettingsPanelProvider";
+import { onInitialDataUpdate } from "./initialDataEvents";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
 const AuthMessage = S.Struct({
@@ -25,15 +26,6 @@ const AuthMessage = S.Struct({
 });
 const isAuthMessage = S.is(AuthMessage);
 
-const InitialDataUserSchema = S.Struct({
-  id: S.String,
-  username: S.String,
-  role: S.NullishOr(S.String),
-});
-const InitialDataUpdateSchema = S.Struct({
-  user: S.NullishOr(InitialDataUserSchema),
-});
-const isInitialDataUpdate = S.is(InitialDataUpdateSchema);
 
 /**
  * GitHub authentication session
@@ -466,18 +458,8 @@ void getApi().then((vsapi) => {
     }
   });
 
-  window.addEventListener("pg-initial-data-updated", (event) => {
-    if (!(event instanceof CustomEvent)) return;
-    const detail: unknown = event.detail;
-    if (!isInitialDataUpdate(detail)) return;
-    const normalizedUser: InitialDataUser | null = detail.user
-      ? {
-          id: detail.user.id,
-          username: detail.user.username,
-          role: detail.user.role ?? undefined,
-        }
-      : null;
-    provider.syncFromInitialData(normalizedUser);
+  onInitialDataUpdate((update) => {
+    provider.syncFromInitialData(update.user);
   });
 
   // Initial status bar update
