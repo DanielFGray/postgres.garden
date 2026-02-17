@@ -20,6 +20,7 @@ import { SQLSerializer } from "./notebook/sql.js";
 import { MarkdownSerializer } from "./notebook/markdown.js";
 import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
 import { ERDPanelProvider } from "./erd/ERDPanelProvider.js";
+import { updateSchema } from "./lsp.js";
 
 // Module-level subscriptions for HMR support
 const subscriptions: vscode.Disposable[] = [];
@@ -411,10 +412,15 @@ void getApi().then(async (vscode) => {
     treeDataProvider: dbExplorer,
   });
   subscriptions.push(dbTreeView);
-  const [refreshIntrospection] = throttle(dbExplorer.refresh, 50);
+  const [refreshIntrospection] = throttle(async () => {
+    await dbExplorer.refresh();
+    if (dbExplorer.introspection) {
+      updateSchema(dbExplorer.introspection);
+    }
+  }, 50);
   subscriptions.push(
     vscode.commands.registerCommand(PGLITE_INTROSPECT, () => {
-      refreshIntrospection();
+      void refreshIntrospection();
       dbTreeView.reveal(undefined, { expand: true });
       ERDPanelProvider.refresh();
     }),

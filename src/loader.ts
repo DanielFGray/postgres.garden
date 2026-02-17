@@ -11,6 +11,7 @@ import "./features/network";
 import "./features/postgres";
 import "./features/serverSync";
 import "./features/playground/extension";
+import "./features/lsp";
 import "@codingame/monaco-vscode-configuration-editing-default-extension";
 import "@codingame/monaco-vscode-ipynb-default-extension";
 import "@codingame/monaco-vscode-json-default-extension";
@@ -85,4 +86,4 @@ if (locale != null) {
 
 await setupWorkbench();
 
-export { };
+export {};

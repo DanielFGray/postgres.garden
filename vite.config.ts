@@ -109,7 +109,7 @@ export default defineConfig({
       "@vscode/vscode-languagedetection",
       "marked",
     ],
-    exclude: ["@electric-sql/pglite"],
+    exclude: ["@electric-sql/pglite", "@postgres-language-server/wasm"],
     esbuildOptions: {
       tsconfig: './tsconfig.json',
       plugins: [importMetaUrlPlugin]

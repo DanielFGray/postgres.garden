@@ -30,6 +30,8 @@
         "@codingame/monaco-vscode-docker-default-extension": "^26.1.2",
         "@codingame/monaco-vscode-edit-sessions-service-override": "^26.1.2",
         "@codingame/monaco-vscode-editor-service-override": "^26.1.2",
+        "@codingame/monaco-vscode-emmet-default-extension": "^26.1.2",
+        "@codingame/monaco-vscode-emmet-service-override": "^26.1.2",
         "@codingame/monaco-vscode-environment-service-override": "^26.1.2",
         "@codingame/monaco-vscode-explorer-service-override": "^26.1.2",
         "@codingame/monaco-vscode-extension-editing-default-extension": "^26.1.2",
@@ -219,6 +221,7 @@
         "urlpattern-polyfill": "^10.1.0",
         "vite-plugin-pwa": "^1.2.0",
         "vscode": "npm:@codingame/monaco-vscode-extension-api@^26.1.2",
+        "vscode-languageclient": "^9.0.1",
         "vscode-notebook-error-overlay": "^1.1.0",
         "vue": "^3.5.28",
         "vue-clipboard3": "^2.0.0",
@@ -585,6 +588,8 @@
     "@codingame/monaco-vscode-editor-service-override": ["@codingame/monaco-vscode-editor-service-override@26.1.2", "", { "dependencies": { "@codingame/monaco-vscode-api": "26.1.2" } }, "sha512-oq8Yl6uAhDn2EawvhFiqlvAoI6an6s4QyQ0h5jvKsCs/8I5X6BtwQy9hnfKlsSpDoGwQR+TSgSQLtaXIqe/TBQ=="],
 
     "@codingame/monaco-vscode-emmet-default-extension": ["@codingame/monaco-vscode-emmet-default-extension@26.1.2", "", { "dependencies": { "@codingame/monaco-vscode-api": "26.1.2" } }, "sha512-k5w+ZQZH7fyKRXWiRvKg7LKcfPS46zIj/H+zb4Ka7TugnEHVcLP2+y+wnV8yufLNrHwn43EUSue24Xi8/cUh7Q=="],
+
+    "@codingame/monaco-vscode-emmet-service-override": ["@codingame/monaco-vscode-emmet-service-override@26.1.2", "", { "dependencies": { "@codingame/monaco-vscode-api": "26.1.2" } }, "sha512-Ta2LWplOBEytLiSj6basnuU3R7XMU0V8AE+NAmUitPwc9yvEbvXI7Dk614KJxShIV2oUG0YoWNmFd6QZ9C9H1w=="],
 
     "@codingame/monaco-vscode-environment-service-override": ["@codingame/monaco-vscode-environment-service-override@26.1.2", "", { "dependencies": { "@codingame/monaco-vscode-api": "26.1.2" } }, "sha512-9ghA47uuPOyjonYOHV8N3fR838pEsyshr6j98FKQYmRKBIY9iluUSN2Afzi2hXXh0cotimHZE390spKjnc4ZmA=="],
 
@@ -3022,6 +3027,8 @@
 
     "vscode-jsonrpc": ["vscode-jsonrpc@8.2.0", "", {}, "sha512-C+r0eKJUIfiDIfwJhria30+TYWPtuHJXHtI7J0YlOmKAo7ogxP20T0zxB7HZQIFhIyvoBPwWskjxrvAtfjyZfA=="],
 
+    "vscode-languageclient": ["vscode-languageclient@9.0.1", "", { "dependencies": { "minimatch": "^5.1.0", "semver": "^7.3.7", "vscode-languageserver-protocol": "3.17.5" } }, "sha512-JZiimVdvimEuHh5olxhxkht09m3JzUGwggb5eRUkzzJhZ2KjCN0nh55VfiED9oez9DyF8/fz1g1iBV3h+0Z2EA=="],
+
     "vscode-languageserver": ["vscode-languageserver@9.0.1", "", { "dependencies": { "vscode-languageserver-protocol": "3.17.5" }, "bin": { "installServerIntoExtension": "bin/installServerIntoExtension" } }, "sha512-woByF3PDpkHFUreUa7Hos7+pUWdeWMXRd26+ZX2A8cFx6v/JPTtd4/uN0/jB6XQHYaOlHbio03NTHCqrgG5n7g=="],
 
     "vscode-languageserver-protocol": ["vscode-languageserver-protocol@3.17.5", "", { "dependencies": { "vscode-jsonrpc": "8.2.0", "vscode-languageserver-types": "3.17.5" } }, "sha512-mb1bvRJN8SVznADSGWM9u/b07H7Ecg0I3OgXDuLdn307rl/J3A9YD6/eYOssqhecL27hK1IPZAsaqh00i/Jljg=="],
@@ -3526,6 +3533,8 @@
 
     "vite-plugin-pwa/pretty-bytes": ["pretty-bytes@6.1.1", "", {}, "sha512-mQUvGU6aUFQ+rNvTIAcZuWGRT9a6f6Yrg9bHs4ImKF+HZCEK+plBvnAZYSIQztknZF2qnzNtr6F8s0+IuptdlQ=="],
 
+    "vscode-languageclient/minimatch": ["minimatch@5.1.6", "", { "dependencies": { "brace-expansion": "^2.0.1" } }, "sha512-lKwV/1brpG6mBUFHtb7NUmtABCb2WZZmm2wNiOA5hAb8VdCS4B3dtMWyvcoViccwAW/COERjXLt0zP1zXUN26g=="],
+
     "vscode-notebook-error-overlay/preact": ["preact@10.27.2", "", {}, "sha512-5SYSgFKSyhCbk6SrXyMpqjb5+MQBgfvEKE/OC+PujcY34sOpqtr+0AZQtPYx5IA6VxynQ7rUPCtKzyovpj9Bpg=="],
 
     "web-resource-inliner/htmlparser2": ["htmlparser2@5.0.1", "", { "dependencies": { "domelementtype": "^2.0.1", "domhandler": "^3.3.0", "domutils": "^2.4.2", "entities": "^2.0.0" } }, "sha512-vKZZra6CSe9qsJzh0BjBGXo8dvzNsq/oGvsjfRdOrrryfeD9UOBEEQdeoqCRmKZchF5h2zOBMQ6YuQ0uRUmdbQ=="],
@@ -3719,6 +3728,8 @@
     "shelljs/glob/minimatch": ["minimatch@3.1.2", "", { "dependencies": { "brace-expansion": "^1.1.7" } }, "sha512-J7p63hRiAjw1NDEww1W7i37+ByIrOWO5XQQAzZ3VOcL0PNybwpfmV/N05zFAzwQ9USyEcX6t3UO+K5aqBQOIHw=="],
 
     "slice-ansi/ansi-styles/color-convert": ["color-convert@2.0.1", "", { "dependencies": { "color-name": "~1.1.4" } }, "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ=="],
+
+    "vscode-languageclient/minimatch/brace-expansion": ["brace-expansion@2.0.2", "", { "dependencies": { "balanced-match": "^1.0.0" } }, "sha512-Jt0vHyM+jmUBqojB7E1NIYadt0vI0Qxjxd2TErW94wDz+E2LAm5vKMXXwg6ZZBTHPuUlDgQHKXvjGBdfcF1ZDQ=="],
 
     "web-resource-inliner/htmlparser2/domhandler": ["domhandler@3.3.0", "", { "dependencies": { "domelementtype": "^2.0.1" } }, "sha512-J1C5rIANUbuYK+FuFL98650rihynUOEzRLxW+90bKZRWB6A1X1Tf82GxR1qAWLyfNPRvjqfip3Q5tdYlmAa9lA=="],
 
