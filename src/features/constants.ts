@@ -27,6 +27,9 @@ export const SERVER_SYNC_REFRESH_FORK_HISTORY = "server-sync.refreshForkHistory"
 // ERD Commands
 export const ERD_SHOW = "pg-playground.erdShow";
 
+// Workspace Commands
+export const WORKSPACE_DOWNLOAD = "pg-playground.downloadWorkspace";
+
 // Playground Commands
 export const PLAYGROUND_SHOW_BROWSER = "playground.showBrowser";
 export const PLAYGROUND_OPEN = "playground.open";

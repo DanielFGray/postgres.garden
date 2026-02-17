@@ -14,6 +14,7 @@ import {
   LATEST_POSTS,
   ERD_SHOW,
   SERVER_SYNC_COMMIT,
+  WORKSPACE_DOWNLOAD,
 } from "./constants.js";
 import { SQLNotebookExecutionController } from "./notebook/controller.js";
 import { SQLSerializer } from "./notebook/sql.js";
@@ -21,6 +22,7 @@ import { MarkdownSerializer } from "./notebook/markdown.js";
 import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
 import { ERDPanelProvider } from "./erd/ERDPanelProvider.js";
 import { updateSchema } from "./lsp.js";
+import { getCurrentPlaygroundId } from "../routes.js";
 
 // Module-level subscriptions for HMR support
 const subscriptions: vscode.Disposable[] = [];
@@ -175,6 +177,11 @@ const { getApi, registerFileUrl } = registerExtension(
           title: "Show ERD",
           icon: "$(type-hierarchy)",
         },
+        {
+          command: WORKSPACE_DOWNLOAD,
+          title: "Download workspace",
+          icon: "$(desktop-download)",
+        },
       ],
       menus: {
         commandPalette: [
@@ -200,6 +207,7 @@ const { getApi, registerFileUrl } = registerExtension(
           { command: DATABASE_MIGRATE, group: "1_run" },
           { command: SERVER_SYNC_COMMIT, group: "1_run" },
           { command: ERD_SHOW, group: "1_run" },
+          { command: WORKSPACE_DOWNLOAD, group: "1_run" },
           { command: PGLITE_RESET, group: "5_close" },
         ],
         "notebook/cell/execute": [
@@ -424,6 +432,41 @@ void getApi().then(async (vscode) => {
       dbTreeView.reveal(undefined, { expand: true });
       ERDPanelProvider.refresh();
     }),
+  );
+
+  // Download workspace as zip
+  subscriptions.push(
+    vscode.commands.registerCommand(
+      WORKSPACE_DOWNLOAD,
+      async function downloadWorkspace() {
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        if (!folder) return;
+
+        const uris = await findFiles(folder.uri);
+        if (uris.length === 0) {
+          void vscode.window.showInformationMessage("No files to download.");
+          return;
+        }
+
+        const entries = await Promise.all(
+          uris.map(async (uri) => {
+            const content = await vscode.workspace.fs.readFile(uri);
+            const relativePath = uri.path.replace(/^\/workspace\//, "");
+            return { name: relativePath, input: content };
+          }),
+        );
+
+        const { downloadZip } = await import("client-zip");
+        const blob = await downloadZip(entries).blob();
+        const name = getCurrentPlaygroundId() ?? "workspace";
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${name}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+    ),
   );
 
   // ERD panel
