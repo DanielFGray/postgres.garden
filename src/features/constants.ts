@@ -47,9 +47,6 @@ export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS =
 // Account Commands
 export const ACCOUNT_SETTINGS_OPEN = "account.openSettings";
 
-// Network Commands
-export const NETWORK_STATUS_SHOW = "network.showStatus";
-
 // View IDs
 export const DATABASE_EXPLORER = "databaseExplorer";
 export const PLAYGROUND_METADATA = "playground.metadata";
