@@ -59,7 +59,7 @@ import getOutlineServiceOverride from "@codingame/monaco-vscode-outline-service-
 import getTimelineServiceOverride from "@codingame/monaco-vscode-timeline-service-override";
 import getCommentsServiceOverride from "@codingame/monaco-vscode-comments-service-override";
 import getEditSessionsServiceOverride from "@codingame/monaco-vscode-edit-sessions-service-override";
-import getEmmetServiceOverride from "@codingame/monaco-vscode-emmet-service-override";
+// import getEmmetServiceOverride from "@codingame/monaco-vscode-emmet-service-override";
 import getInteractiveServiceOverride from "@codingame/monaco-vscode-interactive-service-override";
 import getIssueServiceOverride from "@codingame/monaco-vscode-issue-service-override";
 import getMultiDiffEditorServiceOverride from "@codingame/monaco-vscode-multi-diff-editor-service-override";
@@ -287,7 +287,7 @@ export const commonServices: IEditorOverrideServices = {
   ...getTaskServiceOverride(),
   ...getCommentsServiceOverride(),
   ...getEditSessionsServiceOverride(),
-  ...getEmmetServiceOverride(),
+  // ...getEmmetServiceOverride(),
   ...getInteractiveServiceOverride(),
   ...getIssueServiceOverride(),
   ...getMultiDiffEditorServiceOverride(),
