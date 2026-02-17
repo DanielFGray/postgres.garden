@@ -33,11 +33,13 @@ services:
       - "traefik.http.routers.postgres-garden.rule=Host(`postgres.garden`)"
       - "traefik.http.routers.postgres-garden.entrypoints=websecure"
       - "traefik.http.routers.postgres-garden.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden.service=postgres-garden"
       - "traefik.http.routers.postgres-garden.middlewares=postgres-garden-headers"
       # API router: /api, /auth, /webhooks (rate limited)
       - "traefik.http.routers.postgres-garden-api.rule=Host(`postgres.garden`) && (PathPrefix(`/api`) || PathPrefix(`/auth`) || PathPrefix(`/webhooks`))"
       - "traefik.http.routers.postgres-garden-api.entrypoints=websecure"
       - "traefik.http.routers.postgres-garden-api.tls.certResolver=letsencrypt"
+      - "traefik.http.routers.postgres-garden-api.service=postgres-garden"
       - "traefik.http.routers.postgres-garden-api.middlewares=postgres-garden-ratelimit,postgres-garden-headers"
 
   worker:
