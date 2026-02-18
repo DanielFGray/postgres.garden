@@ -33,7 +33,10 @@ jobs:
     steps:
       - name: Trigger Dokploy deploy
         run: |
-          status=$(curl -s -L -o /dev/null -w "%{http_code}" \
-            -X POST "${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}")
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -H "x-github-event: push" \
+            -d '{"ref":"refs/heads/main"}')
           echo "Webhook responded: $status"
           [ "$status" -ge 200 ] && [ "$status" -lt 300 ]
