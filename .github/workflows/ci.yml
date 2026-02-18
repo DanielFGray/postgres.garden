@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun typecheck
+
+      - name: Lint
+        run: bun lint
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Dokploy deploy
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}")
+          echo "Webhook responded: $status"
+          [ "$status" -ge 200 ] && [ "$status" -lt 300 ]
