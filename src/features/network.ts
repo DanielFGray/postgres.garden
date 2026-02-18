@@ -25,8 +25,7 @@ function setState(next: NetworkState) {
 
 // --- Extension registration ---
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "network-status",
     publisher: "postgres.garden",
@@ -37,7 +36,7 @@ const { getApi } = registerExtension(
   ExtensionHostKind.LocalProcess,
 );
 
-void getApi().then(() => {
+void ext.getApi().then(() => {
   window.addEventListener("online", () => setState("online"));
   window.addEventListener("offline", () => setState("offline"));
 });

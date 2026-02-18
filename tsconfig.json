@@ -23,11 +23,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "baseUrl": ".",
     "experimentalDecorators": true,
     "noUncheckedIndexedAccess": true,
     "skipDefaultLibCheck": true,
     "skipLibCheck": true,
+    "paths": {
+      "lib/*": ["./lib/*"],
+      "generated/*": ["./generated/*"]
+    },
     "plugins": [
       {
         "name": "@effect/language-service",

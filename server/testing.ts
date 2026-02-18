@@ -15,7 +15,7 @@ import {
   validateSessionToken,
 } from "./sessions.js";
 
-if (process.env.NODE_ENV === "production") {
+if (env.NODE_ENV === "production") {
   throw new Error("testing helpers must not run in production mode");
 }
 
@@ -271,7 +271,7 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
   );
 
 export const testingApi = edenFetch<typeof testingServer>(
-  `http://localhost:${process.env.PORT || 3000}/api/testingCommand`,
+  `http://localhost:${env.PORT}/api/testingCommand`,
 );
 
 async function reallyCreateUser({

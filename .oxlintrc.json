@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "node_modules/**",
+    "*.config.js",
+    "*.config.ts",
+    "vscode-extension-samples/**",
+    "migrations/**",
+    "src/features/notebook/renderer/pev2/**",
+    "src/features/notebook/renderer-dist/**",
+    "src/webview-dist/**",
+    "src/features/remoteExtensionExample/**",
+    "server/vendor/**"
+  ],
+  "overrides": [
+    {
+      "files": ["cypress/**/*.{js,ts}"],
+      "globals": {
+        "cy": "readonly",
+        "Cypress": "readonly",
+        "expect": "readonly",
+        "assert": "readonly"
+      }
+    },
+    {
+      "files": ["k6/**/*.js"],
+      "globals": {
+        "console": "readonly",
+        "__VU": "readonly",
+        "__ITER": "readonly",
+        "__ENV": "readonly"
+      }
+    },
+    {
+      "files": ["worker/**/*.js", "worker/**/*.d.ts"],
+      "globals": {
+        "console": "readonly",
+        "process": "readonly",
+        "global": "readonly"
+      }
+    }
+  ]
+}

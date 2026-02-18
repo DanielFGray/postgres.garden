@@ -50,8 +50,7 @@ interface ForkHistoryItem {
   isCurrent: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "postgres-garden",
     publisher: "postgres-garden",
@@ -155,7 +154,7 @@ const { getApi } = registerExtension(
 
 console.log("[ServerSync] Extension registered, waiting for API...");
 
-void getApi()
+void ext.getApi()
   .then(async (vscode) => {
     console.log("[ServerSync] API received, checking workspace...");
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];

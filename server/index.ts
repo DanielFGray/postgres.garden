@@ -8,12 +8,13 @@
 
 import { Effect } from "effect";
 import { app } from "./app.js";
+import { env } from "./assertEnv.js";
 import { createDevServer } from "./dev.js";
 import { createProdServer } from "./prod.js";
 import { waitForDependencies } from "./ready.js";
 
-const isDev = process.env.NODE_ENV !== "production";
-const PORT = Number(process.env.PORT) || 3000;
+const isDev = env.NODE_ENV !== "production";
+const PORT = Number(env.PORT);
 const HOST = process.env.HOST || "0.0.0.0";
 
 // Wait for Postgres and Valkey before starting
@@ -23,7 +24,7 @@ export { app };
 
 // Add testing routes in dev/test mode only (BEFORE creating dev server)
 // Use dynamic import to avoid loading testing.ts in production
-if (isDev || process.env.NODE_ENV === "test") {
+if (isDev || env.NODE_ENV === "test") {
   const { testingServer } = await import("./testing.js");
   app.use(testingServer);
   console.log("✓ Testing commands mounted at /api/testingCommand");
@@ -109,8 +110,6 @@ if (isDev) {
     }
   };
 
-  process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
-  process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 }
-
-export { };

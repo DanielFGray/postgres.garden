@@ -1,5 +1,4 @@
 import pg from "pg";
-// @ts-expect-error no type declarations for npm-run-all
 import runAll from "npm-run-all";
 import "dotenv/config";
 import { Effect, Schedule, pipe, Duration, Schema } from "effect";
@@ -146,8 +145,7 @@ const mainProgram = Effect.gen(function* () {
 
   // Start database using npm-run-all
   yield* Effect.tryPromise({
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    try: () => runAll(["db:up"], runAllOpts) as Promise<void>,
+    try: () => runAll(["db:up"], runAllOpts),
     catch: (error) =>
       new DatabaseError({
         message: `Failed to start database: ${error instanceof Error ? error.message : String(error)}`,
@@ -178,8 +176,7 @@ const programWithErrorHandling = pipe(
 
       // Try to run init on failure
       yield* Effect.tryPromise({
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        try: () => runAll(["init"], runAllOpts) as Promise<void>,
+        try: () => runAll(["init"], runAllOpts),
         catch: (initError) =>
           new DatabaseError({
             message: `Init failed: ${initError instanceof Error ? initError.message : String(initError)}`,

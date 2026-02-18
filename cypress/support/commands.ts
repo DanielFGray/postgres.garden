@@ -22,7 +22,7 @@
 
 /// <reference types="cypress" />
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 type Chainable<Subject = any> = Cypress.Chainable<Subject>;
 
 type User = {
@@ -33,7 +33,7 @@ type User = {
   is_verified: boolean;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 function getCy(cyName: string): Chainable<any> {
   return cy.get(`[data-cy=${cyName}]`);
 }
@@ -124,12 +124,12 @@ function serverCommand(
 ): Chainable<{ success: true }>;
 
 // The actual implementation of the 'serverCommand' function.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// oxlint-disable-next-line typescript/no-explicit-any
 function serverCommand(command: string, payload?: Record<string, string>): Chainable<any> {
   const endpoint = `/api/testingCommand/${command}`
   const params = payload ? new URLSearchParams(Object.entries(payload)).toString() : "";
   const url = params ? [endpoint, params].join('?') : endpoint;
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+  // oxlint-disable-next-line typescript/no-unsafe-return
   return cy.request("GET", url).its("body");
 }
 
@@ -174,7 +174,7 @@ function login(payload?: {
  * cy.waitForWorkbench().within(() => { ... });
  */
 function waitForWorkbench() {
-  // eslint-disable-next-line cypress/unsafe-to-chain-command
+  // oxlint-disable-next-line cypress/unsafe-to-chain-command
   return cy.get('#workbench-container', { timeout: 30000 })
     .should('exist')
     .within(() => {
@@ -196,7 +196,7 @@ function waitForWorkbench() {
 function waitForNotification(
   message: string | RegExp,
   options?: Partial<Cypress.Loggable & Cypress.Timeoutable>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
 ): Chainable<any> {
   return cy.contains(message, options);
 }
@@ -213,7 +213,7 @@ Cypress.Commands.add("waitForNotification", waitForNotification);
 export { }; // Make this a module so we can `declare global`
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
+  // oxlint-disable-next-line typescript/no-namespace
   namespace Cypress {
     interface Chainable {
       getCy: typeof getCy;

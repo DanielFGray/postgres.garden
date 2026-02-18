@@ -9,10 +9,11 @@
 import { Effect } from "effect";
 import { Elysia } from "elysia";
 import { app as appRoutes } from "./app.js";
+import { env } from "./assertEnv.js";
 import { createProdServer } from "./prod.js";
 import { waitForDependencies } from "./ready.js";
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(env.PORT);
 const HOST = process.env.HOST || "0.0.0.0";
 
 // Wait for Postgres and Valkey before starting
@@ -56,7 +57,5 @@ const gracefulShutdown = (signal: string) => {
   }
 };
 
-process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
-
-export { };
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

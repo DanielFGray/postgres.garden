@@ -27,8 +27,7 @@ import { getCurrentPlaygroundId } from "../routes.js";
 // Module-level subscriptions for HMR support
 const subscriptions: vscode.Disposable[] = [];
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi, registerFileUrl } = registerExtension(
+const ext = registerExtension(
   {
     name: "postgres.garden",
     publisher: "postgres.garden",
@@ -242,7 +241,7 @@ const { getApi, registerFileUrl } = registerExtension(
 
 // Register renderer bundle (both with and without .js)
 // CSS is inlined into the JS bundle and injected into the Shadow DOM at runtime.
-registerFileUrl(
+ext.registerFileUrl(
   "renderer/index",
   new URL(
     "./notebook/renderer-dist/sql-renderer.js",
@@ -250,7 +249,7 @@ registerFileUrl(
   ).toString(),
 );
 
-registerFileUrl(
+ext.registerFileUrl(
   "renderer/index.js",
   new URL(
     "./notebook/renderer-dist/sql-renderer.js",
@@ -259,17 +258,17 @@ registerFileUrl(
 );
 
 // PostgreSQL language support (replaces @codingame/monaco-vscode-sql-default-extension)
-registerFileUrl(
+ext.registerFileUrl(
   "./language-configuration.json",
   new URL("./pgsql/language-configuration.json", import.meta.url).toString(),
 );
 
-registerFileUrl(
+ext.registerFileUrl(
   "./syntaxes/sql.tmLanguage.json",
   new URL("./pgsql/sql.tmLanguage.json", import.meta.url).toString(),
 );
 
-void getApi().then(async (vscode) => {
+void ext.getApi().then(async (vscode) => {
   console.log(
     "[TEST READY] VSCode API initialized, setting window.vscode and window.vscodeReady",
   );
@@ -428,7 +427,7 @@ void getApi().then(async (vscode) => {
   }, 50);
   subscriptions.push(
     vscode.commands.registerCommand(PGLITE_INTROSPECT, () => {
-      void refreshIntrospection();
+      refreshIntrospection();
       dbTreeView.reveal(undefined, { expand: true });
       ERDPanelProvider.refresh();
     }),
@@ -480,7 +479,7 @@ void getApi().then(async (vscode) => {
   );
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic constraint requires any for proper variance
+// oxlint-disable-next-line typescript/no-explicit-any -- generic constraint requires any for proper variance
 function throttle<F extends (...args: any[]) => any>(
   func: F,
   wait: number,

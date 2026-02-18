@@ -45,11 +45,12 @@ function formatDuration(ms: number): string {
  *   .get("/hello", () => "world");
  * ```
  */
+const requestMeta = new WeakMap<Request, { startTime: number; shouldSkip: boolean }>();
+
 export const logger = (options: LoggerOptions = {}) => {
   const { skip = [], logBody = false, colorize = true } = options;
 
   return new Elysia({ name: "logger" }).onRequest(({ request }) => {
-    // Store start time in a WeakMap keyed by request object
     const startTime = performance.now();
 
     const url = new URL(request.url);
@@ -59,6 +60,8 @@ export const logger = (options: LoggerOptions = {}) => {
     const shouldSkip = skip.some(
       (skipPath) => path === skipPath || path.startsWith(skipPath),
     );
+
+    requestMeta.set(request, { startTime, shouldSkip });
 
     if (shouldSkip) return;
 
@@ -71,19 +74,10 @@ export const logger = (options: LoggerOptions = {}) => {
     console.log(
       `${c.dim}${timestamp}${c.reset} ${c.magenta}${method}${c.reset} ${c.cyan}${url.pathname}${c.reset}${url.search || ""}${logBody && request.body ? ` ${c.dim}body=${JSON.stringify(request.body)}${c.reset}` : ""}`,
     );
-
-    // Store timing info for use in onResponse
-    // @ts-expect-error - attaching custom property
-    request.__startTime = startTime;
-    // @ts-expect-error - attaching custom property
-    request.__shouldSkip = shouldSkip;
   }).onAfterResponse(({ request, set }) => {
-    // @ts-expect-error - custom property
-    const startTime = request.__startTime as number | undefined;
-    // @ts-expect-error - custom property
-    const shouldSkip = request.__shouldSkip as boolean | undefined;
-
-    if (shouldSkip || !startTime) return;
+    const meta = requestMeta.get(request);
+    if (!meta || meta.shouldSkip) return;
+    const { startTime } = meta;
 
     const duration = performance.now() - startTime;
     const status = set.status ?? 200;

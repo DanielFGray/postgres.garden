@@ -4,8 +4,7 @@ import {
   registerExtension,
 } from "@codingame/monaco-vscode-api/extensions";
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "testing",
     publisher: "codingame",
@@ -20,7 +19,7 @@ const { getApi } = registerExtension(
   },
 );
 
-void getApi().then((api) => {
+void ext.getApi().then((api) => {
   const testRe = /^([0-9]+)\s*([+*/-])\s*([0-9]+)\s*=\s*([0-9]+)/;
   const headingRe = /^(#+)\s*(.+)$/;
 

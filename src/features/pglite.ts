@@ -3,6 +3,10 @@ import type { QueryOptions } from "@electric-sql/pglite";
 import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { live } from "@electric-sql/pglite/live";
 
+declare global {
+  interface Window { db?: PGliteWorker }
+}
+
 /**
  * PGlite service managing a Web Worker instance with multi-tab support.
  * Only the leader tab will run the actual database instance.
@@ -51,7 +55,6 @@ export class PGliteService {
         },
       });
 
-      // @ts-expect-error expose for debugging
       window.db = worker;
 
       // Log leader status

@@ -20,8 +20,7 @@ import {
   PLAYGROUND_METADATA,
 } from "../constants";
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "postgres-garden-playground",
     publisher: "postgres-garden",
@@ -93,7 +92,6 @@ class PlaygroundMetadataItem extends vscode.TreeItem {
       .TreeItemCollapsibleState.None,
   ) {
     super(label, collapsibleState);
-    this.description = description;
   }
 }
 
@@ -162,7 +160,7 @@ class PlaygroundMetadataProvider
   }
 }
 
-void getApi().then((vscode: typeof import("vscode")) => {
+void ext.getApi().then((vscode: typeof import("vscode")) => {
   console.log("Playground extension activated");
 
   const service = new PlaygroundService();

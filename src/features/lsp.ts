@@ -6,8 +6,7 @@ import { LanguageClient } from "vscode-languageclient/browser";
 import type { Introspection } from "pg-introspection";
 import { syncSchema } from "./lsp/schemaSync.js";
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "pgls",
     publisher: "postgres.garden",
@@ -33,7 +32,7 @@ export function updateSchema(introspection: Introspection): void {
   });
 }
 
-void getApi().then(() => {
+void ext.getApi().then(() => {
   const worker = new Worker(
     new URL("./lsp/pgls.worker.ts", import.meta.url),
     { type: "module" },

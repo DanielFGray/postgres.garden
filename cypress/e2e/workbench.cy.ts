@@ -7,7 +7,7 @@ describe('workbench basics', () => {
     cy.login({ verified: true });
     // extract user from INITIAL_DATA
     cy.window().its('__INITIAL_DATA__').then((data: { user: { username: string } }) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      // oxlint-disable-next-line typescript/no-unused-expressions
       expect(data.user).to.exist;
       // confirm it exists in the UI
       cy.waitForWorkbench();
@@ -32,7 +32,7 @@ describe('workbench basics', () => {
     // Click "+ Code" to add a new code cell in the notebook
     // Use VSCode command to insert a code cell (more reliable than clicking)
     cy.window().then(win => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      // oxlint-disable-next-line typescript/no-unsafe-return, typescript/no-unsafe-call, typescript/no-unsafe-member-access, typescript/no-explicit-any
       return (win as any).vscode.commands.executeCommand('notebook.cell.insertCodeCellBelow');
     });
 

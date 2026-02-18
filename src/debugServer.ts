@@ -5,6 +5,12 @@ import fs from "node:fs";
 import stream from "node:stream";
 
 const PORT = 5555;
+
+/** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
+function demuxStream(container: Docker.Container, input: NodeJS.ReadableStream, stdout: NodeJS.WritableStream, stderr: NodeJS.WritableStream): void {
+  (container.modem as { demuxStream(s: NodeJS.ReadableStream, o: NodeJS.WritableStream, e: NodeJS.WritableStream): void }).demuxStream(input, stdout, stderr);
+}
+
 const docker = new Docker();
 const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 
@@ -62,13 +68,13 @@ async function exitHandler() {
     process.exit();
   }
 }
-/* eslint-disable @typescript-eslint/no-misused-promises */
+/* oxlint-disable typescript/no-misused-promises */
 process.on("exit", exitHandler);
 process.on("SIGINT", exitHandler);
 process.on("SIGUSR1", exitHandler);
 process.on("SIGUSR2", exitHandler);
 process.on("uncaughtException", exitHandler);
-/* eslint-enable @typescript-eslint/no-misused-promises */
+/* oxlint-enable typescript/no-misused-promises */
 
 const container = await containerPromise;
 await prepareContainer(container);
@@ -220,8 +226,7 @@ new Elysia()
               const execStream = await exec.start({ hijack: true });
               const stdout = new stream.PassThrough();
               const stderr = new stream.PassThrough();
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-              container.modem.demuxStream(execStream, stdout, stderr);
+              demuxStream(container, execStream, stdout, stderr);
 
               stdout.on("data", (buf: Buffer) =>
                 ws.send(makeOutput("stdout", buf)),

@@ -15,7 +15,7 @@ export const templateHack = (strings: TemplateStringsArray, ...exprs: unknown[])
     (acc, str, i) =>
       acc.concat(
         str,
-        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""),  // eslint-disable-line @typescript-eslint/no-base-to-string
+        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""),  // oxlint-disable-line typescript/no-base-to-string
       ),
     "",
   );

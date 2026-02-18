@@ -7,6 +7,11 @@ import stream from "node:stream";
 
 const PORT = 5555;
 
+/** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
+function demuxStream(container: Docker.Container, input: NodeJS.ReadableStream, stdout: NodeJS.WritableStream, stderr: NodeJS.WritableStream): void {
+  (container.modem as { demuxStream(s: NodeJS.ReadableStream, o: NodeJS.WritableStream, e: NodeJS.WritableStream): void }).demuxStream(input, stdout, stderr);
+}
+
 function routeHandler(
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => string,
 ) {
@@ -42,7 +47,7 @@ wss.on("connection", (ws) => {
 
   ws.on(
     "message",
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    // oxlint-disable-next-line typescript/no-misused-promises
     sequential(async (message: string) => {
       if (!initialized) {
         try {
@@ -69,8 +74,7 @@ wss.on("connection", (ws) => {
           });
           const stdout = new stream.PassThrough();
           const stderr = new stream.PassThrough();
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-          container.modem.demuxStream(execStream, stdout, stderr);
+          demuxStream(container, execStream, stdout, stderr);
 
           stdout.on("data", (buffer: Buffer) => ws.send(makeOutput("stdout", buffer)));
           stderr.on("data", (buffer: Buffer) => ws.send(makeOutput("stderr", buffer)));
@@ -164,13 +168,13 @@ async function exitHandler() {
     process.exit();
   }
 }
-/* eslint-disable @typescript-eslint/no-misused-promises */
+/* oxlint-disable typescript/no-misused-promises */
 process.on("exit", exitHandler);
 process.on("SIGINT", exitHandler);
 process.on("SIGUSR1", exitHandler);
 process.on("SIGUSR2", exitHandler);
 process.on("uncaughtException", exitHandler);
-/* eslint-enable @typescript-eslint/no-misused-promises */
+/* oxlint-enable typescript/no-misused-promises */
 
 const container = await containerPromise;
 await prepareContainer(container);

@@ -4,8 +4,7 @@ import {
 } from "@codingame/monaco-vscode-api/extensions";
 import type * as vscode from "vscode";
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi, registerFileUrl } = registerExtension(
+const ext = registerExtension(
   {
     name: "debugger",
     publisher: "codingame",
@@ -33,12 +32,12 @@ const { getApi, registerFileUrl } = registerExtension(
   ExtensionHostKind.LocalProcess,
 );
 
-registerFileUrl(
+ext.registerFileUrl(
   "./extension.js",
   "data:text/javascript;base64," + window.btoa("// nothing"),
 );
 
-void getApi().then((debuggerVscodeApi) => {
+void ext.getApi().then((debuggerVscodeApi) => {
   class WebsocketDebugAdapter implements vscode.DebugAdapter {
     constructor(private websocket: WebSocket) {
       websocket.onmessage = (message) => {

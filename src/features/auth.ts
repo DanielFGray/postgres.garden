@@ -25,19 +25,21 @@ const AuthMessage = S.Struct({
 });
 const isAuthMessage = S.is(AuthMessage);
 
+const GITHUB_AUTH_ID = "github-auth";
+
 /**
  * GitHub authentication session
  */
 class GitHubAuthSession implements vscode.AuthenticationSession {
   readonly account: { id: string; label: string };
-  readonly id = GitHubAuthProvider.id;
+  readonly id = GITHUB_AUTH_ID;
   readonly scopes = [];
 
   constructor(
     public readonly accessToken: string,
     public readonly username: string,
   ) {
-    this.account = { id: GitHubAuthProvider.id, label: username };
+    this.account = { id: GITHUB_AUTH_ID, label: username };
   }
 }
 
@@ -47,7 +49,7 @@ class GitHubAuthSession implements vscode.AuthenticationSession {
  */
 export class GitHubAuthProvider
   implements vscode.AuthenticationProvider, vscode.Disposable {
-  static id = "github-auth";
+  static id = GITHUB_AUTH_ID;
   static label = "GitHub";
   private static storageKey = "github-username";
 
@@ -85,7 +87,7 @@ export class GitHubAuthProvider
         // Listen for auth changes from other windows/tabs
         vscode.authentication.onDidChangeSessions((e) => {
           if (e.provider.id === GitHubAuthProvider.id) {
-            void this.checkForUpdates();
+            this.checkForUpdates();
           }
         }),
       );
@@ -313,8 +315,7 @@ export class GitHubAuthProvider
 // Export provider instance for use in other modules
 export let authProviderInstance: GitHubAuthProvider | undefined;
 
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const { getApi } = registerExtension(
+const ext = registerExtension(
   {
     name: "postgres.garden",
     publisher: "postgres.garden",
@@ -334,7 +335,7 @@ interface AccountMenuItem extends vscode.QuickPickItem {
   value: "profile" | "settings" | "signout";
 }
 
-void getApi().then((vsapi) => {
+void ext.getApi().then((vsapi) => {
   // Register the authentication provider
   const provider = new GitHubAuthProvider();
   authProviderInstance = provider;

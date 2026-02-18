@@ -6,6 +6,7 @@
 import { createServer as createViteServer } from "vite";
 import type { ViteDevServer, Plugin } from "vite";
 import type { App } from "./index";
+import { env } from "./assertEnv.js";
 import { getInitialData } from "./ssr";
 
 /**
@@ -108,7 +109,7 @@ export async function createDevServer(app: App): Promise<ViteDevServer> {
   const vite: ViteDevServer = await createViteServer({
     plugins: [apiRoutesPlugin(), dataInjectionPlugin()],
     server: {
-      port: Number(process.env.PORT) || 3000,
+      port: Number(env.PORT),
       host: "0.0.0.0",
       headers: {
         // Add CORS headers for SharedArrayBuffer support (required for language features)
