@@ -1,7 +1,7 @@
 import * as esbuild from "esbuild";
 import { Effect, Schema } from "effect";
 
-interface BuildOptions extends esbuild.BuildOptions { }
+type BuildOptions = esbuild.BuildOptions;
 
 // Error types using Schema.TaggedError
 class BuildError extends Schema.TaggedError<BuildError>()("BuildError", {

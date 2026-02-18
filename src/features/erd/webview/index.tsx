@@ -19,7 +19,10 @@ interface WebviewMessage {
 const mermaidCode: Signal<string> = signal("");
 const error: Signal<string> = signal("");
 const loading: Signal<boolean> = signal(true);
-const vscode = (window as any).acquireVsCodeApi?.();
+interface VsCodeApi {
+  postMessage(message: WebviewMessage): void;
+}
+const vscode = (window as unknown as { acquireVsCodeApi?: () => VsCodeApi }).acquireVsCodeApi?.();
 
 /** Lighten a dark color or darken a light color by `amount` (0-255) */
 function nudgeColor(hex: string, amount: number): string {
@@ -90,7 +93,7 @@ const handleMessage = (event: MessageEvent<ERDMessage>) => {
         mermaidCode.value = message.data.mermaidCode;
         error.value = "";
         loading.value = false;
-        renderDiagram(message.data.mermaidCode);
+        void renderDiagram(message.data.mermaidCode);
       }
       break;
     case "error":
@@ -141,11 +144,6 @@ const renderDiagram = async (code: string) => {
     error.value = `Failed to render diagram: ${message}`;
     console.error("Mermaid render error:", err);
   }
-};
-
-const handleRefresh = () => {
-  loading.value = true;
-  vscode?.postMessage({ type: "refresh" } as WebviewMessage);
 };
 
 export function ERDViewer() {

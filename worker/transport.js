@@ -24,7 +24,7 @@ export default async function getTransport() {
         try {
           const testAccountJson = await fs.readFile(etherealFilename, "utf8");
           account = JSON.parse(testAccountJson);
-        } catch (e) {
+        } catch {
           account = await nodemailer.createTestAccount();
           await fs.writeFile(etherealFilename, JSON.stringify(account));
         }

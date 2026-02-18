@@ -1,25 +1,22 @@
-import express from "express";
-import { WebSocketServer } from "ws";
+import { Elysia } from "elysia";
 import Docker from "dockerode";
-import * as http from "http";
-import * as net from "net";
-import * as fs from "fs";
-import * as stream from "stream";
+import net from "node:net";
+import fs from "node:fs";
+import stream from "node:stream";
 
+const PORT = 5555;
 const docker = new Docker();
 const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 
 async function createContainer() {
-  const stream = await docker.pull(image);
+  const pullStream = await docker.pull(image);
   await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(stream, (err) =>
+    docker.modem.followProgress(pullStream, (err) =>
       err == null ? resolve() : reject(err),
     );
   });
-  await fs.promises.mkdir("/tmp/workspace", {
-    recursive: true,
-  });
-  const container = await docker.createContainer({
+  await fs.promises.mkdir("/tmp/workspace", { recursive: true });
+  return docker.createContainer({
     name: "graalvm-debugger",
     Image: image,
     Entrypoint: ["sleep", "infinity"],
@@ -35,7 +32,6 @@ async function createContainer() {
       AutoRemove: true,
     },
   });
-  return container;
 }
 
 async function prepareContainer(container: Docker.Container) {
@@ -46,9 +42,7 @@ async function prepareContainer(container: Docker.Container) {
     AttachStdout: true,
     AttachStderr: true,
   });
-  const execStream = await exec.start({
-    hijack: true,
-  });
+  const execStream = await exec.start({ hijack: true });
   execStream.pipe(process.stdout);
   await new Promise((resolve) => execStream.on("end", resolve));
   console.log("Node installed");
@@ -60,29 +54,36 @@ const containerPromise = createContainer();
 async function exitHandler() {
   console.log("Exiting...");
   try {
-    const container = await containerPromise;
-    await container.remove({
-      force: true,
-    });
+    const c = await containerPromise;
+    await c.remove({ force: true });
   } catch (err) {
     console.error(err);
   } finally {
     process.exit();
   }
 }
+/* eslint-disable @typescript-eslint/no-misused-promises */
 process.on("exit", exitHandler);
 process.on("SIGINT", exitHandler);
 process.on("SIGUSR1", exitHandler);
 process.on("SIGUSR2", exitHandler);
 process.on("uncaughtException", exitHandler);
+/* eslint-enable @typescript-eslint/no-misused-promises */
 
 const container = await containerPromise;
 await prepareContainer(container);
+
+// --- DAP (Debug Adapter Protocol) socket ---
+
+const TWO_CRLF = "\r\n\r\n";
+const HEADER_LINESEPARATOR = /\r?\n/;
+const HEADER_FIELDSEPARATOR = /: */;
 
 class DAPSocket {
   private socket: net.Socket;
   private rawData = Buffer.allocUnsafe(0);
   private contentLength = -1;
+
   constructor(private onMessage: (message: string) => void) {
     this.socket = new net.Socket();
     this.socket.on("data", this.onData);
@@ -132,19 +133,10 @@ class DAPSocket {
   }
 }
 
-const TWO_CRLF = "\r\n\r\n";
-const HEADER_LINESEPARATOR = /\r?\n/;
-const HEADER_FIELDSEPARATOR = /: */;
-
-const PORT = 5555;
-const app = express();
-
-const server = http.createServer(app);
-
-const wss = new WebSocketServer({ server });
+// --- Helpers ---
 
 async function findPortFree() {
-  return await new Promise<number>((resolve) => {
+  return new Promise<number>((resolve) => {
     const srv = net.createServer();
     srv.listen(0, () => {
       const port = (srv.address() as net.AddressInfo).port;
@@ -153,90 +145,109 @@ async function findPortFree() {
   });
 }
 
-function sequential<T, P extends unknown[]>(
-  fn: (...params: P) => Promise<T>,
-): (...params: P) => Promise<T> {
-  let promise = Promise.resolve();
-  return (...params: P) => {
-    const result = promise.then(() => {
-      return fn(...params);
-    });
-
-    promise = result.then(
-      () => {},
-      () => {},
-    );
-    return result;
+export type OutputMessage = {
+  type: "event";
+  event: "output";
+  body: {
+    category: "stdout" | "stderr";
+    output: string;
   };
+};
+
+function makeOutput(category: "stdout" | "stderr", output: Buffer) {
+  return JSON.stringify({
+    type: "event",
+    event: "output",
+    body: { category, output: output.toString() },
+  } satisfies OutputMessage);
 }
 
-wss.on("connection", (ws) => {
-  const socket = new DAPSocket((message) => ws.send(message));
+// --- Per-connection state ---
 
-  let initialized = false;
+interface ConnectionState {
+  dapSocket: DAPSocket;
+  initialized: boolean;
+  queue: Promise<void>;
+}
 
-  ws.on(
-    "message",
-    sequential(async (message: string) => {
-      if (!initialized) {
-        try {
-          initialized = true;
-          const init: { main: string; files: Record<string, string> } =
-            JSON.parse(message);
-          for (const [file, content] of Object.entries(init.files)) {
-            await fs.promises.writeFile("/tmp/" + file, content);
+const connections = new Map<string, ConnectionState>();
+
+// --- Server ---
+
+new Elysia()
+  .ws("/ws", {
+    open(ws) {
+      const dapSocket = new DAPSocket((msg) => ws.send(msg));
+      connections.set(ws.id, {
+        dapSocket,
+        initialized: false,
+        queue: Promise.resolve(),
+      });
+    },
+
+    message(ws, raw) {
+      const state = connections.get(ws.id);
+      if (!state) return;
+
+      const message = typeof raw === "string" ? raw : String(raw);
+
+      // Process messages sequentially per connection
+      state.queue = state.queue
+        .then(async () => {
+          if (!state.initialized) {
+            try {
+              state.initialized = true;
+              const init = JSON.parse(message) as {
+                main: string;
+                files: Record<string, string>;
+              };
+              for (const [file, content] of Object.entries(init.files)) {
+                await fs.promises.writeFile("/tmp/" + file, content);
+              }
+              const debuggerPort = await findPortFree();
+              const exec = await container.exec({
+                Cmd: [
+                  "node",
+                  `--dap=${debuggerPort}`,
+                  "--dap.WaitAttached",
+                  "--dap.Suspend=false",
+                  init.main,
+                ],
+                AttachStdout: true,
+                AttachStderr: true,
+              });
+
+              const execStream = await exec.start({ hijack: true });
+              const stdout = new stream.PassThrough();
+              const stderr = new stream.PassThrough();
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+              container.modem.demuxStream(execStream, stdout, stderr);
+
+              stdout.on("data", (buf: Buffer) =>
+                ws.send(makeOutput("stdout", buf)),
+              );
+              stderr.on("data", (buf: Buffer) =>
+                ws.send(makeOutput("stderr", buf)),
+              );
+
+              execStream.on("end", () => ws.close());
+
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              state.dapSocket.connect(debuggerPort);
+            } catch (err) {
+              console.error("Failed to initialize", err);
+            }
+            return;
           }
-          const debuggerPort = await findPortFree();
-          const exec = await container.exec({
-            Cmd: [
-              "node",
-              `--dap=${debuggerPort}`,
-              "--dap.WaitAttached",
-              "--dap.Suspend=false",
-              `${init.main}`,
-            ],
-            AttachStdout: true,
-            AttachStderr: true,
-          });
+          state.dapSocket.sendMessage(message);
+        })
+        .catch(() => {});
+    },
 
-          const execStream = await exec.start({
-            hijack: true,
-          });
-          const stdout = new stream.PassThrough();
-          const stderr = new stream.PassThrough();
-          container.modem.demuxStream(execStream, stdout, stderr);
-          function sendOutput(category: "stdout" | "stderr", output: Buffer) {
-            ws.send(
-              JSON.stringify({
-                type: "event",
-                event: "output",
-                body: {
-                  category,
-                  output: output.toString(),
-                },
-              }),
-            );
-          }
-          stdout.on("data", sendOutput.bind(undefined, "stdout"));
-          stderr.on("data", sendOutput.bind(undefined, "stderr"));
-
-          execStream.on("end", () => {
-            ws.close();
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          socket.connect(debuggerPort);
-
-          return;
-        } catch (err) {
-          console.error("Failed to initialize", err);
-        }
-      }
-      socket.sendMessage(message);
-    }),
-  );
-});
-
-server.listen(PORT, () => {
-  console.log(`Server started on port ${PORT} :)`);
-});
+    close(ws) {
+      connections.delete(ws.id);
+    },
+  })
+  .listen(PORT, () => {
+    console.log(`Debug server started on port ${PORT}`);
+  });

@@ -7,7 +7,6 @@
 // Clean: DELETE FROM app_public.users WHERE username LIKE 'seed_%';
 
 import http from "k6/http";
-import { check } from "k6";
 import { BASE_URL, authHeaders } from "./helpers.js";
 
 const NUM_USERS = 200;

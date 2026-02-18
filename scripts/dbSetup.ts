@@ -50,11 +50,12 @@ const executeQuery = (pool: pg.PoolClient | pg.Pool, query: string) =>
 const testConnection = (pool: pg.Pool) =>
   Effect.tryPromise({
     try: () => pool.query('select true as "Connection test"'),
-    catch: (error: any) => {
-      if (error.code === "28P01") {
-        return new DatabaseAuthError({ message: error.message });
+    catch: (error: unknown) => {
+      const pgError = error as { code?: string; message?: string };
+      if (pgError.code === "28P01") {
+        return new DatabaseAuthError({ message: pgError.message ?? "Auth failed" });
       }
-      return new DatabaseConnectionError({ message: error.message });
+      return new DatabaseConnectionError({ message: pgError.message ?? "Connection failed" });
     },
   });
 
@@ -222,16 +223,14 @@ const program = Effect.gen(function*() {
           Effect.andThen((rootPgPool) => executeDatabaseSetup(rootPgPool)),
           Effect.catchAll((error) =>
             Effect.gen(function*() {
-              yield* Effect.logError(`Database setup error: ${error}`);
+              yield* Effect.logError(`Database setup error: ${String(error)}`);
             }),
           ),
         ),
       );
     }),
     Effect.ensuring(
-      Effect.sync(() => {
-        pgPool.end();
-      }),
+      Effect.promise(() => pgPool.end()),
     ),
   );
 });

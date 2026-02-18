@@ -26,7 +26,7 @@ declare const self: ServiceWorkerGlobalScope;
 // ── Lifecycle ──────────────────────────────────────────────────────────
 
 // Take control immediately on install (skip waiting)
-self.skipWaiting();
+void self.skipWaiting();
 clientsClaim();
 
 // Clean up caches from previous SW versions
@@ -154,6 +154,6 @@ setCatchHandler(async ({ request }) => {
 
 self.addEventListener("message", (event) => {
   if ((event.data as { type?: string } | null)?.type === "SKIP_WAITING") {
-    self.skipWaiting();
+    void self.skipWaiting();
   }
 });

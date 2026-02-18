@@ -6,7 +6,7 @@ import fs from "fs/promises";
 import { htmlToText } from "html-to-text";
 import nodemailer from "nodemailer";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname } from "path";
 import getTransport from "../transport.js";
 import packageJson from "../../package.json" with { type: "json" };
 

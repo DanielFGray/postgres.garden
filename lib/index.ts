@@ -10,12 +10,12 @@ export function randomNumber(min: number, max?: number): number {
 /**
  * silly hack to enable syntax highlighting
  */
-export const templateHack = (strings: TemplateStringsArray, ...exprs: any[]) =>
+export const templateHack = (strings: TemplateStringsArray, ...exprs: unknown[]) =>
   strings.reduce(
     (acc, str, i) =>
       acc.concat(
         str,
-        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""),
+        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""),  // eslint-disable-line @typescript-eslint/no-base-to-string
       ),
     "",
   );

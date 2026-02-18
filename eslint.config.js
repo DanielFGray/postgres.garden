@@ -11,22 +11,13 @@ export default [
       "node_modules/**",
       "*.config.js",
       "*.config.ts",
-      "test-env.ts",
       "vscode-extension-samples/**",
-      "patches/**",
       "migrations/**",
-      "lib/**",
-      "scripts/**",
-      "worker/**",
       "src/features/notebook/renderer/pev2/**",
       "src/features/notebook/renderer-dist/**",
       "src/webview-dist/**",
       "src/features/remoteExtensionExample/**",
-      "src/debugServer.ts",
-      "server/debugServer.ts",
       "server/vendor/**",
-      "src/features/erd/**",
-      "src/sw.ts",
     ],
   },
 
@@ -40,8 +31,22 @@ export default [
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: [],
+          defaultProject: "tsconfig.json",
+        },
         tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
+  // Service worker uses its own tsconfig (WebWorker lib, not DOM)
+  {
+    files: ["src/sw.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: "tsconfig.sw.json",
       },
     },
   },
@@ -61,6 +66,41 @@ export default [
         Cypress: true,
         expect: true,
         assert: true,
+      },
+    },
+  },
+
+  // k6 load tests — no tsconfig, k6-specific globals
+  {
+    files: ["k6/**/*.js"],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: null,
+      },
+      globals: {
+        console: true,
+        __VU: true,
+        __ITER: true,
+        __ENV: true,
+      },
+    },
+  },
+
+  // graphile-worker tasks — no tsconfig, Node globals
+  {
+    files: ["worker/**/*.js", "worker/**/*.d.ts"],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: null,
+      },
+      globals: {
+        console: true,
+        process: true,
+        global: true,
       },
     },
   },

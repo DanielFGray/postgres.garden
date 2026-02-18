@@ -15,7 +15,7 @@ function routeHandler(
       const response = handler(req, res);
       if (response) res.write(response);
       res.end();
-    } catch (err) {
+    } catch {
       res.writeHead(500);
       res.write("Internal server error");
       res.end();
@@ -42,12 +42,12 @@ wss.on("connection", (ws) => {
 
   ws.on(
     "message",
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     sequential(async (message: string) => {
       if (!initialized) {
         try {
           initialized = true;
-          const init: { main: string; files: Record<string, string> } =
-            JSON.parse(message);
+          const init = JSON.parse(message) as { main: string; files: Record<string, string> };
           for (const [file, content] of Object.entries(init.files)) {
             await fs.promises.writeFile("/tmp/" + file, content);
           }
@@ -69,10 +69,11 @@ wss.on("connection", (ws) => {
           });
           const stdout = new stream.PassThrough();
           const stderr = new stream.PassThrough();
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
           container.modem.demuxStream(execStream, stdout, stderr);
 
-          stdout.on("data", (buffer) => ws.send(makeOutput("stdout", buffer)));
-          stderr.on("data", (buffer) => ws.send(makeOutput("stderr", buffer)));
+          stdout.on("data", (buffer: Buffer) => ws.send(makeOutput("stdout", buffer)));
+          stderr.on("data", (buffer: Buffer) => ws.send(makeOutput("stderr", buffer)));
 
           execStream.on("end", () => {
             ws.close();
@@ -91,7 +92,7 @@ wss.on("connection", (ws) => {
   );
 });
 server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
+   
   console.log(`Server started on port ${PORT} :)`);
 });
 
@@ -129,7 +130,7 @@ async function createContainer() {
 
 async function prepareContainer(container: Docker.Container) {
   await container.start();
-  // eslint-disable-next-line no-console
+   
   console.log("Installing node");
   const exec = await container.exec({
     Cmd: ["gu", "install", "nodejs"],
@@ -141,16 +142,16 @@ async function prepareContainer(container: Docker.Container) {
   });
   execStream.pipe(process.stdout);
   await new Promise((resolve) => execStream.on("end", resolve));
-  // eslint-disable-next-line no-console
+   
   console.log("Node installed");
 }
 
-// eslint-disable-next-line no-console
+ 
 console.log("Pulling image/starting container...");
 const containerPromise = createContainer();
 
 async function exitHandler() {
-  // eslint-disable-next-line no-console
+   
   console.log("Exiting...");
   try {
     const container = await containerPromise;
@@ -163,11 +164,13 @@ async function exitHandler() {
     process.exit();
   }
 }
+/* eslint-disable @typescript-eslint/no-misused-promises */
 process.on("exit", exitHandler);
 process.on("SIGINT", exitHandler);
 process.on("SIGUSR1", exitHandler);
 process.on("SIGUSR2", exitHandler);
 process.on("uncaughtException", exitHandler);
+/* eslint-enable @typescript-eslint/no-misused-promises */
 
 const container = await containerPromise;
 await prepareContainer(container);
@@ -183,7 +186,7 @@ class DAPSocket {
 
   private onData = (data: Buffer) => {
     this.rawData = Buffer.concat([this.rawData, data]);
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+     
     while (true) {
       if (this.contentLength >= 0) {
         if (this.rawData.length >= this.contentLength) {
