@@ -6,6 +6,13 @@ import { logger } from "./logger.js";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
+import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis";
+import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
+import "./otel-logger.js";
+import "./metrics.js";
+import { logError, logInfo } from "./otel-logger.js";
+import { authAttempts, authActiveSessions, webhookReceived } from "./metrics.js";
 import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import * as arctic from "arctic";
@@ -25,6 +32,7 @@ import type { AppPublicUsers, AppPublicUserEmails } from "generated/db";
 
 const gql = templateHack;
 const html = templateHack;
+const tracer = trace.getTracer("postgres-garden");
 
 const PositiveNumber = S.Number.pipe(
   S.filter((n) => n > 0 || "a positive number"),
@@ -1079,37 +1087,56 @@ const authRoutes = new Elysia()
   .post(
     "/register",
     async ({ body, cookie, status }) => {
-      try {
-        const {
-          rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.really_create_user(
-            username => ${body.username}::citext,
-            email => ${body.email}::citext,
-            email_is_verified => false,
-            password => ${body.password}::text
-          ) u
-          where not (u is null);
-        `.execute(rootDb);
+      return tracer.startActiveSpan("auth.register", async (span) => {
+        span.setAttribute("auth.method", "password");
+        try {
+          const {
+            rows: [user],
+          } = await sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.really_create_user(
+              username => ${body.username}::citext,
+              email => ${body.email}::citext,
+              email_is_verified => false,
+              password => ${body.password}::text
+            ) u
+            where not (u is null);
+          `.execute(rootDb);
 
-        if (!user?.id) {
-          return status(400, { error: "Registration failed" });
+          if (!user?.id) {
+            span.setAttribute("auth.result", "failed");
+            authAttempts.add(1, { method: "password", action: "register", result: "failed" });
+            span.end();
+            return status(400, { error: "Registration failed" });
+          }
+
+          const { token, expiresAt } = await createSession(user.id);
+          cookie[sessionCookieName]?.set(buildSessionCookie(token, expiresAt));
+
+          span.setAttribute("auth.result", "success");
+          span.setAttribute("user.id", user.id);
+          authAttempts.add(1, { method: "password", action: "register", result: "success" });
+          authActiveSessions.add(1);
+          span.end();
+          return {
+            id: user.id,
+            username: user.username,
+          };
+        } catch (e) {
+          span.recordException(e instanceof Error ? e : new Error(String(e)));
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          if (e instanceof pg.DatabaseError && e.code === "23505") {
+            span.setAttribute("auth.result", "duplicate_user");
+            authAttempts.add(1, { method: "password", action: "register", result: "duplicate_user" });
+            span.end();
+            return status(409, { error: "Username or email already exists" });
+          }
+          logError("Registration error", e);
+          span.setAttribute("auth.result", "error");
+          authAttempts.add(1, { method: "password", action: "register", result: "error" });
+          span.end();
+          return status(500, { error: "Registration failed" });
         }
-
-        const { token, expiresAt } = await createSession(user.id);
-        cookie[sessionCookieName]?.set(buildSessionCookie(token, expiresAt));
-
-        return {
-          id: user.id,
-          username: user.username,
-        };
-      } catch (e) {
-        if (e instanceof pg.DatabaseError && e.code === "23505") {
-          return status(409, { error: "Username or email already exists" });
-        }
-        console.error("Registration error:", e);
-        return status(500, { error: "Registration failed" });
-      }
+      });
     },
     {
       body: S.Struct({
@@ -1122,29 +1149,45 @@ const authRoutes = new Elysia()
   .post(
     "/login",
     async ({ body, cookie, status }) => {
-      try {
-        const {
-          rows: [user],
-        } = await sql<Selectable<AppPublicUsers>>`
-          select u.* from app_private.login(${body.id}::citext, ${body.password}) u
-          where not (u is null)
-        `.execute(rootDb);
+      return tracer.startActiveSpan("auth.login", async (span) => {
+        span.setAttribute("auth.method", "password");
+        try {
+          const {
+            rows: [user],
+          } = await sql<Selectable<AppPublicUsers>>`
+            select u.* from app_private.login(${body.id}::citext, ${body.password}) u
+            where not (u is null)
+          `.execute(rootDb);
 
-        if (!user?.id) {
-          return status(401, { error: "Invalid credentials" });
+          if (!user?.id) {
+            span.setAttribute("auth.result", "invalid_credentials");
+            authAttempts.add(1, { method: "password", action: "login", result: "invalid_credentials" });
+            span.end();
+            return status(401, { error: "Invalid credentials" });
+          }
+
+          const { token, expiresAt } = await createSession(user.id);
+          cookie[sessionCookieName]?.set(buildSessionCookie(token, expiresAt));
+
+          span.setAttribute("auth.result", "success");
+          span.setAttribute("user.id", user.id);
+          authAttempts.add(1, { method: "password", action: "login", result: "success" });
+          authActiveSessions.add(1);
+          span.end();
+          return {
+            id: user.id,
+            username: user.username,
+          };
+        } catch (e) {
+          span.recordException(e instanceof Error ? e : new Error(String(e)));
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          span.setAttribute("auth.result", "error");
+          authAttempts.add(1, { method: "password", action: "login", result: "error" });
+          logError("Login error", e);
+          span.end();
+          return status(500, { error: "Login failed" });
         }
-
-        const { token, expiresAt } = await createSession(user.id);
-        cookie[sessionCookieName]?.set(buildSessionCookie(token, expiresAt));
-
-        return {
-          id: user.id,
-          username: user.username,
-        };
-      } catch (e) {
-        console.error("Login error:", e);
-        return status(500, { error: "Login failed" });
-      }
+      });
     },
     {
       body: S.Struct({
@@ -1155,23 +1198,30 @@ const authRoutes = new Elysia()
   )
   .get("/me", ({ user }) => user)
   .post("/logout", async ({ status, cookie, session }) => {
-    try {
-      if (session) {
-        await deleteSession(session.id);
+    return tracer.startActiveSpan("auth.logout", async (span) => {
+      try {
+        if (session) {
+          await deleteSession(session.id);
+          authActiveSessions.add(-1);
+        }
+        cookie[sessionCookieName]?.set({
+          value: "",
+          httpOnly: true,
+          sameSite: "lax" as const,
+          secure: env.NODE_ENV === "production",
+          path: "/",
+          expires: new Date(0),
+        });
+        span.end();
+        return { success: true };
+      } catch (e) {
+        span.recordException(e instanceof Error ? e : new Error(String(e)));
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        logError("Logout error", e);
+        span.end();
+        return status(500, { error: "Logout failed" });
       }
-      cookie[sessionCookieName]?.set({
-        value: "",
-        httpOnly: true,
-        sameSite: "lax" as const,
-        secure: env.NODE_ENV === "production",
-        path: "/",
-        expires: new Date(0),
-      });
-      return { success: true };
-    } catch (e) {
-      console.error("Logout error:", e);
-      return status(500, { error: "Logout failed" });
-    }
+    });
   });
 
 if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
@@ -1296,15 +1346,15 @@ if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
       switch (true) {
         case sponsorInfo.user.isViewer:
           role = "admin";
-          console.info("github user %s is admin", userInformation.login);
+          logInfo("GitHub user role resolved", { username: userInformation.login, role: "admin" });
           break;
         case sponsorInfo.user.isSponsoringViewer:
           role = "sponsor";
-          console.info("github user %s is sponsor", userInformation.login);
+          logInfo("GitHub user role resolved", { username: userInformation.login, role: "sponsor" });
           break;
         case sponsorInfo.repository.collaborators.totalCount > 0:
           role = "sponsor";
-          console.info("github user %s is collaborator", userInformation.login);
+          logInfo("GitHub user role resolved", { username: userInformation.login, role: "sponsor", reason: "collaborator" });
           break;
       }
       return {
@@ -1372,10 +1422,15 @@ function installOauthProvider({
       if (!storedState || state !== storedState)
         return status(400, { error: "Invalid state parameter" });
 
+      const oauthSpan = tracer.startSpan("auth.oauth_callback");
+      oauthSpan.setAttribute("auth.method", serviceName);
+
       try {
         const { tokens, identifier, profile } = await postRequestHook({
           code,
         });
+        oauthSpan.setAttribute("auth.oauth.identifier", identifier);
+
         // Use subquery to properly expand the composite type returned by the function
         const linkedUser = await rootDb
           .selectFrom(
@@ -1397,10 +1452,16 @@ function installOauthProvider({
         if (!session) {
           const { token, expiresAt } = await createSession(linkedUser.id);
           cookie[sessionCookieName]?.set(buildSessionCookie(token, expiresAt));
+          authActiveSessions.add(1);
         }
 
         // Clear mode cookie after use
         cookie.oauth_mode?.remove();
+
+        oauthSpan.setAttribute("auth.result", "success");
+        oauthSpan.setAttribute("user.id", linkedUser.id);
+        authAttempts.add(1, { method: serviceName, action: "oauth", result: "success" });
+        oauthSpan.end();
 
         set.headers["content-type"] = "text/html; charset=utf-8";
         const authData = JSON.stringify({
@@ -1533,12 +1594,21 @@ function installOauthProvider({
             </body>
           </html>`;
       } catch (err) {
+        oauthSpan.recordException(err instanceof Error ? err : new Error(String(err)));
+        oauthSpan.setStatus({ code: SpanStatusCode.ERROR });
         if (
           err instanceof arctic.OAuth2RequestError &&
           err.message === "bad_verification_code"
         ) {
+          oauthSpan.setAttribute("auth.result", "bad_verification_code");
+          authAttempts.add(1, { method: serviceName, action: "oauth", result: "bad_verification_code" });
+          oauthSpan.end();
           return status(400, { error: "Bad verification code" });
         }
+        oauthSpan.setAttribute("auth.result", "error");
+        authAttempts.add(1, { method: serviceName, action: "oauth", result: "error" });
+        logError("OAuth error", err, { service: serviceName });
+        oauthSpan.end();
         const { code, error } = handleDbError(err, "OAuth error");
         return status(code, { error });
       }
@@ -1557,39 +1627,57 @@ function installOauthProvider({
 const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
   "/gh_sponsor",
   async ({ request, status }) => {
-    const secret = env.GITHUB_WEBHOOK_SECRET;
-    if (!secret) {
-      return status(503, { error: "Webhook not configured" });
-    }
+    return tracer.startActiveSpan("webhook.gh_sponsor", async (span) => {
+      span.setAttribute("webhook.provider", "github");
+      const event = request.headers.get("x-github-event");
+      span.setAttribute("webhook.event", event ?? "unknown");
 
-    const { Webhooks } = await import("@octokit/webhooks");
-    const webhooks = new Webhooks({ secret });
+      const secret = env.GITHUB_WEBHOOK_SECRET;
+      if (!secret) {
+        span.setAttribute("webhook.verified", false);
+        webhookReceived.add(1, { provider: "github", event: event ?? "unknown", verified: "false" });
+        span.end();
+        return status(503, { error: "Webhook not configured" });
+      }
 
-    const signature = request.headers.get("x-hub-signature-256");
-    const body = await request.text();
+      const { Webhooks } = await import("@octokit/webhooks");
+      const webhooks = new Webhooks({ secret });
 
-    if (!signature || !(await webhooks.verify(body, signature))) {
-      return status(401, { error: "Invalid signature" });
-    }
+      const signature = request.headers.get("x-hub-signature-256");
+      const body = await request.text();
 
-    const event = request.headers.get("x-github-event");
-    if (event !== "sponsorship") {
+      if (!signature || !(await webhooks.verify(body, signature))) {
+        span.setAttribute("webhook.verified", false);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: "Invalid signature" });
+        webhookReceived.add(1, { provider: "github", event: event ?? "unknown", verified: "false" });
+        span.end();
+        return status(401, { error: "Invalid signature" });
+      }
+
+      span.setAttribute("webhook.verified", true);
+      webhookReceived.add(1, { provider: "github", event: event ?? "unknown", verified: "true" });
+
+      if (event !== "sponsorship") {
+        span.end();
+        return { ok: true };
+      }
+
+      const payload: unknown = JSON.parse(body);
+      span.setAttribute("graphile.job_name", "sponsor_webhook");
+      await rootDb
+        .selectNoFrom((eb) =>
+          eb
+            .fn("graphile_worker.add_job", [
+              eb.val("sponsor_webhook"),
+              sql`${JSON.stringify(payload)}::json`,
+            ])
+            .as("add_job"),
+        )
+        .executeTakeFirst();
+
+      span.end();
       return { ok: true };
-    }
-
-    const payload: unknown = JSON.parse(body);
-    await rootDb
-      .selectNoFrom((eb) =>
-        eb
-          .fn("graphile_worker.add_job", [
-            eb.val("sponsor_webhook"),
-            sql`${JSON.stringify(payload)}::json`,
-          ])
-          .as("add_job"),
-      )
-      .executeTakeFirst();
-
-    return { ok: true };
+    });
   },
 );
 
@@ -1598,7 +1686,11 @@ export const app = new Elysia()
   .use(
     opentelemetry({
       serviceName: "postgres-garden",
-      instrumentations: [new PgInstrumentation()],
+      instrumentations: [
+        new PgInstrumentation(),
+        new IORedisInstrumentation(),
+        new UndiciInstrumentation(),
+      ],
       spanProcessors: env.OTEL_EXPORTER_OTLP_ENDPOINT
         ? [
           new BatchSpanProcessor(

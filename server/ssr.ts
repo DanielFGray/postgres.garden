@@ -6,6 +6,10 @@
 import { treaty } from "@elysiajs/eden";
 import type { App } from "./app.js";
 import { URLPattern } from "urlpattern-polyfill";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
+import { logError } from "./otel-logger.js";
+
+const tracer = trace.getTracer("postgres-garden");
 
 // Route patterns (same as in src/routes.ts)
 const patterns = {
@@ -88,74 +92,97 @@ export async function getInitialData(
   pathname: string,
   cookieHeader: string,
 ): Promise<unknown> {
-  // Create treaty client for in-memory API calls
-  const client = treaty(app);
-  const fetchOpts = { fetch: { headers: { Cookie: cookieHeader } } };
-
-  try {
-    // Always fetch user data using /me (returns user directly, not wrapped)
-    const { data: user } = await client.me.get(fetchOpts);
-
-    // Parse the route to understand what we're loading
+  return tracer.startActiveSpan("ssr.getInitialData", async (span) => {
     const route = parsePathname(pathname);
+    span.setAttribute("ssr.route_type", route?.type ?? "unknown");
+    span.setAttribute("ssr.pathname", pathname);
 
-    // If home page or invalid route, just return user data
-    if (!route || route.type === "home") {
-      return { user, route: null, commit: null };
-    }
+    // Create treaty client for in-memory API calls
+    const client = treaty(app);
+    const fetchOpts = { fetch: { headers: { Cookie: cookieHeader } } };
+    let apiCalls = 0;
 
-    // Shared routes: data is encoded in the URL, no server-side fetch needed
-    if (route.type === "shared") {
-      return { user, route, commit: null };
-    }
+    try {
+      // Always fetch user data using /me (returns user directly, not wrapped)
+      const { data: user } = await client.me.get(fetchOpts);
+      apiCalls++;
 
-    // For playground routes, fetch the playground and commit data
-    if (route.type === "playground" || route.type === "commit") {
-      const hash = route.params.playgroundId!;
+      // If home page or invalid route, just return user data
+      if (!route || route.type === "home") {
+        span.setAttribute("ssr.api_calls", apiCalls);
+        span.end();
+        return { user, route: null, commit: null };
+      }
 
-      // Fetch playground info
-      const { data: playground } = await client.api
-        .playgrounds({ hash })
-        .get(fetchOpts);
-
-      if (!playground || "error" in playground) {
+      // Shared routes: data is encoded in the URL, no server-side fetch needed
+      if (route.type === "shared") {
+        span.setAttribute("ssr.api_calls", apiCalls);
+        span.end();
         return { user, route, commit: null };
       }
 
-      let commit = null;
+      // For playground routes, fetch the playground and commit data
+      if (route.type === "playground" || route.type === "commit") {
+        const hash = route.params.playgroundId!;
 
-      // If it's a specific commit, fetch that commit
-      if (route.type === "commit" && route.params.commitId) {
-        const { data } = await client.api
+        // Fetch playground info
+        const { data: playground } = await client.api
           .playgrounds({ hash })
-          .commits({ commit_id: route.params.commitId })
           .get(fetchOpts);
-        commit = data;
-      } else if (route.type === "playground") {
-        // For playground routes without specific commit, fetch the latest commit
-        const { data: commits } = await client.api
-          .playgrounds({ hash })
-          .commits.get(fetchOpts);
+        apiCalls++;
 
-        if (Array.isArray(commits) && commits.length > 0) {
-          // Get the first commit (latest, since they're ordered by created_at desc)
-          const latestCommitId = commits[0]!.id;
+        if (!playground || "error" in playground) {
+          span.setAttribute("ssr.api_calls", apiCalls);
+          span.end();
+          return { user, route, commit: null };
+        }
+
+        let commit = null;
+
+        // If it's a specific commit, fetch that commit
+        if (route.type === "commit" && route.params.commitId) {
           const { data } = await client.api
             .playgrounds({ hash })
-            .commits({ commit_id: latestCommitId })
+            .commits({ commit_id: route.params.commitId })
             .get(fetchOpts);
+          apiCalls++;
           commit = data;
+        } else if (route.type === "playground") {
+          // For playground routes without specific commit, fetch the latest commit
+          const { data: commits } = await client.api
+            .playgrounds({ hash })
+            .commits.get(fetchOpts);
+          apiCalls++;
+
+          if (Array.isArray(commits) && commits.length > 0) {
+            // Get the first commit (latest, since they're ordered by created_at desc)
+            const latestCommitId = commits[0]!.id;
+            const { data } = await client.api
+              .playgrounds({ hash })
+              .commits({ commit_id: latestCommitId })
+              .get(fetchOpts);
+            apiCalls++;
+            commit = data;
+          }
         }
+
+        span.setAttribute("ssr.api_calls", apiCalls);
+        span.end();
+        return { user, route, commit };
       }
 
-      return { user, route, commit };
+      span.setAttribute("ssr.api_calls", apiCalls);
+      span.end();
+      return { user, route: null, commit: null };
+    } catch (error) {
+      span.recordException(error instanceof Error ? error : new Error(String(error)));
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setAttribute("ssr.api_calls", apiCalls);
+      logError(`[SSR] Failed to fetch ${pathname}`, error);
+      span.end();
+      return null;
     }
-
-    return { user, route: null, commit: null };
-  } catch (error) {
-    console.error(`[SSR] Failed to fetch ${pathname}:`, error);
-    return null;
-  }
+  });
 }
 
 

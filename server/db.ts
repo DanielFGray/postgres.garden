@@ -1,6 +1,8 @@
 import * as pg from "pg";
 import { PostgresDialect, Transaction, Kysely, sql } from "kysely";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { env } from "./assertEnv.js";
+import { logError } from "./otel-logger.js";
 import type {
   DB,
   AppPublicUsers as User,
@@ -60,14 +62,20 @@ const CUSTOM_ERROR_CODES = [
 ] as const;
 
 export function handleDbError(e: unknown, fallbackMessage: string) {
+  const span = trace.getActiveSpan();
   if (
     e instanceof pg.DatabaseError &&
     e.code &&
     (CUSTOM_ERROR_CODES as unknown as string[]).includes(e.code)
   ) {
+    span?.setAttribute("db.error_code", e.code);
     // Return the exact error message from the database
     return { code: 400, error: e.message };
   }
-  console.error(e);
+  if (span) {
+    span.recordException(e instanceof Error ? e : new Error(String(e)));
+    span.setStatus({ code: SpanStatusCode.ERROR });
+  }
+  logError("Database error", e);
   return { code: 500, error: fallbackMessage };
 }
