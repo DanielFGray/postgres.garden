@@ -110,6 +110,39 @@ body {
   font-style: italic;
 }
 
+/* Inputs */
+.setting-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  border-radius: 2px;
+}
+
+.setting-input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.setting-input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.setting-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+}
+
 /* Avatar */
 .avatar-preview {
   display: flex;
@@ -198,4 +231,70 @@ body {
 .button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Emails section */
+.badge-primary { background: var(--vscode-charts-blue); color: #fff; }
+
+.email-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.email-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.email-address {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.email-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.add-email-form {
+  margin-top: 16px;
+}
+
+.add-email-row {
+  display: flex;
+  gap: 8px;
+}
+
+.email-input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 2px;
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.email-input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.email-input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }

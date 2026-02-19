@@ -407,12 +407,8 @@ void ext.getApi().then((vsapi) => {
   // Register account menu command
   vsapi.commands.registerCommand(GITHUB_ACCOUNT_MENU, async () => {
     try {
-      const sessions = await vscode.authentication.getSession(
-        GitHubAuthProvider.id,
-        [],
-        { createIfNone: false },
-      );
-      if (!sessions) return;
+      const sessions = await provider.getSessions();
+      if (sessions.length === 0) return;
 
       const menuItems: AccountMenuItem[] = [
         { label: "$(account) Account Settings", value: "settings" },

@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { api } from "../../api-client";
 import { getNetworkState } from "../network";
 import type { WebviewMessage } from "./types";
 
@@ -80,26 +79,33 @@ export class AccountSettingsPanelProvider {
     }
 
     try {
-      const options: Record<string, unknown> = { method };
+      const headers: Record<string, string> = {};
       if (body !== undefined) {
-        options.body = body;
+        headers["Content-Type"] = "application/json";
       }
 
-      const { data, error } = await api(endpoint as Parameters<typeof api>[0], options as Parameters<typeof api>[1]);
+      const response = await fetch(window.location.origin + endpoint, {
+        method,
+        credentials: "include",
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
 
-      if (error) {
+      const responseBody: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
         this._panel.webview.postMessage({
           type: "error",
           id,
           error: {
-            code: String((error as { status?: number }).status ?? "UNKNOWN"),
-            message: JSON.stringify((error as { value?: unknown }).value),
+            code: String(response.status),
+            message: JSON.stringify(responseBody),
           },
         });
         return;
       }
 
-      this._panel.webview.postMessage({ type: "data", id, data });
+      this._panel.webview.postMessage({ type: "data", id, data: responseBody });
     } catch (err) {
       this._panel.webview.postMessage({
         type: "error",
@@ -127,6 +133,7 @@ export class AccountSettingsPanelProvider {
   private _getHtmlForWebview(webview: vscode.Webview) {
     const baseUri = this._extensionUri.toString().replace(/\/$/, "");
     const scriptUri = `${baseUri}/src/webview-dist/account-settings.js`;
+    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
     const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
 
     const nonce = getNonce();
@@ -137,6 +144,7 @@ export class AccountSettingsPanelProvider {
         <meta charset="UTF-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link href="${styleUri}" rel="stylesheet" />
         <link href="${codiconsUri}" rel="stylesheet" />
         <title>Account Settings</title>
       </head>
