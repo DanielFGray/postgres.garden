@@ -38,7 +38,7 @@ export default async (inPayload, { addJob, withPgClient }) => {
     template: "password_reset.mjml",
     variables: {
       token,
-      verifyLink: `${process.env.ROOT_URL}/reset?userId=${encodeURIComponent(
+      verifyLink: `${process.env.VITE_ROOT_URL}/reset?userId=${encodeURIComponent(
         user.id,
       )}&token=${encodeURIComponent(token)}`,
     },

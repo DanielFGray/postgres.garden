@@ -23,7 +23,7 @@ export default async (inPayload, { addJob }) => {
     },
     template: "password_reset_unregistered.mjml",
     variables: {
-      url: process.env.ROOT_URL,
+      url: process.env.VITE_ROOT_URL,
     },
   };
   await addJob("send_email", sendEmailPayload);

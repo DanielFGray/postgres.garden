@@ -21,6 +21,7 @@ export default defineConfig({
         ),
         "erd-viewer": resolve(__dirname, "src/features/erd/webview/entry.tsx"),
         "account-settings": resolve(__dirname, "src/features/account/webview/index.tsx"),
+        "auth-panel": resolve(__dirname, "src/features/auth-panel/webview/index.tsx"),
       },
       formats: ["es"],
       fileName: (format, entryName) => `${entryName}.js`,

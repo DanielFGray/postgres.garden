@@ -14,6 +14,7 @@ import {
   ACCOUNT_SETTINGS_OPEN,
 } from "./constants";
 import { AccountSettingsPanelProvider } from "./account/AccountSettingsPanelProvider";
+import { AuthPanelProvider } from "./auth-panel/AuthPanelProvider";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
 const AuthMessage = S.Struct({
@@ -22,35 +23,37 @@ const AuthMessage = S.Struct({
 });
 const isAuthMessage = S.is(AuthMessage);
 
-const GITHUB_AUTH_ID = "github-auth";
+const AUTH_PROVIDER_ID = "github-auth";
 
 /**
- * GitHub authentication session
+ * Authentication session
  */
-class GitHubAuthSession implements vscode.AuthenticationSession {
+class AuthSession implements vscode.AuthenticationSession {
   readonly account: { id: string; label: string };
-  readonly id = GITHUB_AUTH_ID;
+  readonly id = AUTH_PROVIDER_ID;
   readonly scopes = [];
 
   constructor(
     public readonly accessToken: string,
     public readonly username: string,
   ) {
-    this.account = { id: GITHUB_AUTH_ID, label: username };
+    this.account = { id: AUTH_PROVIDER_ID, label: username };
   }
 }
 
 /**
- * GitHub authentication provider
+ * Authentication provider
+ * Supports email/password and GitHub OAuth
  * Uses localStorage for persistence and syncs with server via cookies
  */
-export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode.Disposable {
-  static id = GITHUB_AUTH_ID;
-  static label = "GitHub";
+export class AuthProvider implements vscode.AuthenticationProvider, vscode.Disposable {
+  static id = AUTH_PROVIDER_ID;
+  static label = "postgres.garden";
   private static storageKey = "github-username";
 
   private currentUsername: string | undefined;
   private initializedDisposable: vscode.Disposable | undefined;
+  private extensionUri: vscode.Uri | undefined;
 
   private _onDidChangeSessions =
     new vscode.EventEmitter<vscode.AuthenticationProviderAuthenticationSessionsChangeEvent>();
@@ -65,12 +68,16 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
     if (initialData?.user?.username) {
       this.currentUsername = initialData.user.username;
       // Store in localStorage for persistence
-      localStorage.setItem(GitHubAuthProvider.storageKey, this.currentUsername);
+      localStorage.setItem(AuthProvider.storageKey, this.currentUsername);
     } else {
       // No server session - clear any stale localStorage
-      localStorage.removeItem(GitHubAuthProvider.storageKey);
+      localStorage.removeItem(AuthProvider.storageKey);
       this.currentUsername = undefined;
     }
+  }
+
+  setExtensionUri(uri: vscode.Uri) {
+    this.extensionUri = uri;
   }
 
   dispose(): void {
@@ -82,7 +89,7 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
       this.initializedDisposable = vscode.Disposable.from(
         // Listen for auth changes from other windows/tabs
         vscode.authentication.onDidChangeSessions((e) => {
-          if (e.provider.id === GitHubAuthProvider.id) {
+          if (e.provider.id === AuthProvider.id) {
             this.checkForUpdates();
           }
         }),
@@ -96,18 +103,18 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
     const changed: vscode.AuthenticationSession[] = [];
 
     const previousUsername = this.currentUsername;
-    const storedUsername = localStorage.getItem(GitHubAuthProvider.storageKey);
+    const storedUsername = localStorage.getItem(AuthProvider.storageKey);
 
     if (storedUsername && !previousUsername) {
       this.currentUsername = storedUsername;
-      added.push(new GitHubAuthSession(storedUsername, storedUsername));
+      added.push(new AuthSession(storedUsername, storedUsername));
     } else if (!storedUsername && previousUsername) {
       this.currentUsername = undefined;
-      removed.push(new GitHubAuthSession(previousUsername, previousUsername));
+      removed.push(new AuthSession(previousUsername, previousUsername));
     } else if (storedUsername !== previousUsername) {
       this.currentUsername = storedUsername || undefined;
       if (storedUsername) {
-        changed.push(new GitHubAuthSession(storedUsername, storedUsername));
+        changed.push(new AuthSession(storedUsername, storedUsername));
       }
     } else {
       return;
@@ -118,15 +125,59 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
 
   getSessions(): Promise<vscode.AuthenticationSession[]> {
     this.ensureInitialized();
-    const username = this.currentUsername || localStorage.getItem(GitHubAuthProvider.storageKey);
-    return Promise.resolve(username ? [new GitHubAuthSession(username, username)] : []);
+    const username = this.currentUsername || localStorage.getItem(AuthProvider.storageKey);
+    return Promise.resolve(username ? [new AuthSession(username, username)] : []);
   }
 
-  createSession() {
+  createSession(): Promise<vscode.AuthenticationSession> {
     this.ensureInitialized();
 
-    // Use GitHub OAuth via the createSessionWithGitHub method
-    return this.createSessionWithGitHub();
+    // Open auth panel with login/register/GitHub options
+    return new Promise<vscode.AuthenticationSession>((resolve, reject) => {
+      if (!this.extensionUri) {
+        reject(new Error("Extension URI not set"));
+        return;
+      }
+
+      AuthPanelProvider.createOrShow(this.extensionUri, {
+        onAuth: (username: string) => {
+          // Email/password auth completed — update state
+          localStorage.setItem(AuthProvider.storageKey, username);
+          this.currentUsername = username;
+          const session = new AuthSession(username, username);
+          this._onDidChangeSessions.fire({ added: [session], removed: [], changed: [] });
+          resolve(session);
+        },
+        onGitHubSignIn: () => {
+          // User clicked GitHub button — run OAuth popup flow
+          this.createSessionWithGitHub()
+            .then((session) => {
+              AuthPanelProvider.notifyGitHubComplete(session.username);
+              // Session is already stored by createSessionWithGitHub
+              resolve(session);
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              AuthPanelProvider.notifyGitHubError(msg);
+              // Don't reject — let user try again
+            });
+        },
+        onCancel: () => {
+          reject(new Error("Authentication was cancelled"));
+        },
+      });
+    });
+  }
+
+  /**
+   * Called when email/password auth completes outside the VSCode auth API flow
+   * (e.g., from the sign-in command opening the panel directly).
+   */
+  completeAuth(username: string) {
+    localStorage.setItem(AuthProvider.storageKey, username);
+    this.currentUsername = username;
+    const session = new AuthSession(username, username);
+    this._onDidChangeSessions.fire({ added: [session], removed: [], changed: [] });
   }
 
   async removeSession(): Promise<void> {
@@ -136,7 +187,7 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
     }
 
     // Clear localStorage
-    localStorage.removeItem(GitHubAuthProvider.storageKey);
+    localStorage.removeItem(AuthProvider.storageKey);
     this.currentUsername = undefined;
 
     // Sync with server to clear session cookie
@@ -148,7 +199,7 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
 
     // Fire session change event
     this._onDidChangeSessions.fire({
-      removed: [new GitHubAuthSession(username, username)],
+      removed: [new AuthSession(username, username)],
       added: [],
       changed: [],
     });
@@ -157,7 +208,7 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
   /**
    * Create session using GitHub OAuth in a popup window
    */
-  async createSessionWithGitHub(): Promise<vscode.AuthenticationSession> {
+  async createSessionWithGitHub(): Promise<AuthSession> {
     this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
@@ -187,14 +238,14 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
         const username = user.username;
 
         // Store in localStorage
-        localStorage.setItem(GitHubAuthProvider.storageKey, username);
+        localStorage.setItem(AuthProvider.storageKey, username);
         this.currentUsername = username;
 
         // Clean up auth result from localStorage
         localStorage.removeItem(storageKey);
 
         // Create session
-        const session = new GitHubAuthSession(username, username);
+        const session = new AuthSession(username, username);
 
         // Fire session change event
         this._onDidChangeSessions.fire({
@@ -305,7 +356,7 @@ export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode
 }
 
 // Export provider instance for use in other modules
-export let authProviderInstance: GitHubAuthProvider | undefined;
+export let authProviderInstance: AuthProvider | undefined;
 
 const ext = registerExtension(
   {
@@ -329,12 +380,15 @@ interface AccountMenuItem extends vscode.QuickPickItem {
 
 void ext.getApi().then((vsapi) => {
   // Register the authentication provider
-  const provider = new GitHubAuthProvider();
+  const provider = new AuthProvider();
   authProviderInstance = provider;
 
+  const extensionUri = vscode.Uri.parse(window.location.origin);
+  provider.setExtensionUri(extensionUri);
+
   vscode.authentication.registerAuthenticationProvider(
-    GitHubAuthProvider.id,
-    GitHubAuthProvider.label,
+    AuthProvider.id,
+    AuthProvider.label,
     provider,
   );
 
@@ -362,18 +416,28 @@ void ext.getApi().then((vsapi) => {
     }
   };
 
-  // Register sign in command
-  vsapi.commands.registerCommand(GITHUB_SIGNIN, async () => {
-    try {
-      await vscode.authentication.getSession(GitHubAuthProvider.id, [], {
-        createIfNone: true,
-      });
-      void vscode.window.showInformationMessage("Successfully signed in!");
-    } catch (error) {
-      void vscode.window.showErrorMessage(
-        `Sign in failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+  // Register sign in command — opens auth panel directly
+  vsapi.commands.registerCommand(GITHUB_SIGNIN, () => {
+    AuthPanelProvider.createOrShow(extensionUri, {
+      onAuth: (username: string) => {
+        localStorage.setItem("github-username", username);
+        provider.completeAuth(username);
+      },
+      onGitHubSignIn: () => {
+        provider
+          .createSessionWithGitHub()
+          .then((session) => {
+            AuthPanelProvider.notifyGitHubComplete(session.username);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            AuthPanelProvider.notifyGitHubError(msg);
+          });
+      },
+      onCancel: () => {
+        // User closed the panel — nothing to do
+      },
+    });
   });
 
   // Register sign out command — single source of truth for logout
@@ -390,7 +454,6 @@ void ext.getApi().then((vsapi) => {
   });
 
   // Register account settings command
-  const extensionUri = vscode.Uri.parse(window.location.origin);
   vsapi.commands.registerCommand(ACCOUNT_SETTINGS_OPEN, () => {
     AccountSettingsPanelProvider.createOrShow(extensionUri);
   });
@@ -429,11 +492,34 @@ void ext.getApi().then((vsapi) => {
 
   // Listen for authentication changes
   vscode.authentication.onDidChangeSessions((e) => {
-    if (e.provider.id === GitHubAuthProvider.id) {
+    if (e.provider.id === AuthProvider.id) {
       void updateStatusBar();
     }
   });
 
   // Initial status bar update
   void updateStatusBar();
+
+  // === URL Parameter Detection ===
+  // Check for /verify and /reset URLs from email links
+  const url = new URL(window.location.href);
+  const pathname = url.pathname;
+
+  if (pathname === "/reset") {
+    const userId = url.searchParams.get("userId");
+    const token = url.searchParams.get("token");
+    if (userId && token) {
+      AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", { userId, token });
+      // Clean URL
+      window.history.replaceState({}, "", "/");
+    }
+  } else if (pathname === "/verify") {
+    const emailId = url.searchParams.get("id");
+    const token = url.searchParams.get("token");
+    if (emailId && token) {
+      AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", { emailId, token });
+      // Clean URL
+      window.history.replaceState({}, "", "/");
+    }
+  }
 });

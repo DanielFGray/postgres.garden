@@ -61,7 +61,7 @@ export default async (inPayload, { addJob, withPgClient }) => {
     template: "verify_email.mjml",
     variables: {
       token: verification_token,
-      verifyLink: `${process.env.ROOT_URL}/verify?id=${encodeURIComponent(
+      verifyLink: `${process.env.VITE_ROOT_URL}/verify?id=${encodeURIComponent(
         String(userEmailId),
       )}&token=${encodeURIComponent(verification_token)}`,
       username,

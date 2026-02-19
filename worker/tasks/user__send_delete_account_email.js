@@ -21,7 +21,7 @@ export default async (inPayload, { addJob }) => {
     template: "delete_account.mjml",
     variables: {
       token,
-      deleteAccountLink: `${process.env.ROOT_URL}/settings?delete_token=${encodeURIComponent(
+      deleteAccountLink: `${process.env.VITE_ROOT_URL}/settings?delete_token=${encodeURIComponent(
         token,
       )}`,
     },

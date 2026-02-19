@@ -1,0 +1,184 @@
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Container */
+.auth-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+/* View wrapper */
+.auth-view {
+  width: 100%;
+  max-width: 360px;
+}
+
+/* Header */
+.auth-header {
+  margin-bottom: 24px;
+}
+
+.auth-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.auth-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Form fields */
+.auth-field {
+  margin-bottom: 14px;
+}
+
+.auth-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+}
+
+/* Inputs — match account settings */
+.setting-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  border-radius: 2px;
+}
+
+.setting-input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.setting-input:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* Error */
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--vscode-inputValidation-errorBackground);
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+  border-radius: 2px;
+  color: var(--vscode-errorForeground);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* Buttons */
+.button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-button-primary {
+  width: 100%;
+  justify-content: center;
+  padding: 8px 12px;
+}
+
+.auth-button-github {
+  width: 100%;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.auth-button-github:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Links */
+.auth-links {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.auth-link {
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
+  padding: 0;
+}
+
+.auth-link:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.auth-link-separator {
+  margin: 0 8px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Divider */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  gap: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-panel-border);
+}
+
+.auth-divider span {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
