@@ -49,34 +49,34 @@ import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy
 import getTestingServiceOverride from "@codingame/monaco-vscode-testing-service-override";
 import getChatServiceOverride from "@codingame/monaco-vscode-chat-service-override";
 import getNotebookServiceOverride from "@codingame/monaco-vscode-notebook-service-override";
-import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
-import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
-import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
-import getUserDataProfileServiceOverride from "@codingame/monaco-vscode-user-data-profile-service-override";
+// import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
+// import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
+// import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
+// import getUserDataProfileServiceOverride from "@codingame/monaco-vscode-user-data-profile-service-override";
 import getAiServiceOverride from "@codingame/monaco-vscode-ai-service-override";
 import getTaskServiceOverride from "@codingame/monaco-vscode-task-service-override";
 import getOutlineServiceOverride from "@codingame/monaco-vscode-outline-service-override";
-import getTimelineServiceOverride from "@codingame/monaco-vscode-timeline-service-override";
-import getCommentsServiceOverride from "@codingame/monaco-vscode-comments-service-override";
-import getEditSessionsServiceOverride from "@codingame/monaco-vscode-edit-sessions-service-override";
+// import getTimelineServiceOverride from "@codingame/monaco-vscode-timeline-service-override";
+// import getCommentsServiceOverride from "@codingame/monaco-vscode-comments-service-override";
+// import getEditSessionsServiceOverride from "@codingame/monaco-vscode-edit-sessions-service-override";
 // import getEmmetServiceOverride from "@codingame/monaco-vscode-emmet-service-override";
-import getInteractiveServiceOverride from "@codingame/monaco-vscode-interactive-service-override";
-import getIssueServiceOverride from "@codingame/monaco-vscode-issue-service-override";
-import getMultiDiffEditorServiceOverride from "@codingame/monaco-vscode-multi-diff-editor-service-override";
-import getPerformanceServiceOverride from "@codingame/monaco-vscode-performance-service-override";
-import getRelauncherServiceOverride from "@codingame/monaco-vscode-relauncher-service-override";
-import getShareServiceOverride from "@codingame/monaco-vscode-share-service-override";
-import getSpeechServiceOverride from "@codingame/monaco-vscode-speech-service-override";
-import getSurveyServiceOverride from "@codingame/monaco-vscode-survey-service-override";
-import getUpdateServiceOverride from "@codingame/monaco-vscode-update-service-override";
+// import getInteractiveServiceOverride from "@codingame/monaco-vscode-interactive-service-override";
+// import getIssueServiceOverride from "@codingame/monaco-vscode-issue-service-override";
+// import getMultiDiffEditorServiceOverride from "@codingame/monaco-vscode-multi-diff-editor-service-override";
+// import getPerformanceServiceOverride from "@codingame/monaco-vscode-performance-service-override";
+// import getRelauncherServiceOverride from "@codingame/monaco-vscode-relauncher-service-override";
+// import getShareServiceOverride from "@codingame/monaco-vscode-share-service-override";
+// import getSpeechServiceOverride from "@codingame/monaco-vscode-speech-service-override";
+// import getSurveyServiceOverride from "@codingame/monaco-vscode-survey-service-override";
+// import getUpdateServiceOverride from "@codingame/monaco-vscode-update-service-override";
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override";
 import getLocalizationServiceOverride from "@codingame/monaco-vscode-localization-service-override";
-import getTreeSitterServiceOverride from "@codingame/monaco-vscode-treesitter-service-override";
-import getTelemetryServiceOverride from "@codingame/monaco-vscode-telemetry-service-override";
+// import getTreeSitterServiceOverride from "@codingame/monaco-vscode-treesitter-service-override";
+// import getTelemetryServiceOverride from "@codingame/monaco-vscode-telemetry-service-override";
 import getMcpServiceOverride from "@codingame/monaco-vscode-mcp-service-override";
-import getProcessControllerServiceOverride from "@codingame/monaco-vscode-process-explorer-service-override";
-import getImageResizeServiceOverride from "@codingame/monaco-vscode-image-resize-service-override";
-import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
+// import getProcessControllerServiceOverride from "@codingame/monaco-vscode-process-explorer-service-override";
+// import getImageResizeServiceOverride from "@codingame/monaco-vscode-image-resize-service-override";
+// import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
 import { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
 import { Worker } from "./tools/fakeWorker";
 import defaultKeybindings from "./user/keybindings.json?raw";
@@ -247,13 +247,13 @@ export const commonServices: IEditorOverrideServices = {
   ...getConfigurationServiceOverride(),
   ...getKeybindingsServiceOverride(),
   ...getTextmateServiceOverride(),
-  ...getTreeSitterServiceOverride(),
+  // ...getTreeSitterServiceOverride(),
   ...getThemeServiceOverride(),
   ...getLanguagesServiceOverride(),
   ...getDebugServiceOverride(),
   ...getPreferencesServiceOverride(),
   ...getOutlineServiceOverride(),
-  ...getTimelineServiceOverride(),
+  // ...getTimelineServiceOverride(),
   ...getBannerServiceOverride(),
   ...getStatusBarServiceOverride(),
   ...getTitleBarServiceOverride(),
@@ -279,24 +279,24 @@ export const commonServices: IEditorOverrideServices = {
   ...getTestingServiceOverride(),
   ...getChatServiceOverride(),
   ...getNotebookServiceOverride(),
-  ...getWelcomeServiceOverride(),
-  ...getWalkThroughServiceOverride(),
-  ...getUserDataProfileServiceOverride(),
-  ...getUserDataSyncServiceOverride(),
+  // ...getWelcomeServiceOverride(),
+  // ...getWalkThroughServiceOverride(),
+  // ...getUserDataProfileServiceOverride(),
+  // ...getUserDataSyncServiceOverride(),
   ...getAiServiceOverride(),
   ...getTaskServiceOverride(),
-  ...getCommentsServiceOverride(),
-  ...getEditSessionsServiceOverride(),
+  // ...getCommentsServiceOverride(),
+  // ...getEditSessionsServiceOverride(),
   // ...getEmmetServiceOverride(),
-  ...getInteractiveServiceOverride(),
-  ...getIssueServiceOverride(),
-  ...getMultiDiffEditorServiceOverride(),
-  ...getPerformanceServiceOverride(),
-  ...getRelauncherServiceOverride(),
-  ...getShareServiceOverride(),
-  ...getSpeechServiceOverride(),
-  ...getSurveyServiceOverride(),
-  ...getUpdateServiceOverride(),
+  // ...getInteractiveServiceOverride(),
+  // ...getIssueServiceOverride(),
+  // ...getMultiDiffEditorServiceOverride(),
+  // ...getPerformanceServiceOverride(),
+  // ...getRelauncherServiceOverride(),
+  // ...getShareServiceOverride(),
+  // ...getSpeechServiceOverride(),
+  // ...getSurveyServiceOverride(),
+  // ...getUpdateServiceOverride(),
   ...getExplorerServiceOverride(),
   ...getLocalizationServiceOverride({
     clearLocale() {
@@ -379,9 +379,9 @@ export const commonServices: IEditorOverrideServices = {
     ],
   }),
   ...getSecretStorageServiceOverride(),
-  ...getTelemetryServiceOverride(),
+  // ...getTelemetryServiceOverride(),
   ...getMcpServiceOverride(),
-  ...getProcessControllerServiceOverride(),
-  ...getImageResizeServiceOverride(),
-  ...getAssignmentServiceOverride(),
+  // ...getProcessControllerServiceOverride(),
+  // ...getImageResizeServiceOverride(),
+  // ...getAssignmentServiceOverride(),
 };

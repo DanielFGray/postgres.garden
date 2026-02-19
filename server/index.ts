@@ -35,25 +35,19 @@ export type App = typeof app;
 if (isDev) {
   console.log("🚀 Starting development server with Vite SSR...");
 
-  // Create and start Vite dev server (it handles API routes internally)
-  const vite = await createDevServer(app);
-
-  // Vite dev server starts automatically when created
-  // The HTTP server is accessible via vite.httpServer
-  const resolvedPort = vite.config.server.port || PORT;
-
-  if (!vite.httpServer) {
-    throw new Error("Vite HTTP server not available");
-  }
+  // Create dev server plugin — Elysia is the HTTP server, Vite runs in middleware mode
+  const { devApp, stop } = await createDevServer(app);
+  app.use(devApp);
+  app.listen(PORT);
 
   console.log(`
   Development Server Running
-  Local:   http://localhost:${resolvedPort}
-  Network: http://${HOST}:${resolvedPort}
+  Local:   http://localhost:${PORT}
+  Network: http://${HOST}:${PORT}
 -----------------------------------------
   SSR data injection: ✓ enabled
-  Vite HMR:           ✓ enabled
-  API routes:         ✓ enabled
+  Vite HMR:           ✓ enabled (ws://localhost:${PORT + 1})
+  API routes:         ✓ enabled (Elysia native)
 -----------------------------------------
   `);
 
@@ -65,7 +59,7 @@ if (isDev) {
 
     console.log(`\n${signal} received, shutting down gracefully...`);
     try {
-      await vite.close();
+      await stop();
       console.log("✓ Vite server closed");
       process.exit(0);
     } catch (error) {
