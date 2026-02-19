@@ -1,49 +1,13 @@
-import { signal, computed, effect } from "@preact/signals";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
 import type { PlaygroundListItem, ExtensionToViewMessage } from "../../types";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 
-// State
-const playgrounds = signal<PlaygroundListItem[]>([]);
-const searchQuery = signal("");
-
-// Computed filtered playgrounds
-const filteredPlaygrounds = computed(() => {
-  const query = searchQuery.value.toLowerCase();
-  if (!query) return playgrounds.value;
-
-  return playgrounds.value.filter(
-    (p) =>
-      (p.name && p.name.toLowerCase().includes(query)) ||
-      (p.description && p.description.toLowerCase().includes(query)),
-  );
-});
-
-// Listen for messages from extension
-window.addEventListener("message", (event) => {
-  const message = event.data as ExtensionToViewMessage;
-  console.log("Received message:", message);
-
-  switch (message.type) {
-    case "playgroundsList":
-      playgrounds.value = message.data || [];
-      break;
-    case "playgroundCreated":
-    case "playgroundDeleted":
-      // Request refresh
-      vscode.postMessage({ type: "loadPlaygrounds" });
-      break;
-    case "error":
-      console.error("Error from extension:", message.data?.message);
-      break;
-  }
-});
-
-// Request initial data on mount
-effect(() => {
-  vscode.postMessage({ type: "loadPlaygrounds" });
-});
+// Atoms
+const playgroundsAtom = Atom.make<PlaygroundListItem[]>([]);
+const searchQueryAtom = Atom.make("");
 
 function handleCreate() {
   const name = prompt("Playground name:");
@@ -53,11 +17,6 @@ function handleCreate() {
       data: { name },
     });
   }
-}
-
-function handleSearch(e: Event) {
-  const target = e.target as HTMLInputElement;
-  searchQuery.value = target.value;
 }
 
 function handleOpen(hash: string) {
@@ -116,14 +75,14 @@ function PlaygroundItem({ playground }: { playground: PlaygroundListItem }) {
           <button
             class="icon-button action-fork"
             title="Fork"
-            onClick={(e) => handleFork(e, playground.hash)}
+            onClick={(e: Event) => handleFork(e, playground.hash)}
           >
             <i class="codicon codicon-repo-forked"></i>
           </button>
           <button
             class="icon-button action-delete"
             title="Delete"
-            onClick={(e) => handleDelete(e, playground.hash)}
+            onClick={(e: Event) => handleDelete(e, playground.hash)}
           >
             <i class="codicon codicon-trash"></i>
           </button>
@@ -133,7 +92,55 @@ function PlaygroundItem({ playground }: { playground: PlaygroundListItem }) {
   );
 }
 
-export function PlaygroundListView() {
+let initialized = false;
+
+export const PlaygroundListView = () => Effect.gen(function* () {
+  const registry = yield* AtomRegistry.AtomRegistry;
+
+  if (!initialized) {
+    initialized = true;
+
+    window.addEventListener("message", (event) => {
+      const message = event.data as ExtensionToViewMessage;
+      console.log("Received message:", message);
+
+      switch (message.type) {
+        case "playgroundsList":
+          registry.set(playgroundsAtom, message.data || []);
+          break;
+        case "playgroundCreated":
+        case "playgroundDeleted":
+          // Request refresh
+          vscode.postMessage({ type: "loadPlaygrounds" });
+          break;
+        case "error":
+          console.error("Error from extension:", message.data?.message);
+          break;
+      }
+    });
+
+    // Request initial data
+    vscode.postMessage({ type: "loadPlaygrounds" });
+  }
+
+  const playgrounds = yield* Atom.get(playgroundsAtom);
+  const query = yield* Atom.get(searchQueryAtom);
+
+  // Compute filtered playgrounds inline
+  const lowerQuery = query.toLowerCase();
+  const filteredPlaygrounds = lowerQuery
+    ? playgrounds.filter(
+        (p) =>
+          (p.name && p.name.toLowerCase().includes(lowerQuery)) ||
+          (p.description && p.description.toLowerCase().includes(lowerQuery)),
+      )
+    : playgrounds;
+
+  function handleSearch(e: Event) {
+    const target = e.target as HTMLInputElement;
+    registry.set(searchQueryAtom, target.value);
+  }
+
   return (
     <>
       <div class="header">
@@ -158,14 +165,14 @@ export function PlaygroundListView() {
       </div>
 
       <div class="playground-list">
-        {filteredPlaygrounds.value.length === 0 ? (
+        {filteredPlaygrounds.length === 0 ? (
           <div class="empty">No playgrounds found</div>
         ) : (
-          filteredPlaygrounds.value.map((playground) => (
+          filteredPlaygrounds.map((playground) => (
             <PlaygroundItem key={playground.hash} playground={playground} />
           ))
         )}
       </div>
     </>
   );
-}
+});

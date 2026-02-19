@@ -61,8 +61,10 @@ export default defineConfig({
     '__APP_VERSION__': JSON.stringify('vendored'),
   },
   esbuild: {
-    jsx: 'automatic',
-    jsxImportSource: 'preact',
+    jsx: 'transform',
+    jsxFactory: 'jsx',
+    jsxFragment: 'Fragment',
+    jsxInject: `import { jsx, Fragment } from 'fibrae/jsx-runtime'`,
   },
   build: {
     lib: {
@@ -84,8 +86,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      'react': 'preact/compat',
-      'react-dom': 'preact/compat',
       '@': resolve(__dirname, 'src/features/notebook/renderer/pev2'),
     },
   },

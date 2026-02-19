@@ -1,41 +1,46 @@
-import { useState, useEffect } from "preact/hooks";
-import type { ComponentType } from "preact";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
+import type { VElement } from "fibrae";
 import type { SQLResult } from "./types";
 
 interface Props {
   data: SQLResult;
 }
 
+type ExplainViewComponent = (props: Props) => Effect.Effect<VElement, never, AtomRegistry.AtomRegistry>;
+
+const componentAtom = Atom.make<ExplainViewComponent | null>(null);
+const loadingAtom = Atom.make(true);
+const errorAtom = Atom.make<string | null>(null);
+
+let initialized = false;
+
 export function ExplainViewLazy({ data }: Props) {
-  const [Component, setComponent] = useState<ComponentType<Props> | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  return Effect.gen(function* () {
+    const registry = yield* AtomRegistry.AtomRegistry;
 
-  useEffect(() => {
-    let mounted = true;
+    if (!initialized) {
+      initialized = true;
 
-    import("./ExplainView")
-      .then((mod) => {
-        if (mounted) {
-          setComponent(() => mod.ExplainView);
-          setLoading(false);
-        }
-      })
-      .catch((err: unknown) => {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : String(err));
-          setLoading(false);
-        }
-      });
+      import("./ExplainView")
+        .then((mod) => {
+          registry.set(componentAtom, mod.ExplainView as ExplainViewComponent);
+          registry.set(loadingAtom, false);
+        })
+        .catch((err: unknown) => {
+          registry.set(errorAtom, err instanceof Error ? err.message : String(err));
+          registry.set(loadingAtom, false);
+        });
+    }
 
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    const loading = yield* Atom.get(loadingAtom);
+    const error = yield* Atom.get(errorAtom);
+    const Component = yield* Atom.get(componentAtom);
 
-  if (loading) return <div class="explain-loading">Loading visualizer...</div>;
-  if (error) return <div class="explain-error">Failed to load: {error}</div>;
-  if (!Component) return null;
+    if (loading) return <div class="explain-loading">Loading visualizer...</div>;
+    if (error) return <div class="explain-error">Failed to load: {error}</div>;
+    if (!Component) return <></>;
 
-  return <Component data={data} />;
+    return <Component data={data} />;
+  });
 }

@@ -1,4 +1,5 @@
-import { render } from "preact";
+import * as Effect from "effect/Effect";
+import { render } from "fibrae";
 import type { ActivationFunction } from "vscode-notebook-renderer";
 import errorOverlay from "vscode-notebook-error-overlay";
 import { SQLResultRenderer } from "./SQLResultRenderer";
@@ -26,11 +27,11 @@ export const activate: ActivationFunction = () => ({
     const root = shadow.querySelector<HTMLElement>("#root")!;
     errorOverlay.wrap(root, () => {
       const data = outputItem.json() as SQLResult;
-      render(<SQLResultRenderer data={data} mime={outputItem.mime} />, root);
+      Effect.runFork(render(<SQLResultRenderer data={data} mime={outputItem.mime} />, root));
     });
   },
 
   disposeOutputItem() {
-    // Cleanup handled by Preact
+    // Cleanup handled by fibrae
   },
 });

@@ -3,8 +3,10 @@ import { resolve } from 'path';
 
 export default defineConfig({
   esbuild: {
-    jsx: 'automatic',
-    jsxImportSource: 'preact',
+    jsx: 'transform',
+    jsxFactory: 'jsx',
+    jsxFragment: 'Fragment',
+    jsxInject: `import { jsx, Fragment } from 'fibrae/jsx-runtime'`,
   },
   build: {
     lib: {
@@ -28,12 +30,6 @@ export default defineConfig({
         chunkFileNames: '[name].js',
         assetFileNames: '[name][extname]',
       },
-    },
-  },
-  resolve: {
-    alias: {
-      'react': 'preact/compat',
-      'react-dom': 'preact/compat',
     },
   },
 });

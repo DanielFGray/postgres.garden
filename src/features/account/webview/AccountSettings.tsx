@@ -1,6 +1,11 @@
-import { signal } from "@preact/signals";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
 import { sendInitialized } from "./api";
 import { ProfileSection } from "./sections/ProfileSection";
+import { EmailsSection } from "./sections/EmailsSection";
+import { SecuritySection } from "./sections/SecuritySection";
+import { LinkedAccountsSection } from "./sections/LinkedAccountsSection";
+import { DangerZoneSection } from "./sections/DangerZoneSection";
 
 type SectionId = "profile" | "emails" | "security" | "linked-accounts" | "danger-zone";
 
@@ -18,57 +23,49 @@ const sections: NavSection[] = [
   { id: "danger-zone", label: "Danger Zone", icon: "codicon-warning" },
 ];
 
-const activeSection = signal<SectionId>("profile");
+const activeSectionAtom = Atom.make<SectionId>("profile");
 
 // Tell extension we're ready
 sendInitialized();
 
-function renderSection() {
-  switch (activeSection.value) {
+function renderSection(activeSection: SectionId) {
+  switch (activeSection) {
     case "profile":
       return <ProfileSection />;
     case "emails":
-      return <PlaceholderSection title="Emails" description="Manage your email addresses, set your primary email, and verify new ones." />;
+      return <EmailsSection />;
     case "security":
-      return <PlaceholderSection title="Security" description="Change your password or set one if you signed up with GitHub." />;
+      return <SecuritySection />;
     case "linked-accounts":
-      return <PlaceholderSection title="Linked Accounts" description="Manage OAuth connections to your account." />;
+      return <LinkedAccountsSection />;
     case "danger-zone":
-      return <PlaceholderSection title="Danger Zone" description="Permanently delete your account and all associated data." />;
+      return <DangerZoneSection />;
   }
 }
 
-function PlaceholderSection({ title, description }: { title: string; description: string }) {
-  return (
-    <div class="placeholder-section">
-      <div class="section-header">
-        <h2>{title}</h2>
-      </div>
-      <p class="section-description">{description}</p>
-      <p class="section-coming-soon">Coming soon</p>
-    </div>
-  );
-}
+export const AccountSettings = () =>
+  Effect.gen(function* () {
+    const registry = yield* AtomRegistry.AtomRegistry;
+    const activeSection = yield* Atom.get(activeSectionAtom);
 
-export function AccountSettings() {
-  return (
-    <div class="settings-container">
-      <nav class="settings-nav">
-        <div class="nav-header">Account Settings</div>
-        {sections.map((section) => (
-          <button
-            key={section.id}
-            class={`nav-item ${activeSection.value === section.id ? "nav-item-active" : ""}`}
-            onClick={() => { activeSection.value = section.id; }}
-          >
-            <i class={`codicon ${section.icon}`} />
-            <span>{section.label}</span>
-          </button>
-        ))}
-      </nav>
-      <main class="settings-content">
-        {renderSection()}
-      </main>
-    </div>
-  );
-}
+    return (
+      <div class="settings-container">
+        <nav class="settings-nav">
+          <div class="nav-header">Account Settings</div>
+          {sections.map((section) => (
+            <button
+              key={section.id}
+              class={`nav-item ${activeSection === section.id ? "nav-item-active" : ""}`}
+              onClick={() => { registry.set(activeSectionAtom, section.id); }}
+            >
+              <i class={`codicon ${section.icon}`} />
+              <span>{section.label}</span>
+            </button>
+          ))}
+        </nav>
+        <main class="settings-content">
+          {renderSection(activeSection)}
+        </main>
+      </div>
+    );
+  });

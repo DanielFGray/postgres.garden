@@ -1,4 +1,5 @@
-import { Signal, signal } from "@preact/signals";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
 import mermaid from "mermaid";
 import svgPanZoom from "svg-pan-zoom";
 import "./styles.css";
@@ -15,10 +16,11 @@ interface WebviewMessage {
   type: "initialized" | "refresh";
 }
 
-// Signals
-const mermaidCode: Signal<string> = signal("");
-const error: Signal<string> = signal("");
-const loading: Signal<boolean> = signal(true);
+// Atoms
+const mermaidCodeAtom = Atom.make<string>("");
+const errorAtom = Atom.make<string>("");
+const loadingAtom = Atom.make<boolean>(true);
+
 interface VsCodeApi {
   postMessage(message: WebviewMessage): void;
 }
@@ -80,34 +82,9 @@ function initMermaidTheme() {
   });
 }
 
-// Notify extension that webview is ready
-vscode?.postMessage({ type: "initialized" } as WebviewMessage);
-
-// Handle messages from extension
-const handleMessage = (event: MessageEvent<ERDMessage>) => {
-  const message = event.data;
-
-  switch (message.type) {
-    case "load":
-      if (message.data?.mermaidCode) {
-        mermaidCode.value = message.data.mermaidCode;
-        error.value = "";
-        loading.value = false;
-        void renderDiagram(message.data.mermaidCode);
-      }
-      break;
-    case "error":
-      error.value = message.data?.message || "Unknown error";
-      loading.value = false;
-      break;
-  }
-};
-
-window.addEventListener("message", handleMessage);
-
 let panZoomInstance: ReturnType<typeof svgPanZoom> | null = null;
 
-const renderDiagram = async (code: string) => {
+const renderDiagram = async (code: string, registry: AtomRegistry.Registry) => {
   try {
     const container = document.getElementById("mermaid-container");
     if (!container) return;
@@ -141,23 +118,54 @@ const renderDiagram = async (code: string) => {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    error.value = `Failed to render diagram: ${message}`;
+    registry.set(errorAtom, `Failed to render diagram: ${message}`);
     console.error("Mermaid render error:", err);
   }
 };
 
-export function ERDViewer() {
+let initialized = false;
+
+export const ERDViewer = () => Effect.gen(function* () {
+  const registry = yield* AtomRegistry.AtomRegistry;
+
+  if (!initialized) {
+    initialized = true;
+
+    window.addEventListener("message", (event: MessageEvent<ERDMessage>) => {
+      const message = event.data;
+
+      switch (message.type) {
+        case "load":
+          if (message.data?.mermaidCode) {
+            registry.set(mermaidCodeAtom, message.data.mermaidCode);
+            registry.set(errorAtom, "");
+            registry.set(loadingAtom, false);
+            void renderDiagram(message.data.mermaidCode, registry);
+          }
+          break;
+        case "error":
+          registry.set(errorAtom, message.data?.message || "Unknown error");
+          registry.set(loadingAtom, false);
+          break;
+      }
+    });
+
+    vscode?.postMessage({ type: "initialized" });
+  }
+
+  const err = yield* Atom.get(errorAtom);
+  const isLoading = yield* Atom.get(loadingAtom);
+
   return (
     <div className="erd-viewer">
-
-      {loading.value && <div className="loading">Loading schema...</div>}
-      {error.value && <div className="error">{error.value}</div>}
+      {isLoading && <div className="loading">Loading schema...</div>}
+      {err && <div className="error">{err}</div>}
 
       <div
         id="mermaid-container"
         className="mermaid-container"
-        style={{ display: loading.value || error.value ? "none" : "block" }}
+        style={{ display: isLoading || err ? "none" : "block" }}
       />
     </div>
   );
-}
+});

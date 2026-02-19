@@ -1,102 +1,121 @@
-import { signal, effect } from "@preact/signals";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
 import type { Playground, ExtensionToPanelMessage } from "../../types";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
 
-// State
-const playground = signal<Playground | null>(null);
-const isDirty = signal(false);
-const saveStatus = signal({ message: "", type: "" });
+// Atoms
+const playgroundAtom = Atom.make<Playground | null>(null);
+const isDirtyAtom = Atom.make(false);
+const saveStatusAtom = Atom.make({ message: "", type: "" });
 
-// Listen for messages from extension
-window.addEventListener("message", (event) => {
-  const message = event.data as ExtensionToPanelMessage;
+let initialized = false;
 
-  switch (message.type) {
-    case "loadPlayground":
-      playground.value = message.data;
-      isDirty.value = false;
-      break;
-    case "saved":
-      isDirty.value = false;
-      showSaveStatus("Saved", "success");
-      break;
-    case "error":
-      showSaveStatus(message.data?.message || "Error", "error");
-      break;
+export const PlaygroundEditorPanel = () => Effect.gen(function* () {
+  const registry = yield* AtomRegistry.AtomRegistry;
+
+  if (!initialized) {
+    initialized = true;
+
+    function showSaveStatus(message: string, type: string) {
+      registry.set(saveStatusAtom, { message, type });
+
+      if (type === "success") {
+        setTimeout(() => {
+          registry.set(saveStatusAtom, { message: "", type: "" });
+        }, 3000);
+      }
+    }
+
+    window.addEventListener("message", (event) => {
+      const message = event.data as ExtensionToPanelMessage;
+
+      switch (message.type) {
+        case "loadPlayground":
+          registry.set(playgroundAtom, message.data);
+          registry.set(isDirtyAtom, false);
+          break;
+        case "saved":
+          registry.set(isDirtyAtom, false);
+          showSaveStatus("Saved", "success");
+          break;
+        case "error":
+          showSaveStatus(message.data?.message || "Error", "error");
+          break;
+      }
+    });
+
+    document.addEventListener("keydown", (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        const dirty = registry.get(isDirtyAtom);
+        if (!dirty) return;
+
+        registry.set(saveStatusAtom, { message: "Saving...", type: "info" });
+        const pg = registry.get(playgroundAtom);
+        vscode.postMessage({
+          type: "updateMetadata",
+          data: {
+            name: pg?.name,
+            description: pg?.description,
+            privacy: pg?.privacy,
+          },
+        });
+      }
+    });
+
+    // Signal that webview is ready
+    vscode.postMessage({ type: "initialized" });
   }
-});
 
-// Signal that webview is ready
-effect(() => {
-  vscode.postMessage({ type: "initialized" });
-});
+  const pg = yield* Atom.get(playgroundAtom);
+  const isDirty = yield* Atom.get(isDirtyAtom);
+  const saveStatus = yield* Atom.get(saveStatusAtom);
 
-function showSaveStatus(message: string, type: string) {
-  saveStatus.value = { message, type };
-
-  if (type === "success") {
-    setTimeout(() => {
-      saveStatus.value = { message: "", type: "" };
-    }, 3000);
-  }
-}
-
-function handleMetadataChange(
-  field: "name" | "description" | "privacy",
-  value: string,
-) {
-  isDirty.value = true;
-  showSaveStatus("Saving...", "info");
-
-  const data: Record<string, string | null | undefined> = {
-    name: playground.value?.name,
-    description: playground.value?.description,
-    privacy: playground.value?.privacy,
-  };
-  data[field] = value;
-
-  vscode.postMessage({
-    type: "updateMetadata",
-    data,
-  });
-}
-
-function handleSave() {
-  if (!isDirty.value) return;
-
-  showSaveStatus("Saving...", "info");
-  vscode.postMessage({
-    type: "updateMetadata",
-    data: {
-      name: playground.value?.name,
-      description: playground.value?.description,
-      privacy: playground.value?.privacy,
-    },
-  });
-}
-
-function handleFork() {
-  vscode.postMessage({ type: "fork" });
-}
-
-function handleKeyDown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-    e.preventDefault();
-    handleSave();
-  }
-}
-
-// Keyboard shortcuts
-effect(() => {
-  document.addEventListener("keydown", handleKeyDown);
-  return () => document.removeEventListener("keydown", handleKeyDown);
-});
-
-export function PlaygroundEditorPanel() {
-  if (!playground.value) {
+  if (!pg) {
     return <div class="loading">Loading playground...</div>;
+  }
+
+  function handleMetadataChange(
+    field: "name" | "description" | "privacy",
+    value: string,
+  ) {
+    registry.set(isDirtyAtom, true);
+    registry.set(saveStatusAtom, { message: "Saving...", type: "info" });
+
+    const current = registry.get(playgroundAtom);
+    const data: Record<string, string | null | undefined> = {
+      name: current?.name,
+      description: current?.description,
+      privacy: current?.privacy,
+    };
+    data[field] = value;
+
+    vscode.postMessage({
+      type: "updateMetadata",
+      data,
+    });
+  }
+
+  function handleSave() {
+    const dirty = registry.get(isDirtyAtom);
+    if (!dirty) return;
+
+    registry.set(saveStatusAtom, { message: "Saving...", type: "info" });
+    const current = registry.get(playgroundAtom);
+    vscode.postMessage({
+      type: "updateMetadata",
+      data: {
+        name: current?.name,
+        description: current?.description,
+        privacy: current?.privacy,
+      },
+    });
+  }
+
+  function handleFork() {
+    vscode.postMessage({ type: "fork" });
   }
 
   return (
@@ -107,7 +126,7 @@ export function PlaygroundEditorPanel() {
             class="button"
             title="Save (Ctrl+S)"
             onClick={handleSave}
-            disabled={!isDirty.value}
+            disabled={!isDirty}
           >
             <i class="codicon codicon-save"></i>
             Save
@@ -122,9 +141,9 @@ export function PlaygroundEditorPanel() {
           </button>
         </div>
         <div class="toolbar-right">
-          {saveStatus.value.message && (
-            <span class={`save-status save-status-${saveStatus.value.type}`}>
-              {saveStatus.value.message}
+          {saveStatus.message && (
+            <span class={`save-status save-status-${saveStatus.type}`}>
+              {saveStatus.message}
             </span>
           )}
         </div>
@@ -137,8 +156,8 @@ export function PlaygroundEditorPanel() {
             type="text"
             id="name"
             placeholder="Playground name"
-            value={playground.value.name || ""}
-            onInput={(e) =>
+            value={pg.name || ""}
+            onInput={(e: Event) =>
               handleMetadataChange("name", (e.target as HTMLInputElement).value)
             }
           />
@@ -147,8 +166,8 @@ export function PlaygroundEditorPanel() {
           <label for="privacy">Privacy</label>
           <select
             id="privacy"
-            value={playground.value.privacy}
-            onChange={(e) =>
+            value={pg.privacy}
+            onChange={(e: Event) =>
               handleMetadataChange(
                 "privacy",
                 (e.target as HTMLSelectElement).value,
@@ -167,8 +186,8 @@ export function PlaygroundEditorPanel() {
         <textarea
           id="description"
           placeholder="Add a description for this playground..."
-          value={playground.value.description || ""}
-          onInput={(e) =>
+          value={pg.description || ""}
+          onInput={(e: Event) =>
             handleMetadataChange(
               "description",
               (e.target as HTMLTextAreaElement).value,
@@ -178,4 +197,4 @@ export function PlaygroundEditorPanel() {
       </div>
     </>
   );
-}
+});

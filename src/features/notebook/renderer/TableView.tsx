@@ -1,5 +1,5 @@
-import { useSignal, useComputed } from "@preact/signals";
-import { useEffect, useRef } from "preact/hooks";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "fibrae";
 import type { SQLResult } from "./types";
 
 /** Safely stringify a cell value, using JSON.stringify for objects */
@@ -10,44 +10,50 @@ function stringifyCell(v: unknown): string {
 
 // Inline JSON tree for table cells
 function JSONCell({ value }: { value: unknown }) {
-  const collapsed = useSignal(true);
+  // Each JSONCell instance needs its own collapsed atom
+  const collapsedAtom = Atom.make(true);
 
-  if (value === null) {
-    return <span class="json-null">null</span>;
-  }
+  return Effect.gen(function* () {
+    const registry = yield* AtomRegistry.AtomRegistry;
+    const collapsed = yield* Atom.get(collapsedAtom);
 
-  if (typeof value !== "object") {
-    const type = typeof value;
-    return <span class={`json-${type}`}>{JSON.stringify(value)}</span>;
-  }
+    if (value === null) {
+      return <span class="json-null">null</span>;
+    }
 
-  const isArray = Array.isArray(value);
-  const keys = isArray ? value.map((_, i) => i) : Object.keys(value);
-  const preview = isArray ? `[${keys.length}]` : `{${keys.length}}`;
+    if (typeof value !== "object") {
+      const type = typeof value;
+      return <span class={`json-${type}`}>{JSON.stringify(value)}</span>;
+    }
 
-  return (
-    <div class="json-cell-tree">
-      <span
-        class="json-toggle"
-        onClick={(e) => {
-          e.stopPropagation();
-          collapsed.value = !collapsed.value;
-        }}
-      >
-        {collapsed.value ? "▶" : "▼"} {preview}
-      </span>
-      {!collapsed.value && (
-        <div class="json-cell-children">
-          {keys.map((key) => (
-            <div key={key} class="json-cell-entry">
-              <span class="json-key">{isArray ? `[${key}]` : `"${key}"`}:</span>{" "}
-              <JSONCell value={(value as Record<string, unknown>)[key]} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    const isArray = Array.isArray(value);
+    const keys = isArray ? value.map((_, i) => i) : Object.keys(value);
+    const preview = isArray ? `[${keys.length}]` : `{${keys.length}}`;
+
+    return (
+      <div class="json-cell-tree">
+        <span
+          class="json-toggle"
+          onClick={(e: MouseEvent) => {
+            e.stopPropagation();
+            registry.set(collapsedAtom, !registry.get(collapsedAtom));
+          }}
+        >
+          {collapsed ? "\u25B6" : "\u25BC"} {preview}
+        </span>
+        {!collapsed && (
+          <div class="json-cell-children">
+            {keys.map((key) => (
+              <div key={key} class="json-cell-entry">
+                <span class="json-key">{isArray ? `[${key}]` : `"${key}"`}:</span>{" "}
+                <JSONCell value={(value as Record<string, unknown>)[key]} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  });
 }
 
 // PostgreSQL type OID mapping
@@ -73,146 +79,148 @@ interface CellProps {
   typeId?: number;
 }
 
+function formatCellValue(value: unknown, typeId: number | undefined): unknown {
+  if (value === null) {
+    return <i class="null">null</i>;
+  }
+
+  const typeName = typeId ? PG_TYPES[typeId] : null;
+
+  switch (typeName) {
+    case "boolean":
+      return <span class="boolean">{value ? "true" : "false"}</span>;
+
+    case "date":
+    case "timestamp":
+    case "timestamptz":
+      try {
+        const date = new Date(value as string | number);
+        return <span class="date">{date.toLocaleString()}</span>;
+      } catch {
+        return stringifyCell(value);
+      }
+
+    case "json":
+    case "jsonb":
+      try {
+        const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
+        return <JSONCell value={parsed} />;
+      } catch {
+        return stringifyCell(value);
+      }
+
+    case "integer":
+    case "bigint":
+    case "smallint":
+    case "float4":
+    case "float8":
+    case "numeric":
+      return <span class="number">{stringifyCell(value)}</span>;
+
+    default:
+      return stringifyCell(value);
+  }
+}
+
 function Cell({ value, typeId }: CellProps) {
-  const stringValue = value === null ? null : stringifyCell(value);
-
-  const formattedValue = useComputed(() => {
-    if (value === null) {
-      return <i class="null">null</i>;
-    }
-
-    const typeName = typeId ? PG_TYPES[typeId] : null;
-
-    switch (typeName) {
-      case "boolean":
-        return <span class="boolean">{value ? "true" : "false"}</span>;
-
-      case "date":
-      case "timestamp":
-      case "timestamptz":
-        try {
-          const date = new Date(value as string | number);
-          return <span class="date">{date.toLocaleString()}</span>;
-        } catch {
-          return stringifyCell(value);
-        }
-
-      case "json":
-      case "jsonb":
-        try {
-          const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
-          return <JSONCell value={parsed} />;
-        } catch {
-          return stringifyCell(value);
-        }
-
-      case "integer":
-      case "bigint":
-      case "smallint":
-      case "float4":
-      case "float8":
-      case "numeric":
-        return <span class="number">{stringifyCell(value)}</span>;
-
-      default:
-        return stringValue;
-    }
-  });
+  const formatted = formatCellValue(value, typeId);
 
   return (
     <td>
       <div class="cell-content">
-        {formattedValue.value}
+        {formatted}
       </div>
     </td>
   );
 }
 
+// Module-level atoms for column resizing state
+const columnWidthsAtom = Atom.make<Record<string, number>>({});
+const resizingColumnAtom = Atom.make<string | null>(null);
+
+let resizeInitialized = false;
+let startX = 0;
+let startWidth = 0;
+
 export function TableView({ data }: { data: SQLResult }) {
-  const columnWidths = useSignal<Record<string, number>>({});
-  const resizingColumn = useSignal<string | null>(null);
-  const startX = useSignal(0);
-  const startWidth = useSignal(0);
-  const tableRef = useRef<HTMLTableElement>(null);
+  return Effect.gen(function* () {
+    const registry = yield* AtomRegistry.AtomRegistry;
+    const columnWidths = yield* Atom.get(columnWidthsAtom);
+    const resizingColumn = yield* Atom.get(resizingColumnAtom);
 
-  const handleMouseDown =
-    (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
-      e.preventDefault();
-      resizingColumn.value = fieldName;
-      startX.value = e.pageX;
-      startWidth.value = currentWidth;
-    };
+    if (!resizeInitialized) {
+      resizeInitialized = true;
 
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (resizingColumn.value) {
-        const diff = e.pageX - startX.value;
-        const newWidth = Math.max(50, startWidth.value + diff);
-        columnWidths.value = {
-          ...columnWidths.value,
-          [resizingColumn.value]: newWidth,
-        };
-      }
-    };
+      document.addEventListener("mousemove", (e: MouseEvent) => {
+        const col = registry.get(resizingColumnAtom);
+        if (col) {
+          const diff = e.pageX - startX;
+          const newWidth = Math.max(50, startWidth + diff);
+          registry.set(columnWidthsAtom, {
+            ...registry.get(columnWidthsAtom),
+            [col]: newWidth,
+          });
+        }
+      });
 
-    const handleMouseUp = () => {
-      resizingColumn.value = null;
-    };
+      document.addEventListener("mouseup", () => {
+        registry.set(resizingColumnAtom, null);
+      });
+    }
 
-    if (!resizingColumn.value) return;
+    const handleMouseDown =
+      (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
+        e.preventDefault();
+        registry.set(resizingColumnAtom, fieldName);
+        startX = e.pageX;
+        startWidth = currentWidth;
+      };
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [resizingColumn.value]);
-
-  return (
-    <div class="table-container">
-      <table class="sql-table" ref={tableRef}>
-        <thead>
-          <tr>
-            {data.fields.map((field) => {
-              const width = columnWidths.value[field.name];
-              return (
-                <th
-                  key={field.name}
-                  style={{ width: width ? `${width}px` : undefined }}
-                >
-                  {field.name}
-                  <div
-                    class={`resize-handle ${resizingColumn.value === field.name ? "resizing" : ""}`}
-                    onMouseDown={handleMouseDown(field.name, width || 150)}
-                  />
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.length === 0 ? (
+    return (
+      <div class="table-container">
+        <table class="sql-table">
+          <thead>
             <tr>
-              <td colspan={data.fields.length} class="empty">
-                No results
-              </td>
-            </tr>
-          ) : (
-            data.rows.map((row, i) => (
-              <tr key={i}>
-                {data.fields.map((field) => (
-                  <Cell
+              {data.fields.map((field) => {
+                const width = columnWidths[field.name];
+                return (
+                  <th
                     key={field.name}
-                    value={row[field.name]}
-                    typeId={field.dataTypeID}
-                  />
-                ))}
+                    style={{ width: width ? `${String(width)}px` : undefined }}
+                  >
+                    {field.name}
+                    <div
+                      class={`resize-handle ${resizingColumn === field.name ? "resizing" : ""}`}
+                      onMouseDown={handleMouseDown(field.name, width || 150)}
+                    />
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.length === 0 ? (
+              <tr>
+                <td colspan={data.fields.length} class="empty">
+                  No results
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
+            ) : (
+              data.rows.map((row, i) => (
+                <tr key={i}>
+                  {data.fields.map((field) => (
+                    <Cell
+                      key={field.name}
+                      value={row[field.name]}
+                      typeId={field.dataTypeID}
+                    />
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  });
 }
