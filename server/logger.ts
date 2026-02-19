@@ -47,10 +47,8 @@ function formatDuration(ms: number): string {
  */
 const requestMeta = new WeakMap<Request, { startTime: number; shouldSkip: boolean }>();
 
-export const logger = (options: LoggerOptions = {}) => {
-  const { skip = [], logBody = false, colorize = true } = options;
-
-  return new Elysia({ name: "logger" })
+export const logger = ({ skip = [], logBody = false, colorize = true }: LoggerOptions = {}) =>
+  new Elysia({ name: "logger" })
     .onRequest(({ request }) => {
       const startTime = performance.now();
 
@@ -90,7 +88,6 @@ export const logger = (options: LoggerOptions = {}) => {
         `${c.dim}${new Date().toISOString()}${c.reset} ${method} ${url.pathname} ${statusColor(statusNum)}${statusNum}${c.reset} ${c.dim}${formatDuration(duration)}${c.reset}`,
       );
     });
-};
 
 /**
  * Simple request logger that logs method, path, status, and duration.

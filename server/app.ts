@@ -1803,7 +1803,7 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
 );
 
 export const app = new Elysia()
-  .use(logger({ skip: ["/healthz"] }))
+  .use(logger({ skip: ["/healthz", "/src/", "/node_modules/", "/@vite/", "/@fs/", "/@id/", "/assets/"] }))
   .use(
     opentelemetry({
       serviceName: "postgres-garden",
