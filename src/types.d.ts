@@ -114,10 +114,7 @@ declare global {
     readonly canGoBack: boolean;
     readonly canGoForward: boolean;
     entries(): NavigationHistoryEntry[];
-    navigate(
-      url: string,
-      options?: NavigationNavigateOptions,
-    ): NavigationResult;
+    navigate(url: string, options?: NavigationNavigateOptions): NavigationResult;
     reload(options?: NavigationReloadOptions): NavigationResult;
     traverseTo(key: string, options?: NavigationOptions): NavigationResult;
     back(options?: NavigationOptions): NavigationResult;

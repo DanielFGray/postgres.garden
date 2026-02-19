@@ -72,9 +72,7 @@ registerRoute(
   ({ request }) => request.url.endsWith(".wasm"),
   new CacheFirst({
     cacheName: "wasm-cache",
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
+    plugins: [new CacheableResponsePlugin({ statuses: [0, 200] })],
   }),
 );
 
@@ -98,23 +96,17 @@ registerRoute(
   ({ url }) => url.pathname.startsWith("/assets/"),
   new CacheFirst({
     cacheName: "versioned-assets",
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
+    plugins: [new CacheableResponsePlugin({ statuses: [0, 200] })],
   }),
 );
 
 // ── Static assets (fonts, images): cache-first ─────────────────────────
 
 registerRoute(
-  ({ request }) =>
-    request.destination === "font" ||
-    request.destination === "image",
+  ({ request }) => request.destination === "font" || request.destination === "image",
   new CacheFirst({
     cacheName: "static-assets",
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-    ],
+    plugins: [new CacheableResponsePlugin({ statuses: [0, 200] })],
   }),
 );
 

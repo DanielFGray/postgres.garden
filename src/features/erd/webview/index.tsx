@@ -39,11 +39,7 @@ function nudgeColor(hex: string, amount: number): string {
 
 /** Read a CSS custom property from :root, resolved to an actual value */
 function cssVar(name: string, fallback: string): string {
-  return (
-    getComputedStyle(document.documentElement)
-      .getPropertyValue(name)
-      .trim() || fallback
-  );
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 /** Re-initialize mermaid with the current VS Code theme colors */
@@ -125,47 +121,48 @@ const renderDiagram = async (code: string, registry: AtomRegistry.Registry) => {
 
 let initialized = false;
 
-export const ERDViewer = () => Effect.gen(function* () {
-  const registry = yield* AtomRegistry.AtomRegistry;
+export const ERDViewer = () =>
+  Effect.gen(function* () {
+    const registry = yield* AtomRegistry.AtomRegistry;
 
-  if (!initialized) {
-    initialized = true;
+    if (!initialized) {
+      initialized = true;
 
-    window.addEventListener("message", (event: MessageEvent<ERDMessage>) => {
-      const message = event.data;
+      window.addEventListener("message", (event: MessageEvent<ERDMessage>) => {
+        const message = event.data;
 
-      switch (message.type) {
-        case "load":
-          if (message.data?.mermaidCode) {
-            registry.set(mermaidCodeAtom, message.data.mermaidCode);
-            registry.set(errorAtom, "");
+        switch (message.type) {
+          case "load":
+            if (message.data?.mermaidCode) {
+              registry.set(mermaidCodeAtom, message.data.mermaidCode);
+              registry.set(errorAtom, "");
+              registry.set(loadingAtom, false);
+              void renderDiagram(message.data.mermaidCode, registry);
+            }
+            break;
+          case "error":
+            registry.set(errorAtom, message.data?.message || "Unknown error");
             registry.set(loadingAtom, false);
-            void renderDiagram(message.data.mermaidCode, registry);
-          }
-          break;
-        case "error":
-          registry.set(errorAtom, message.data?.message || "Unknown error");
-          registry.set(loadingAtom, false);
-          break;
-      }
-    });
+            break;
+        }
+      });
 
-    vscode?.postMessage({ type: "initialized" });
-  }
+      vscode?.postMessage({ type: "initialized" });
+    }
 
-  const err = yield* Atom.get(errorAtom);
-  const isLoading = yield* Atom.get(loadingAtom);
+    const err = yield* Atom.get(errorAtom);
+    const isLoading = yield* Atom.get(loadingAtom);
 
-  return (
-    <div className="erd-viewer">
-      {isLoading && <div className="loading">Loading schema...</div>}
-      {err && <div className="error">{err}</div>}
+    return (
+      <div className="erd-viewer">
+        {isLoading && <div className="loading">Loading schema...</div>}
+        {err && <div className="error">{err}</div>}
 
-      <div
-        id="mermaid-container"
-        className="mermaid-container"
-        style={{ display: isLoading || err ? "none" : "block" }}
-      />
-    </div>
-  );
-});
+        <div
+          id="mermaid-container"
+          className="mermaid-container"
+          style={{ display: isLoading || err ? "none" : "block" }}
+        />
+      </div>
+    );
+  });

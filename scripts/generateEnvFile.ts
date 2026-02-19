@@ -62,30 +62,30 @@ const fieldDefs: Record<string, FieldDef> = {
   },
 
   // Roles derived from DATABASE_NAME
-  DATABASE_OWNER: { derive: ctx => ctx.DATABASE_NAME ?? "" },
+  DATABASE_OWNER: { derive: (ctx) => ctx.DATABASE_NAME ?? "" },
   DATABASE_OWNER_PASSWORD: { generate: () => generatePassword(18) },
   DATABASE_AUTHENTICATOR: {
-    derive: ctx => `${ctx.DATABASE_NAME}_authenticator`,
+    derive: (ctx) => `${ctx.DATABASE_NAME}_authenticator`,
   },
   DATABASE_AUTHENTICATOR_PASSWORD: { generate: () => generatePassword(18) },
-  DATABASE_VISITOR: { derive: ctx => `${ctx.DATABASE_NAME}_visitor` },
+  DATABASE_VISITOR: { derive: (ctx) => `${ctx.DATABASE_NAME}_visitor` },
   SHADOW_DATABASE_PASSWORD: { generate: () => generatePassword(18) },
 
   // URLs derived from connection info
   ROOT_DATABASE_URL: {
-    derive: ctx =>
+    derive: (ctx) =>
       `postgres://${ctx.ROOT_DATABASE_USER}:${ctx.ROOT_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/template1`,
   },
   DATABASE_URL: {
-    derive: ctx =>
+    derive: (ctx) =>
       `postgres://${ctx.DATABASE_OWNER}:${ctx.DATABASE_OWNER_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}`,
   },
   AUTH_DATABASE_URL: {
-    derive: ctx =>
+    derive: (ctx) =>
       `postgres://${ctx.DATABASE_AUTHENTICATOR}:${ctx.DATABASE_AUTHENTICATOR_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}`,
   },
   SHADOW_DATABASE_URL: {
-    derive: ctx =>
+    derive: (ctx) =>
       `postgres://${ctx.DATABASE_NAME}_shadow:${ctx.SHADOW_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}_shadow`,
   },
 
@@ -93,7 +93,7 @@ const fieldDefs: Record<string, FieldDef> = {
   PORT: { prompt: { message: "server port:" }, derive: () => "3000" },
   VITE_ROOT_URL: {
     prompt: { message: "app url:" },
-    derive: ctx => `http://localhost:${ctx.PORT || "3000"}`,
+    derive: (ctx) => `http://localhost:${ctx.PORT || "3000"}`,
   },
   SECRET: { generate: () => generatePassword(32) },
 };
@@ -141,13 +141,13 @@ const resolveField = (
 const resolveAllFields = (existing: Ctx, interactive: boolean, defaults: Ctx) =>
   Effect.reduce(fieldOrder, {} as Ctx, (resolved, key) =>
     resolveField(key, existing, resolved, interactive, defaults).pipe(
-      Effect.map(value => (value ? { ...resolved, [key]: value } : resolved)),
+      Effect.map((value) => (value ? { ...resolved, [key]: value } : resolved)),
     ),
   );
 
 // --- File I/O ---
 
-const readDotenv = Effect.gen(function*() {
+const readDotenv = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.readFileString(DOTENV_PATH).pipe(
     Effect.map(dotenv.parse),
@@ -155,7 +155,7 @@ const readDotenv = Effect.gen(function*() {
   );
 });
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const interactive = !process.env.NOCONFIRM;
 
@@ -173,11 +173,12 @@ const program = Effect.gen(function*() {
   const merged = { ...existing, ...resolved };
 
   const schemaKeys = new Set(fieldOrder);
-  const extraKeys = Object.keys(merged).filter(k => !schemaKeys.has(k));
+  const extraKeys = Object.keys(merged).filter((k) => !schemaKeys.has(k));
 
-  const content = fieldOrder.concat(extraKeys)
-    .filter(k => merged[k] !== undefined)
-    .map(k => `${k}=${merged[k]}`)
+  const content = fieldOrder
+    .concat(extraKeys)
+    .filter((k) => merged[k] !== undefined)
+    .map((k) => `${k}=${merged[k]}`)
     .join("\n")
     .concat("\n");
 

@@ -84,9 +84,10 @@ export const SecuritySection = () =>
         newPassword: registry.get(newPasswordAtom),
       })
         .then(() => {
-          registry.set(successAtom, hp
-            ? "Password changed successfully"
-            : "Password set successfully");
+          registry.set(
+            successAtom,
+            hp ? "Password changed successfully" : "Password set successfully",
+          );
           registry.set(hasPasswordAtom, true);
           registry.set(oldPasswordAtom, "");
           registry.set(newPasswordAtom, "");
@@ -109,7 +110,13 @@ export const SecuritySection = () =>
         <div class="section-error">
           <i class="codicon codicon-error" />
           <span>{error}</span>
-          <button class="button" onClick={() => { resetForm(); loadPasswordStatus(registry); }}>
+          <button
+            class="button"
+            onClick={() => {
+              resetForm();
+              loadPasswordStatus(registry);
+            }}
+          >
             Retry
           </button>
         </div>
@@ -123,7 +130,13 @@ export const SecuritySection = () =>
         </div>
 
         {!hasPassword && (
-          <p style={{ color: "var(--vscode-descriptionForeground)", fontStyle: "italic", margin: "0 0 12px" }}>
+          <p
+            style={{
+              color: "var(--vscode-descriptionForeground)",
+              fontStyle: "italic",
+              margin: "0 0 12px",
+            }}
+          >
             You signed up with GitHub. Set a password to also log in with email.
           </p>
         )}
@@ -136,7 +149,9 @@ export const SecuritySection = () =>
                 type="password"
                 class="setting-input"
                 value={oldPassword}
-                onInput={(e: Event) => { registry.set(oldPasswordAtom, (e.target as HTMLInputElement).value); }}
+                onInput={(e: Event) => {
+                  registry.set(oldPasswordAtom, (e.target as HTMLInputElement).value);
+                }}
               />
             </div>
           )}
@@ -147,7 +162,9 @@ export const SecuritySection = () =>
               type="password"
               class="setting-input"
               value={newPassword}
-              onInput={(e: Event) => { registry.set(newPasswordAtom, (e.target as HTMLInputElement).value); }}
+              onInput={(e: Event) => {
+                registry.set(newPasswordAtom, (e.target as HTMLInputElement).value);
+              }}
             />
           </div>
 
@@ -157,7 +174,9 @@ export const SecuritySection = () =>
               type="password"
               class="setting-input"
               value={confirmPassword}
-              onInput={(e: Event) => { registry.set(confirmPasswordAtom, (e.target as HTMLInputElement).value); }}
+              onInput={(e: Event) => {
+                registry.set(confirmPasswordAtom, (e.target as HTMLInputElement).value);
+              }}
             />
           </div>
 
@@ -170,17 +189,12 @@ export const SecuritySection = () =>
 
           {success && (
             <div style={{ color: "var(--vscode-charts-green)", margin: "8px 0" }}>
-              <i class="codicon codicon-check" />
-              {" "}{success}
+              <i class="codicon codicon-check" /> {success}
             </div>
           )}
 
           <button class="button" type="submit" disabled={saving}>
-            {saving
-              ? "Saving..."
-              : hasPassword
-                ? "Change Password"
-                : "Set Password"}
+            {saving ? "Saving..." : hasPassword ? "Change Password" : "Set Password"}
           </button>
         </form>
       </div>

@@ -1,79 +1,71 @@
 <script lang="ts" setup>
-import _ from "lodash"
-import {
-  computed,
-  inject,
-  onBeforeMount,
-  provide,
-  reactive,
-  ref,
-  watch,
-} from "vue"
-import { BufferLocation, NodeProp, Metric } from "../enums"
-import { HelpService, scrollChildIntoParentView } from "@/services/help-service"
-import type { Node } from "@/interfaces"
-import { SelectNodeKey } from "@/symbols"
-import DiagramRow from "@/components/DiagramRow.vue"
-import LevelDivider from "@/components/LevelDivider.vue"
-import { Tippy } from "vue-tippy"
-import { store } from "@/store"
+import _ from "lodash";
+import { computed, inject, onBeforeMount, provide, reactive, ref, watch } from "vue";
+import { BufferLocation, NodeProp, Metric } from "../enums";
+import { HelpService, scrollChildIntoParentView } from "@/services/help-service";
+import type { Node } from "@/interfaces";
+import { SelectNodeKey } from "@/symbols";
+import DiagramRow from "@/components/DiagramRow.vue";
+import LevelDivider from "@/components/LevelDivider.vue";
+import { Tippy } from "vue-tippy";
+import { store } from "@/store";
 
-const helpService = new HelpService()
-const getHelpMessage = helpService.getHelpMessage
+const helpService = new HelpService();
+const getHelpMessage = helpService.getHelpMessage;
 
-const container = ref(null) // The container element
+const container = ref(null); // The container element
 
-const selectNode = inject(SelectNodeKey)
+const selectNode = inject(SelectNodeKey);
 if (!selectNode) {
-  throw new Error(`Could not resolve ${SelectNodeKey.description}`)
+  throw new Error(`Could not resolve ${SelectNodeKey.description}`);
 }
 
 const viewOptions = reactive({
   metric: Metric.time,
   buffersMetric: BufferLocation.shared,
-})
+});
 
 onBeforeMount((): void => {
-  const savedOptions = localStorage.getItem("diagramViewOptions")
+  const savedOptions = localStorage.getItem("diagramViewOptions");
   if (savedOptions) {
-    _.assignIn(viewOptions, JSON.parse(savedOptions))
+    _.assignIn(viewOptions, JSON.parse(savedOptions));
   }
 
   // switch to the first buffers tab if data not available for the currently
   // chosen one
-  const planBufferLocation = _.keys(store.stats.maxBlocks)
+  const planBufferLocation = _.keys(store.stats.maxBlocks);
   if (_.indexOf(planBufferLocation, viewOptions.buffersMetric) === -1) {
-    viewOptions.buffersMetric = _.min(planBufferLocation) as BufferLocation
+    viewOptions.buffersMetric = _.min(planBufferLocation) as BufferLocation;
   }
-})
+});
 
-watch(viewOptions, onViewOptionsChanged)
+watch(viewOptions, onViewOptionsChanged);
 
 function onViewOptionsChanged() {
-  localStorage.setItem("diagramViewOptions", JSON.stringify(viewOptions))
+  localStorage.setItem("diagramViewOptions", JSON.stringify(viewOptions));
 }
 
 const dataAvailable = computed((): boolean => {
   if (viewOptions.metric === Metric.buffers) {
     // if current Metric is buffers, view options for buffers should be
     // undefined if there's no buffer data
-    return !!viewOptions.buffersMetric
+    return !!viewOptions.buffersMetric;
   }
-  return true
-})
+  return true;
+});
 
 function isCTE(node: Node): boolean {
-  return _.startsWith(node[NodeProp.SUBPLAN_NAME], "CTE")
+  return _.startsWith(node[NodeProp.SUBPLAN_NAME], "CTE");
 }
 
 function scrollTo(el: Element) {
   if (!container.value) {
-    return
+    return;
   }
-  scrollChildIntoParentView(container.value, el, false)
+  scrollChildIntoParentView(container.value, el, false);
 }
 
-provide("scrollTo", scrollTo)
+provide("scrollTo", scrollTo);
 </script>
 
 <template>
@@ -117,11 +109,7 @@ provide("scrollTo", scrollTo)
             buffers
           </button>
           <Tippy
-            :content="
-              !store.stats.maxIo
-                ? getHelpMessage('hint track_io_timing')
-                : undefined
-            "
+            :content="!store.stats.maxIo ? getHelpMessage('hint track_io_timing') : undefined"
             :allowHTML="true"
             class="btn-tooltip-wrapper"
           >
@@ -171,14 +159,8 @@ provide("scrollTo", scrollTo)
         </div>
       </div>
       <div class="legend text-center">
-        <ul
-          class="list-unstyled list-inline mb-0"
-          v-if="viewOptions.metric == Metric.buffers"
-        >
-          <li
-            class="list-inline-item"
-            v-if="viewOptions.buffersMetric != BufferLocation.temp"
-          >
+        <ul class="list-unstyled list-inline mb-0" v-if="viewOptions.metric == Metric.buffers">
+          <li class="list-inline-item" v-if="viewOptions.buffersMetric != BufferLocation.temp">
             <span class="bg-hit rounded"></span>
             Hit
           </li>
@@ -186,10 +168,7 @@ provide("scrollTo", scrollTo)
             <span class="bg-read"></span>
             Read
           </li>
-          <li
-            class="list-inline-item"
-            v-if="viewOptions.buffersMetric != BufferLocation.temp"
-          >
+          <li class="list-inline-item" v-if="viewOptions.buffersMetric != BufferLocation.temp">
             <span class="bg-dirtied"></span>
             Dirtied
           </li>
@@ -221,10 +200,7 @@ provide("scrollTo", scrollTo)
           <template v-for="row in flat" :key="row">
             <tr v-if="row.node[NodeProp.SUBPLAN_NAME]">
               <td></td>
-              <td
-                :class="{ 'fw-bold': isCTE(row.node) }"
-                :colspan="isCTE(row.node) ? 3 : 2"
-              >
+              <td :class="{ 'fw-bold': isCTE(row.node) }" :colspan="isCTE(row.node) ? 3 : 2">
                 <LevelDivider :row="row" dense></LevelDivider>
                 <a
                   class="fst-italic text-reset"

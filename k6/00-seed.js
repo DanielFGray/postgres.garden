@@ -166,11 +166,26 @@ SELECT * FROM cat_tree ORDER BY path;`,
 ];
 
 const PLAYGROUND_NAMES = [
-  "join-examples", "window-functions", "cte-demo", "index-tuning",
-  "jsonb-queries", "full-text-search", "partition-demo", "trigger-examples",
-  "plpgsql-basics", "lateral-joins", "array-ops", "date-math",
-  "upsert-patterns", "materialized-views", "row-security", "foreign-data",
-  "pg-stats", "vacuum-analyze", "toast-demo", "advisory-locks",
+  "join-examples",
+  "window-functions",
+  "cte-demo",
+  "index-tuning",
+  "jsonb-queries",
+  "full-text-search",
+  "partition-demo",
+  "trigger-examples",
+  "plpgsql-basics",
+  "lateral-joins",
+  "array-ops",
+  "date-math",
+  "upsert-patterns",
+  "materialized-views",
+  "row-security",
+  "foreign-data",
+  "pg-stats",
+  "vacuum-analyze",
+  "toast-demo",
+  "advisory-locks",
 ];
 
 export const options = {
@@ -210,9 +225,7 @@ export default function () {
 
   if (regRes.status !== 200) return;
 
-  const sessionCookie = regRes.cookies["session"]
-    ? regRes.cookies["session"][0].value
-    : null;
+  const sessionCookie = regRes.cookies["session"] ? regRes.cookies["session"][0].value : null;
   if (!sessionCookie) return;
 
   const headers = authHeaders(sessionCookie);
@@ -256,10 +269,7 @@ export default function () {
         `${BASE_URL}/api/playgrounds/${hash}/commits`,
         JSON.stringify({
           message: `update ${c + 1}: added ${nextTemplate.path}`,
-          files: [
-            template,
-            { path: nextTemplate.path, content: nextTemplate.content },
-          ],
+          files: [template, { path: nextTemplate.path, content: nextTemplate.content }],
           activeFile: nextTemplate.path,
         }),
         { headers, tags: { name: "POST /api/playgrounds/:hash/commits" } },

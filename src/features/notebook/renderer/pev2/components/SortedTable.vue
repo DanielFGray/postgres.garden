@@ -1,32 +1,31 @@
 <script lang="ts" setup>
-import _ from "lodash"
-import { computed, provide, ref } from "vue"
-import { SortDirection } from "@/enums"
+import _ from "lodash";
+import { computed, provide, ref } from "vue";
+import { SortDirection } from "@/enums";
 
 interface Props {
-  values: object[]
-  sort: string
-  dir: SortDirection
+  values: object[];
+  sort: string;
+  dir: SortDirection;
 }
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
-const sort = ref<string>(props.sort)
-const dir = ref<SortDirection>(props.dir)
+const sort = ref<string>(props.sort);
+const dir = ref<SortDirection>(props.dir);
 
-provide("sort", sort)
-provide("dir", dir)
-provide("sortBy", sortBy)
+provide("sort", sort);
+provide("dir", dir);
+provide("sortBy", sortBy);
 
 const sortedValues = computed((): object[] => {
-  return _.orderBy(props.values, sort.value, dir.value)
-})
+  return _.orderBy(props.values, sort.value, dir.value);
+});
 
 function sortBy(s: string) {
   if (s === sort.value) {
-    dir.value =
-      dir.value === SortDirection.asc ? SortDirection.desc : SortDirection.asc
+    dir.value = dir.value === SortDirection.asc ? SortDirection.desc : SortDirection.asc;
   }
-  sort.value = s
+  sort.value = s;
 }
 </script>
 

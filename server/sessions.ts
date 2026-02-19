@@ -105,8 +105,8 @@ export async function validateSessionToken(token?: string) {
     is_verified: data.is_verified === "1",
   };
   const session = {
-    id: data.session_uuid ?? "",  // Postgres UUID for withAuthContext/RLS
-    cookie_id: id,                // Valkey key for deletion
+    id: data.session_uuid ?? "", // Postgres UUID for withAuthContext/RLS
+    cookie_id: id, // Valkey key for deletion
     user_id: data.user_id ?? "",
     expires_at: new Date(), // TTL is managed by Valkey
   };
@@ -130,9 +130,6 @@ export async function deleteSession(cookieId: string) {
   const sessionUuid = await valkey.hget(key, "session_uuid");
   await valkey.del(key);
   if (sessionUuid) {
-    await rootDb
-      .deleteFrom("app_private.sessions")
-      .where("id", "=", sessionUuid)
-      .execute();
+    await rootDb.deleteFrom("app_private.sessions").where("id", "=", sessionUuid).execute();
   }
 }

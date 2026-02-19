@@ -1,4 +1,5 @@
 ### Overview
+
 Create a custom notebook renderer using Preact that displays SQL query results with a toggle between HTML table and JSON tree views, with collapsible nodes.
 
 ---
@@ -6,12 +7,14 @@ Create a custom notebook renderer using Preact that displays SQL query results w
 ### Phase 1: Dependencies & Setup
 
 **Install required packages:**
+
 ```bash
 bun add preact @preact/signals
 bun add -d @types/vscode-notebook-renderer vscode-notebook-error-overlay
 ```
 
 **Dependencies needed:**
+
 - `preact` - Lightweight React alternative (~3KB)
 - `@preact/signals` - Fine-grained reactivity system
 - `@types/vscode-notebook-renderer` - TypeScript types
@@ -42,6 +45,7 @@ src/features/notebook/
 ### Phase 3: Renderer Component Design
 
 **`src/features/notebook/renderer/types.ts`:**
+
 ```typescript
 export interface SQLResult {
   fields: Array<{ name: string; dataTypeID?: number }>;
@@ -53,10 +57,11 @@ export interface RendererProps {
   mime: string;
 }
 
-export type ViewMode = 'table' | 'json';
+export type ViewMode = "table" | "json";
 ```
 
 **`src/features/notebook/renderer/SQLResultRenderer.tsx`:**
+
 ```typescript
 import { signal } from '@preact/signals';
 import { TableView } from './TableView';
@@ -65,7 +70,7 @@ import type { RendererProps, ViewMode } from './types';
 
 export function SQLResultRenderer({ data, mime }: RendererProps) {
   const viewMode = signal<ViewMode>('table');
-  
+
   return (
     <div class="sql-result-renderer">
       {/* Toggle toolbar */}
@@ -83,10 +88,10 @@ export function SQLResultRenderer({ data, mime }: RendererProps) {
           🌳 JSON
         </button>
       </div>
-      
+
       {/* Content area */}
       <div class="content">
-        {viewMode.value === 'table' 
+        {viewMode.value === 'table'
           ? <TableView data={data} />
           : <JSONTreeView data={data} />
         }
@@ -97,6 +102,7 @@ export function SQLResultRenderer({ data, mime }: RendererProps) {
 ```
 
 **`src/features/notebook/renderer/JSONTreeView.tsx`:**
+
 ```typescript
 import { signal } from '@preact/signals';
 
@@ -110,18 +116,18 @@ export function JSONTreeView({ data }: { data: any }) {
 
 function TreeNode({ value, name, depth }: any) {
   const collapsed = signal(depth > 2);
-  
+
   if (value === null) {
     return <div class="null-value">{name}: null</div>;
   }
-  
+
   if (typeof value !== 'object') {
     return <div class="primitive">{name}: {JSON.stringify(value)}</div>;
   }
-  
+
   const isArray = Array.isArray(value);
   const keys = isArray ? value.map((_, i) => i) : Object.keys(value);
-  
+
   return (
     <div class="tree-node" style={`margin-left: ${depth * 16}px`}>
       <div
@@ -134,10 +140,10 @@ function TreeNode({ value, name, depth }: any) {
           {isArray ? `Array[${keys.length}]` : `Object{${keys.length}}`}
         </span>
       </div>
-      
+
       {!collapsed.value && (
         <div class="children">
-          {keys.map(key => 
+          {keys.map(key =>
             <TreeNode
               key={key}
               name={key}
@@ -153,6 +159,7 @@ function TreeNode({ value, name, depth }: any) {
 ```
 
 **`src/features/notebook/renderer/TableView.tsx`:**
+
 ```typescript
 import type { SQLResult } from './types';
 
@@ -161,7 +168,7 @@ export function TableView({ data }: { data: SQLResult }) {
     <table class="sql-table">
       <thead>
         <tr>
-          {data.fields.map(field => 
+          {data.fields.map(field =>
             <th key={field.name}>{field.name}</th>
           )}
         </tr>
@@ -178,7 +185,7 @@ export function TableView({ data }: { data: SQLResult }) {
             <tr key={i}>
               {data.fields.map(field =>
                 <td key={field.name}>
-                  {row[field.name] === null 
+                  {row[field.name] === null
                     ? <i class="null">null</i>
                     : String(row[field.name])
                   }
@@ -194,6 +201,7 @@ export function TableView({ data }: { data: SQLResult }) {
 ```
 
 **`src/features/notebook/renderer/index.ts`:**
+
 ```typescript
 import { render } from 'preact';
 import type { ActivationFunction } from 'vscode-notebook-renderer';
@@ -212,7 +220,7 @@ export const activate: ActivationFunction = () => ({
     }
 
     const root = shadow.querySelector<HTMLElement>('#root')!;
-    
+
     errorOverlay.wrap(root, () => {
       const data = outputItem.json();
       render(
@@ -221,7 +229,7 @@ export const activate: ActivationFunction = () => ({
       );
     });
   },
-  
+
   disposeOutputItem(outputId) {
     // Cleanup handled by Preact
   }
@@ -233,39 +241,41 @@ export const activate: ActivationFunction = () => ({
 ### Phase 4: Vite Build Configuration
 
 Create **`vite.renderer.config.ts`:**
+
 ```typescript
-import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { defineConfig } from "vite";
+import { resolve } from "path";
 
 export default defineConfig({
   esbuild: {
-    jsxFactory: 'h',
-    jsxFragment: 'Fragment',
-    jsxImportSource: 'preact',
+    jsxFactory: "h",
+    jsxFragment: "Fragment",
+    jsxImportSource: "preact",
   },
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/features/notebook/renderer/index.ts'),
-      formats: ['es'],
-      fileName: 'sql-renderer',
+      entry: resolve(__dirname, "src/features/notebook/renderer/index.ts"),
+      formats: ["es"],
+      fileName: "sql-renderer",
     },
-    outDir: 'src/features/notebook/renderer-dist',
+    outDir: "src/features/notebook/renderer-dist",
     rollupOptions: {
-      external: ['vscode-notebook-renderer'],
+      external: ["vscode-notebook-renderer"],
     },
     minify: false, // Easier debugging during development
     sourcemap: true,
   },
   resolve: {
     alias: {
-      'react': 'preact/compat',
-      'react-dom': 'preact/compat',
+      react: "preact/compat",
+      "react-dom": "preact/compat",
     },
   },
 });
 ```
 
 **Add build script to `package.json`:**
+
 ```json
 {
   "scripts": {
@@ -280,6 +290,7 @@ export default defineConfig({
 ### Phase 5: Register Renderer in Extension
 
 **Update `src/features/postgres.ts` - add to `contributes`:**
+
 ```typescript
 contributes: {
   // ... existing contributes
@@ -288,15 +299,14 @@ contributes: {
       id: "pg-playground-sql-renderer",
       entrypoint: "./renderer/index.js",
       displayName: "SQL Results Renderer",
-      mimeTypes: [
-        "application/vnd.pg-playground.sql-result+json"
-      ]
-    }
-  ]
+      mimeTypes: ["application/vnd.pg-playground.sql-result+json"],
+    },
+  ];
 }
 ```
 
 **After `registerExtension`, add file URL registration:**
+
 ```typescript
 const { getApi, registerFileUrl } = registerExtension(...);
 
@@ -319,19 +329,17 @@ registerFileUrl(
 ### Phase 6: Update Notebook Controller
 
 **`src/features/notebook/controller.ts` - Update output generation:**
+
 ```typescript
 if (result.fields.length > 0) {
   return new vscode.NotebookCellOutput([
     // Custom renderer output
     vscode.NotebookCellOutputItem.json(
       { fields: result.fields, rows: result.rows },
-      "application/vnd.pg-playground.sql-result+json"
+      "application/vnd.pg-playground.sql-result+json",
     ),
     // Fallback HTML table
-    vscode.NotebookCellOutputItem.text(
-      renderRowsAsTable(result),
-      "text/html"
-    ),
+    vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
   ]);
 }
 ```
@@ -341,6 +349,7 @@ if (result.fields.length > 0) {
 ### Phase 7: Styling
 
 **`src/features/notebook/renderer/styles.css`:**
+
 ```css
 .sql-result-renderer {
   font-family: var(--vscode-font-family);
@@ -471,7 +480,7 @@ if (result.fields.length > 0) {
 ✅ **Fallback support** - HTML table as fallback for other renderers  
 ✅ **HMR support** - Fast development iteration  
 ✅ **JSX syntax** - Familiar React-like syntax instead of h() calls  
-✅ **No hooks complexity** - Signals are simpler and more performant than hooks  
+✅ **No hooks complexity** - Signals are simpler and more performant than hooks
 
 ---
 

@@ -1,20 +1,17 @@
 <script lang="ts" setup>
-import { inject } from "vue"
-import { SortDirection } from "@/enums"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import {
-  faArrowDownShortWide,
-  faArrowDownWideShort,
-} from "@fortawesome/free-solid-svg-icons"
+import { inject } from "vue";
+import { SortDirection } from "@/enums";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import { faArrowDownShortWide, faArrowDownWideShort } from "@fortawesome/free-solid-svg-icons";
 
 interface Props {
-  name: string
+  name: string;
 }
-defineProps<Props>()
+defineProps<Props>();
 
-const dir = inject<string>("dir")
-const sort = inject<string>("sort")
-const sortBy = inject<(a: string) => void>("sortBy")
+const dir = inject<string>("dir");
+const sort = inject<string>("sort");
+const sortBy = inject<(a: string) => void>("sortBy");
 </script>
 
 <template>

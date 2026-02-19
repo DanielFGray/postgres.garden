@@ -8,13 +8,7 @@
 import http from "k6/http";
 import { check, sleep, group } from "k6";
 import { Counter, Trend } from "k6/metrics";
-import {
-  BASE_URL,
-  registerUser,
-  authHeaders,
-  sampleFiles,
-  starPlayground,
-} from "./helpers.js";
+import { BASE_URL, registerUser, authHeaders, sampleFiles, starPlayground } from "./helpers.js";
 
 const errors = new Counter("errors");
 const browseDuration = new Trend("browse_duration", true);
@@ -118,8 +112,7 @@ export function browse() {
     try {
       const playgrounds = listRes.json();
       if (Array.isArray(playgrounds) && playgrounds.length > 0) {
-        const pg =
-          playgrounds[Math.floor(Math.random() * playgrounds.length)];
+        const pg = playgrounds[Math.floor(Math.random() * playgrounds.length)];
 
         // View detail
         http.get(`${BASE_URL}/api/playgrounds/${pg.hash}`, {
@@ -128,26 +121,22 @@ export function browse() {
 
         // 60% view commits
         if (Math.random() > 0.4) {
-          const commitsRes = http.get(
-            `${BASE_URL}/api/playgrounds/${pg.hash}/commits`,
-            { tags: { name: "GET /api/playgrounds/:hash/commits" } },
-          );
+          const commitsRes = http.get(`${BASE_URL}/api/playgrounds/${pg.hash}/commits`, {
+            tags: { name: "GET /api/playgrounds/:hash/commits" },
+          });
 
           // 30% view a specific commit + diff
           if (Math.random() > 0.7) {
             try {
               const commits = commitsRes.json();
               if (Array.isArray(commits) && commits.length > 0) {
-                const commit =
-                  commits[Math.floor(Math.random() * commits.length)];
-                http.get(
-                  `${BASE_URL}/api/playgrounds/${pg.hash}/commits/${commit.id}`,
-                  { tags: { name: "GET /api/playgrounds/:hash/commits/:id" } },
-                );
-                http.get(
-                  `${BASE_URL}/api/playgrounds/${pg.hash}/commits/${commit.id}/diff`,
-                  { tags: { name: "GET /api/playgrounds/:hash/commits/:id/diff" } },
-                );
+                const commit = commits[Math.floor(Math.random() * commits.length)];
+                http.get(`${BASE_URL}/api/playgrounds/${pg.hash}/commits/${commit.id}`, {
+                  tags: { name: "GET /api/playgrounds/:hash/commits/:id" },
+                });
+                http.get(`${BASE_URL}/api/playgrounds/${pg.hash}/commits/${commit.id}/diff`, {
+                  tags: { name: "GET /api/playgrounds/:hash/commits/:id/diff" },
+                });
               }
             } catch {
               // ok

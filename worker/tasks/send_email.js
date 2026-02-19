@@ -20,15 +20,11 @@ const { readFile } = fs;
 // @ts-expect-error json import assertions were a mistake
 const fromEmail = packageJson.fromEmail;
 if (!fromEmail)
-  throw new Error(
-    `Warning: no email address configured. Please set "fromEmail" in package.json`,
-  );
+  throw new Error(`Warning: no email address configured. Please set "fromEmail" in package.json`);
 // @ts-expect-error json import assertions were a mistake
 const projectName = packageJson.projectName ?? packageJson.name;
 if (!projectName)
-  throw new Error(
-    `Warning: no project name configured. Please set "projectName" in package.json`,
-  );
+  throw new Error(`Warning: no project name configured. Please set "projectName" in package.json`);
 // @ts-expect-error json import assertions were a mistake
 const legalText = packageJson.legalText ?? "";
 
@@ -85,10 +81,7 @@ function loadTemplate(template) {
       if (!template.match(/^[a-zA-Z0-9_.-]+$/)) {
         throw new Error(`Disallowed template name '${template}'`);
       }
-      const templateString = await readFile(
-        `${__dirname}/../templates/${template}`,
-        "utf8",
-      );
+      const templateString = await readFile(`${__dirname}/../templates/${template}`, "utf8");
       const templateFn = lodash.template(templateString, {
         escape: /\[\[([\s\S]+?)\]\]/g,
       });

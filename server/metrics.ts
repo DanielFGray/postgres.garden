@@ -1,7 +1,4 @@
-import {
-  MeterProvider,
-  PeriodicExportingMetricReader,
-} from "@opentelemetry/sdk-metrics";
+import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { env } from "./assertEnv.js";
@@ -28,10 +25,9 @@ export const authAttempts = meter.createCounter("auth.attempts", {
   description: "Number of authentication attempts",
 });
 
-export const authActiveSessions = meter.createUpDownCounter(
-  "auth.active_sessions",
-  { description: "Number of active sessions" },
-);
+export const authActiveSessions = meter.createUpDownCounter("auth.active_sessions", {
+  description: "Number of active sessions",
+});
 
 export const webhookReceived = meter.createCounter("webhook.received", {
   description: "Number of webhooks received",

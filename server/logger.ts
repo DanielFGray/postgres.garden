@@ -50,46 +50,46 @@ const requestMeta = new WeakMap<Request, { startTime: number; shouldSkip: boolea
 export const logger = (options: LoggerOptions = {}) => {
   const { skip = [], logBody = false, colorize = true } = options;
 
-  return new Elysia({ name: "logger" }).onRequest(({ request }) => {
-    const startTime = performance.now();
+  return new Elysia({ name: "logger" })
+    .onRequest(({ request }) => {
+      const startTime = performance.now();
 
-    const url = new URL(request.url);
-    const path = url.pathname;
+      const url = new URL(request.url);
+      const path = url.pathname;
 
-    // Check if we should skip this path
-    const shouldSkip = skip.some(
-      (skipPath) => path === skipPath || path.startsWith(skipPath),
-    );
+      // Check if we should skip this path
+      const shouldSkip = skip.some((skipPath) => path === skipPath || path.startsWith(skipPath));
 
-    requestMeta.set(request, { startTime, shouldSkip });
+      requestMeta.set(request, { startTime, shouldSkip });
 
-    if (shouldSkip) return;
+      if (shouldSkip) return;
 
-    const method = request.method;
+      const method = request.method;
 
-    // Log incoming request
-    const timestamp = new Date().toISOString();
-    const c = colorize ? colors : { reset: "", dim: "", cyan: "", magenta: "" };
+      // Log incoming request
+      const timestamp = new Date().toISOString();
+      const c = colorize ? colors : { reset: "", dim: "", cyan: "", magenta: "" };
 
-    console.log(
-      `${c.dim}${timestamp}${c.reset} ${c.magenta}${method}${c.reset} ${c.cyan}${url.pathname}${c.reset}${url.search || ""}${logBody && request.body ? ` ${c.dim}body=${JSON.stringify(request.body)}${c.reset}` : ""}`,
-    );
-  }).onAfterResponse(({ request, set }) => {
-    const meta = requestMeta.get(request);
-    if (!meta || meta.shouldSkip) return;
-    const { startTime } = meta;
+      console.log(
+        `${c.dim}${timestamp}${c.reset} ${c.magenta}${method}${c.reset} ${c.cyan}${url.pathname}${c.reset}${url.search || ""}${logBody && request.body ? ` ${c.dim}body=${JSON.stringify(request.body)}${c.reset}` : ""}`,
+      );
+    })
+    .onAfterResponse(({ request, set }) => {
+      const meta = requestMeta.get(request);
+      if (!meta || meta.shouldSkip) return;
+      const { startTime } = meta;
 
-    const duration = performance.now() - startTime;
-    const status = set.status ?? 200;
-    const statusNum = typeof status === "number" ? status : 200;
-    const method = request.method;
-    const url = new URL(request.url);
-    const c = colorize ? colors : { reset: "", dim: "", green: "", yellow: "", red: "" };
+      const duration = performance.now() - startTime;
+      const status = set.status ?? 200;
+      const statusNum = typeof status === "number" ? status : 200;
+      const method = request.method;
+      const url = new URL(request.url);
+      const c = colorize ? colors : { reset: "", dim: "", green: "", yellow: "", red: "" };
 
-    console.log(
-      `${c.dim}${new Date().toISOString()}${c.reset} ${method} ${url.pathname} ${statusColor(statusNum)}${statusNum}${c.reset} ${c.dim}${formatDuration(duration)}${c.reset}`,
-    );
-  });
+      console.log(
+        `${c.dim}${new Date().toISOString()}${c.reset} ${method} ${url.pathname} ${statusColor(statusNum)}${statusNum}${c.reset} ${c.dim}${formatDuration(duration)}${c.reset}`,
+      );
+    });
 };
 
 /**

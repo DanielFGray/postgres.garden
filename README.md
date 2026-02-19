@@ -61,16 +61,16 @@ bun run dev               # Start dev server
 
 ## Scripts
 
-| Command | Description |
-|---|---|
-| `bun run dev` | Start all dev processes (server, db watch, workers, typechecker, tests, renderer) |
-| `bun run build` | Production build (server + client + renderer + webviews) |
-| `bun run start` | Start production server |
-| `bun lint` | Run ESLint |
-| `bun typecheck` | Run TypeScript type checking |
-| `bun test` | Run unit + e2e tests |
-| `bun run db:reset` | Reset database and re-run all migrations |
-| `bun run db:types` | Regenerate TypeScript types from database schema |
+| Command            | Description                                                                       |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `bun run dev`      | Start all dev processes (server, db watch, workers, typechecker, tests, renderer) |
+| `bun run build`    | Production build (server + client + renderer + webviews)                          |
+| `bun run start`    | Start production server                                                           |
+| `bun lint`         | Run ESLint                                                                        |
+| `bun typecheck`    | Run TypeScript type checking                                                      |
+| `bun test`         | Run unit + e2e tests                                                              |
+| `bun run db:reset` | Reset database and re-run all migrations                                          |
+| `bun run db:types` | Regenerate TypeScript types from database schema                                  |
 
 ## Project Structure
 

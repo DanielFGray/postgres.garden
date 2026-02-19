@@ -50,10 +50,7 @@ function getImportedChunks(
 /**
  * Generate HTML with correct asset paths from manifest
  */
-function generateHtmlFromManifest(
-  manifest: Manifest,
-  entryPoint: string,
-): string {
+function generateHtmlFromManifest(manifest: Manifest, entryPoint: string): string {
   const entry = manifest[entryPoint];
   if (!entry) {
     throw new Error(`Entry point "${entryPoint}" not found in manifest`);
@@ -79,10 +76,7 @@ function generateHtmlFromManifest(
 
   // Generate modulepreload links for imported chunks
   const preloadLinks = importedChunks
-    .map(
-      (chunk) =>
-        `  <link rel="modulepreload" crossorigin href="/${chunk.file}">`,
-    )
+    .map((chunk) => `  <link rel="modulepreload" crossorigin href="/${chunk.file}">`)
     .join("\n");
 
   // Find favicon in manifest
@@ -124,15 +118,11 @@ export async function createProdServer(rootApp: App) {
 
   // Read and parse the Vite manifest
   if (!fs.existsSync(MANIFEST_PATH)) {
-    console.error(
-      "❌ Vite manifest not found. Ensure build.manifest is enabled in vite.config.ts",
-    );
+    console.error("❌ Vite manifest not found. Ensure build.manifest is enabled in vite.config.ts");
     process.exit(1);
   }
 
-  const manifest = JSON.parse(
-    fs.readFileSync(MANIFEST_PATH, "utf-8"),
-  ) as Manifest;
+  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf-8")) as Manifest;
 
   // Generate HTML template from manifest
   // The entry point is index.html (Vite uses index.html as the entry)
@@ -152,12 +142,16 @@ export async function createProdServer(rootApp: App) {
   // Service worker must never be long-cached — browsers need to detect updates
   const swPath = path.join(DIST_DIR, "sw.js");
   if (fs.existsSync(swPath)) {
-    app.get("/sw.js", () => new Response(Bun.file(swPath), {
-      headers: {
-        "Content-Type": "application/javascript",
-        "Cache-Control": "no-cache",
-      },
-    }));
+    app.get(
+      "/sw.js",
+      () =>
+        new Response(Bun.file(swPath), {
+          headers: {
+            "Content-Type": "application/javascript",
+            "Cache-Control": "no-cache",
+          },
+        }),
+    );
   }
 
   // Serve static assets from dist directory FIRST
@@ -180,11 +174,7 @@ export async function createProdServer(rootApp: App) {
       const cookieHeader = request.headers.get("cookie") || "";
 
       // Fetch initial data using shared SSR helper
-      const initialData = await getInitialData(
-        rootApp,
-        url.pathname,
-        cookieHeader,
-      );
+      const initialData = await getInitialData(rootApp, url.pathname, cookieHeader);
 
       // Inject initial data into the HTML
       const html = htmlTemplate.replace(

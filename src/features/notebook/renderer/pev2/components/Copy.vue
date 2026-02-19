@@ -1,23 +1,23 @@
 <script lang="ts" setup>
-import { ref } from "vue"
-import useClipboard from "vue-clipboard3"
-import { directive as vTippy } from "vue-tippy"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faCheck, faClipboard } from "@fortawesome/free-solid-svg-icons"
+import { ref } from "vue";
+import useClipboard from "vue-clipboard3";
+import { directive as vTippy } from "vue-tippy";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import { faCheck, faClipboard } from "@fortawesome/free-solid-svg-icons";
 
 interface Props {
-  content: string
+  content: string;
 }
-const props = defineProps<Props>()
-const copied = ref<boolean>(false)
+const props = defineProps<Props>();
+const copied = ref<boolean>(false);
 
 function copyRaw() {
-  const { toClipboard } = useClipboard()
-  toClipboard(props.content)
-  copied.value = true
+  const { toClipboard } = useClipboard();
+  toClipboard(props.content);
+  copied.value = true;
   window.setTimeout(() => {
-    copied.value = false
-  }, 2000)
+    copied.value = false;
+  }, 2000);
 }
 </script>
 

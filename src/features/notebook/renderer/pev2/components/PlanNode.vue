@@ -1,49 +1,39 @@
 <script lang="ts" setup>
-import { inject, nextTick, onMounted, provide, reactive, ref, watch } from "vue"
-import PlanNodeDetail from "@/components/PlanNodeDetail.vue"
-import NodeBadges from "@/components/NodeBadges.vue"
-import type { IPlan, Node, ViewOptions } from "@/interfaces"
-import {
-  HighlightedNodeIdKey,
-  SelectedNodeIdKey,
-  SelectNodeKey,
-  ViewOptionsKey,
-} from "@/symbols"
-import { keysToString, sortKeys } from "@/filters"
-import { HighlightType, NodeProp } from "@/enums"
-import { findNodeBySubplanName } from "@/services/help-service"
-import useNode from "@/node"
-import { store } from "@/store"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import {
-  faChevronDown,
-  faChevronUp,
-  faSearch,
-} from "@fortawesome/free-solid-svg-icons"
+import { inject, nextTick, onMounted, provide, reactive, ref, watch } from "vue";
+import PlanNodeDetail from "@/components/PlanNodeDetail.vue";
+import NodeBadges from "@/components/NodeBadges.vue";
+import type { IPlan, Node, ViewOptions } from "@/interfaces";
+import { HighlightedNodeIdKey, SelectedNodeIdKey, SelectNodeKey, ViewOptionsKey } from "@/symbols";
+import { keysToString, sortKeys } from "@/filters";
+import { HighlightType, NodeProp } from "@/enums";
+import { findNodeBySubplanName } from "@/services/help-service";
+import useNode from "@/node";
+import { store } from "@/store";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import { faChevronDown, faChevronUp, faSearch } from "@fortawesome/free-solid-svg-icons";
 
-const outerEl = ref<Element | null>(null) // The outer Element, useful for CTE and subplans
+const outerEl = ref<Element | null>(null); // The outer Element, useful for CTE and subplans
 
-const selectedNodeId = inject(SelectedNodeIdKey)
+const selectedNodeId = inject(SelectedNodeIdKey);
 if (!selectedNodeId) {
-  throw new Error(`Could not resolve ${SelectedNodeIdKey.description}`)
+  throw new Error(`Could not resolve ${SelectedNodeIdKey.description}`);
 }
-const highlightedNodeId = inject(HighlightedNodeIdKey)
-const selectNode = inject(SelectNodeKey)
+const highlightedNodeId = inject(HighlightedNodeIdKey);
+const selectNode = inject(SelectNodeKey);
 if (!selectNode) {
-  throw new Error(`Could not resolve ${SelectNodeKey.description}`)
+  throw new Error(`Could not resolve ${SelectNodeKey.description}`);
 }
-const viewOptions = inject(ViewOptionsKey) as ViewOptions
+const viewOptions = inject(ViewOptionsKey) as ViewOptions;
 
 interface Props {
-  node: Node
+  node: Node;
 }
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
-const showDetails = ref<boolean>(false)
+const showDetails = ref<boolean>(false);
 
-const node = reactive<Node>(props.node)
-const updateNodeSize =
-  inject<(node: Node, size: [number, number]) => null>("updateNodeSize")
+const node = reactive<Node>(props.node);
+const updateNodeSize = inject<(node: Node, size: [number, number]) => null>("updateNodeSize");
 
 const {
   nodeName,
@@ -54,45 +44,42 @@ const {
   workersLaunchedCount,
   workersPlannedCount,
   workersPlannedCountReversed,
-} = useNode(node, viewOptions)
+} = useNode(node, viewOptions);
 
 onMounted(async () => {
-  updateSize(node)
-})
+  updateSize(node);
+});
 
 function updateSize(node: Node) {
-  const rect = outerEl.value?.getBoundingClientRect()
+  const rect = outerEl.value?.getBoundingClientRect();
   if (rect) {
-    updateNodeSize?.(node, [rect.width, rect.height])
+    updateNodeSize?.(node, [rect.width, rect.height]);
   }
 }
-provide("updateSize", updateSize)
+provide("updateSize", updateSize);
 
 watch(showDetails, () => {
-  window.setTimeout(() => updateSize(node), 1)
-})
+  window.setTimeout(() => updateSize(node), 1);
+});
 
 watch(viewOptions, () => {
   // Using nextTick has the same effect as a debounce making all nodes
   // size to be updated all at once
   nextTick(() => {
-    updateSize(node)
-  })
-})
+    updateSize(node);
+  });
+});
 
 watch(selectedNodeId, () => {
   if (selectedNodeId.value == node.nodeId) {
-    showDetails.value = true
+    showDetails.value = true;
   }
-})
+});
 
 function centerCte() {
-  const cteNode = findNodeBySubplanName(
-    store.plan as IPlan,
-    node[NodeProp.CTE_NAME] as string,
-  )
+  const cteNode = findNodeBySubplanName(store.plan as IPlan, node[NodeProp.CTE_NAME] as string);
   if (cteNode) {
-    selectNode?.(cteNode.nodeId, true)
+    selectNode?.(cteNode.nodeId, true);
   }
 }
 </script>
@@ -151,11 +138,7 @@ function centerCte() {
                   :icon="faChevronUp"
                   v-if="showDetails"
                 ></FontAwesomeIcon>
-                <FontAwesomeIcon
-                  fixed-width
-                  :icon="faChevronDown"
-                  v-else
-                ></FontAwesomeIcon>
+                <FontAwesomeIcon fixed-width :icon="faChevronDown" v-else></FontAwesomeIcon>
               </span>
               {{ nodeName }}
             </h4>
@@ -172,14 +155,11 @@ function centerCte() {
           </header>
           <div class="text-start font-monospace">
             <div
-              v-if="
-                node[NodeProp.RELATION_NAME] || node[NodeProp.FUNCTION_NAME]
-              "
+              v-if="node[NodeProp.RELATION_NAME] || node[NodeProp.FUNCTION_NAME]"
               :class="{ 'line-clamp-2': !showDetails }"
             >
               <span class="text-body-tertiary">on</span>
-              <span v-if="node[NodeProp.SCHEMA]"
-                >{{ node[NodeProp.SCHEMA] }}.</span
+              <span v-if="node[NodeProp.SCHEMA]">{{ node[NodeProp.SCHEMA] }}.</span
               >{{ node[NodeProp.RELATION_NAME] }}
               {{ node[NodeProp.FUNCTION_NAME] }}
               <span v-if="node[NodeProp.ALIAS]">
@@ -187,28 +167,15 @@ function centerCte() {
                 {{ node[NodeProp.ALIAS] }}
               </span>
             </div>
-            <div
-              v-else-if="node[NodeProp.ALIAS]"
-              :class="{ 'line-clamp-2': !showDetails }"
-            >
+            <div v-else-if="node[NodeProp.ALIAS]" :class="{ 'line-clamp-2': !showDetails }">
               <span class="text-body-tertiary">on</span>
-              <span
-                v-html="keysToString(node[NodeProp.ALIAS] as string)"
-              ></span>
+              <span v-html="keysToString(node[NodeProp.ALIAS] as string)"></span>
             </div>
-            <div
-              v-if="node[NodeProp.GROUP_KEY]"
-              :class="{ 'line-clamp-2': !showDetails }"
-            >
+            <div v-if="node[NodeProp.GROUP_KEY]" :class="{ 'line-clamp-2': !showDetails }">
               <span class="text-body-tertiary">by</span>
-              <span
-                v-html="keysToString(node[NodeProp.GROUP_KEY] as string)"
-              ></span>
+              <span v-html="keysToString(node[NodeProp.GROUP_KEY] as string)"></span>
             </div>
-            <div
-              v-if="node[NodeProp.SORT_KEY]"
-              :class="{ 'line-clamp-2': !showDetails }"
-            >
+            <div v-if="node[NodeProp.SORT_KEY]" :class="{ 'line-clamp-2': !showDetails }">
               <span class="text-body-tertiary">by</span>
               <span
                 v-html="
@@ -219,42 +186,24 @@ function centerCte() {
                 "
               ></span>
             </div>
-            <div
-              v-if="node[NodeProp.INDEX_NAME]"
-              :class="{ 'line-clamp-2': !showDetails }"
-            >
+            <div v-if="node[NodeProp.INDEX_NAME]" :class="{ 'line-clamp-2': !showDetails }">
               <span class="text-body-tertiary">using</span>
-              <span
-                v-html="keysToString(node[NodeProp.INDEX_NAME] as string)"
-              ></span>
+              <span v-html="keysToString(node[NodeProp.INDEX_NAME] as string)"></span>
             </div>
-            <div
-              v-if="node[NodeProp.HASH_CONDITION]"
-              :class="{ 'line-clamp-2': !showDetails }"
-            >
+            <div v-if="node[NodeProp.HASH_CONDITION]" :class="{ 'line-clamp-2': !showDetails }">
               <span class="text-body-tertiary">on</span>
-              <span
-                v-html="keysToString(node[NodeProp.HASH_CONDITION] as string)"
-              ></span>
+              <span v-html="keysToString(node[NodeProp.HASH_CONDITION] as string)"></span>
             </div>
             <div v-if="node[NodeProp.CTE_NAME]">
               <a class="text-reset" href="" @click.prevent.stop="centerCte">
-                <FontAwesomeIcon
-                  :icon="faSearch"
-                  class="text-body-tertiary"
-                ></FontAwesomeIcon>
+                <FontAwesomeIcon :icon="faSearch" class="text-body-tertiary"></FontAwesomeIcon>
                 <span class="text-body-tertiary">CTE</span>
                 {{ node[NodeProp.CTE_NAME] }}
               </a>
             </div>
           </div>
 
-          <div
-            v-if="
-              viewOptions.highlightType !== HighlightType.NONE &&
-              highlightValue !== null
-            "
-          >
+          <div v-if="viewOptions.highlightType !== HighlightType.NONE && highlightValue !== null">
             <div class="progress mt-2 mb-1" style="height: 5px">
               <div
                 class="progress-bar"
@@ -269,9 +218,7 @@ function centerCte() {
               ></div>
             </div>
             <span class="node-bar-label">
-              <span class="text-body-tertiary"
-                >{{ viewOptions.highlightType }}:</span
-              >
+              <span class="text-body-tertiary">{{ viewOptions.highlightType }}:</span>
               <span v-html="highlightValue"></span>
             </span>
           </div>

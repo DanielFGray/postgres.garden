@@ -8,12 +8,7 @@
 import http from "k6/http";
 import { check, sleep, group } from "k6";
 import { Counter, Trend } from "k6/metrics";
-import {
-  BASE_URL,
-  registerUser,
-  authHeaders,
-  sampleFiles,
-} from "./helpers.js";
+import { BASE_URL, registerUser, authHeaders, sampleFiles } from "./helpers.js";
 
 const errors = new Counter("errors");
 const browseDuration = new Trend("browse_duration", true);
@@ -90,8 +85,7 @@ export function browse() {
     try {
       const playgrounds = listRes.json();
       if (Array.isArray(playgrounds) && playgrounds.length > 0) {
-        const pg =
-          playgrounds[Math.floor(Math.random() * playgrounds.length)];
+        const pg = playgrounds[Math.floor(Math.random() * playgrounds.length)];
         http.get(`${BASE_URL}/api/playgrounds/${pg.hash}`, {
           tags: { name: "GET /api/playgrounds/:hash" },
         });
@@ -188,22 +182,19 @@ export function viewProfiles() {
       const playgrounds = listRes.json();
       if (Array.isArray(playgrounds) && playgrounds.length > 0) {
         // Pick a random playground's user
-        const pg =
-          playgrounds[Math.floor(Math.random() * playgrounds.length)];
+        const pg = playgrounds[Math.floor(Math.random() * playgrounds.length)];
         if (pg.user && pg.user.username) {
-          const profileRes = http.get(
-            `${BASE_URL}/api/user/${pg.user.username}`,
-            { tags: { name: "GET /api/user/:username" } },
-          );
+          const profileRes = http.get(`${BASE_URL}/api/user/${pg.user.username}`, {
+            tags: { name: "GET /api/user/:username" },
+          });
           check(profileRes, {
             "profile 200": (r) => r.status === 200,
           });
 
           // Also try the /playgrounds sub-route
-          http.get(
-            `${BASE_URL}/api/user/${pg.user.username}/playgrounds`,
-            { tags: { name: "GET /api/user/:username/playgrounds" } },
-          );
+          http.get(`${BASE_URL}/api/user/${pg.user.username}/playgrounds`, {
+            tags: { name: "GET /api/user/:username/playgrounds" },
+          });
         }
       }
     } catch {

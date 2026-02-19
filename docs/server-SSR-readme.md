@@ -5,19 +5,21 @@ This project now supports server-side rendering (SSR) of the HTML shell with emb
 ## Architecture
 
 - **Development**: Vite dev server with custom plugin for data injection
-- **Production**: Bun server serves pre-built Vite assets with data injection  
+- **Production**: Bun server serves pre-built Vite assets with data injection
 - **Backend Runtime**: Bun (dev uses Vite's Node.js server under the hood)
 - **Frontend**: Unchanged - just reads from `window.__INITIAL_DATA__`
 
 ## How It Works
 
 ### Development Mode
+
 1. `server/dev.ts` creates a Vite dev server with a custom plugin
 2. The plugin uses Vite's `transformIndexHtml` hook to inject data
 3. Data is fetched via `getInitialData()` and embedded as `<script>window.__INITIAL_DATA__ = {...}</script>`
 4. Vite handles all module transformation, HMR, and serving with correct MIME types
 
 ### Production Mode
+
 1. `server/prod.ts` uses Elysia to serve pre-built assets from `/dist`
 2. For HTML requests, it injects data before serving
 3. Static assets (JS, CSS, images) are served directly
@@ -63,7 +65,7 @@ export async function getInitialData(): Promise<InitialData> {
   // Add your database queries here
   const user = await db.users.findOne(...)
   const projects = await db.projects.findMany(...)
-  
+
   return {
     timestamp: Date.now(),
     environment: process.env.NODE_ENV || 'development',
@@ -80,10 +82,10 @@ Update the `InitialData` interface to match your data structure.
 
 ```typescript
 // Type-safe access to server-injected data
-const initialData = window.__INITIAL_DATA__
+const initialData = window.__INITIAL_DATA__;
 
 if (initialData) {
-  console.log('Server provided:', initialData)
+  console.log("Server provided:", initialData);
   // Use the data in your app initialization
 }
 ```

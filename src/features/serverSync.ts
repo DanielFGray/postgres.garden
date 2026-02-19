@@ -4,15 +4,8 @@
  */
 
 import * as vscode from "vscode";
-import type {
-  SourceControlResourceState,
-  TreeDataProvider,
-  TreeItem,
-} from "vscode";
-import {
-  ExtensionHostKind,
-  registerExtension,
-} from "@codingame/monaco-vscode-api/extensions";
+import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vscode";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import { api } from "../api-client";
 import { router } from "./router";
 import { replaceTo } from "../navigation";
@@ -154,14 +147,13 @@ const ext = registerExtension(
 
 console.log("[ServerSync] Extension registered, waiting for API...");
 
-void ext.getApi()
+void ext
+  .getApi()
   .then(async (vscode) => {
     console.log("[ServerSync] API received, checking workspace...");
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (workspaceFolder == null) {
-      console.warn(
-        "[ServerSync] No workspace folder found, skipping initialization",
-      );
+      console.warn("[ServerSync] No workspace folder found, skipping initialization");
       return;
     }
 
@@ -178,8 +170,7 @@ void ext.getApi()
     /**
      * Provides baseline file content for quick diff
      */
-    class BaselineContentProvider
-      implements vscode.TextDocumentContentProvider {
+    class BaselineContentProvider implements vscode.TextDocumentContentProvider {
       private _onDidChange = new vscode.EventEmitter<vscode.Uri>();
 
       get onDidChange(): vscode.Event<vscode.Uri> {
@@ -220,24 +211,17 @@ void ext.getApi()
      * Refresh quick diff decorations for all workspace files
      */
     async function refreshQuickDiff() {
-      const allFiles = await vscode.workspace.findFiles(
-        "**/*",
-        "**/node_modules/**",
-      );
+      const allFiles = await vscode.workspace.findFiles("**/*", "**/node_modules/**");
       for (const fileUri of allFiles) {
         // Fire change event to refresh gutter decorations
-        baselineContentProvider.fireChange(
-          vscode.Uri.parse(`${BASELINE_SCHEME}:${fileUri.path}`),
-        );
+        baselineContentProvider.fireChange(vscode.Uri.parse(`${BASELINE_SCHEME}:${fileUri.path}`));
       }
     }
 
     /**
      * Scan workspace and collect all files
      */
-    async function scanWorkspace(): Promise<
-      Array<{ path: string; content: string }>
-    > {
+    async function scanWorkspace(): Promise<Array<{ path: string; content: string }>> {
       try {
         // Find all files (excluding common ignore patterns)
         const allFiles = await vscode.workspace.findFiles("**/*");
@@ -255,10 +239,7 @@ void ext.getApi()
               content: textContent,
             });
           } catch (err) {
-            console.warn(
-              `[ServerSync] Failed to read file ${fileUri.path}:`,
-              err,
-            );
+            console.warn(`[ServerSync] Failed to read file ${fileUri.path}:`, err);
           }
         }
 
@@ -271,7 +252,7 @@ void ext.getApi()
     }
 
     /** Sentinel thrown to break out of withProgress before showing sign-in prompt */
-    class SignInRequired extends Error { }
+    class SignInRequired extends Error {}
 
     /**
      * Commit workspace to server
@@ -374,27 +355,26 @@ void ext.getApi()
               throw new SignInRequired();
             }
 
-            const { data: result, error } = await (currentPlaygroundHash &&
-              isAuthenticated
+            const { data: result, error } = await (currentPlaygroundHash && isAuthenticated
               ? api("/api/playgrounds/:hash/commits", {
-                method: "POST",
-                params: { hash: currentPlaygroundHash },
-                body: {
-                  message: commitMessage,
-                  files,
-                  activeFile,
-                },
-              })
+                  method: "POST",
+                  params: { hash: currentPlaygroundHash },
+                  body: {
+                    message: commitMessage,
+                    files,
+                    activeFile,
+                  },
+                })
               : api("/api/playgrounds", {
-                method: "POST",
-                body: {
-                  name: playgroundName,
-                  message: commitMessage,
-                  description: "New playground",
-                  files,
-                  activeFile,
-                },
-              }));
+                  method: "POST",
+                  body: {
+                    name: playgroundName,
+                    message: commitMessage,
+                    description: "New playground",
+                    files,
+                    activeFile,
+                  },
+                }));
 
             if (error) {
               console.error("[ServerSync] Commit failed:", error);
@@ -417,9 +397,7 @@ void ext.getApi()
                       "Signed in successfully. Please try syncing again.",
                     );
                   } catch {
-                    vscode.window.showErrorMessage(
-                      "Authentication failed. Please try again.",
-                    );
+                    vscode.window.showErrorMessage("Authentication failed. Please try again.");
                   }
                 }
                 return;
@@ -453,8 +431,7 @@ void ext.getApi()
             );
 
             // Check if playground hash changed (new playground created)
-            const playgroundHashChanged =
-              currentPlaygroundHash !== commitResult.playground_hash;
+            const playgroundHashChanged = currentPlaygroundHash !== commitResult.playground_hash;
             const wasForked = commitResult.forked === true;
 
             // Update current commit and playground tracking
@@ -470,11 +447,7 @@ void ext.getApi()
               console.log(
                 "[ServerSync] Playground hash changed - updating URL to:",
                 commitResult.playground_hash,
-                wasForked
-                  ? "(forked)"
-                  : isAuthenticated
-                    ? "(first sync)"
-                    : "(anonymous snapshot)",
+                wasForked ? "(forked)" : isAuthenticated ? "(first sync)" : "(anonymous snapshot)",
               );
 
               // Update router state to reflect the new playground
@@ -542,7 +515,7 @@ void ext.getApi()
             commitHistoryProvider.refresh();
             forkHistoryProvider.refresh();
             void updateStatusBar();
-          }
+          },
         );
       } catch (err) {
         if (err instanceof SignInRequired) {
@@ -570,16 +543,16 @@ void ext.getApi()
      * Update SCM view with changed files
      */
     function updateSCMView() {
-      const resourceStates: SourceControlResourceState[] = Array.from(
-        changedFiles.values(),
-      ).map((uri) => ({
-        resourceUri: uri,
-        command: {
-          title: "Open",
-          command: VSCODE_OPEN,
-          arguments: [uri],
-        },
-      }));
+      const resourceStates: SourceControlResourceState[] = Array.from(changedFiles.values()).map(
+        (uri) => ({
+          resourceUri: uri,
+          command: {
+            title: "Open",
+            command: VSCODE_OPEN,
+            arguments: [uri],
+          },
+        }),
+      );
 
       workingTreeGroup.resourceStates = resourceStates;
       scm.count = resourceStates.length;
@@ -632,12 +605,10 @@ void ext.getApi()
      * Commit History Tree Data Provider
      */
     class CommitHistoryProvider implements TreeDataProvider<CommitHistoryItem> {
-      private _onDidChangeTreeData: vscode.EventEmitter<
-        CommitHistoryItem | undefined | void
-      > = new vscode.EventEmitter<CommitHistoryItem | undefined | void>();
-      readonly onDidChangeTreeData: vscode.Event<
-        CommitHistoryItem | undefined | void
-      > = this._onDidChangeTreeData.event;
+      private _onDidChangeTreeData: vscode.EventEmitter<CommitHistoryItem | undefined | void> =
+        new vscode.EventEmitter<CommitHistoryItem | undefined | void>();
+      readonly onDidChangeTreeData: vscode.Event<CommitHistoryItem | undefined | void> =
+        this._onDidChangeTreeData.event;
 
       refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -646,16 +617,12 @@ void ext.getApi()
       getTreeItem(element: CommitHistoryItem): TreeItem {
         const isCurrentCommit = element.id === currentCommitId;
         const label = element.message || `Commit ${element.id.substring(0, 8)}`;
-        const treeItem = new vscode.TreeItem(
-          isCurrentCommit ? `✓ ${label}` : label,
-        );
+        const treeItem = new vscode.TreeItem(isCurrentCommit ? `✓ ${label}` : label);
         treeItem.id = element.id;
         treeItem.description = new Date(element.timestamp).toLocaleString();
         treeItem.tooltip = `${element.fileCount} file(s) • ${element.username || "Unknown user"} • ${element.id}${isCurrentCommit ? " (currently loaded)" : ""}`;
         treeItem.contextValue = "commit";
-        treeItem.iconPath = new vscode.ThemeIcon(
-          isCurrentCommit ? "circle-filled" : "git-commit",
-        );
+        treeItem.iconPath = new vscode.ThemeIcon(isCurrentCommit ? "circle-filled" : "git-commit");
         treeItem.command = {
           command: SERVER_SYNC_VIEW_COMMIT,
           title: "View Commit",
@@ -664,9 +631,7 @@ void ext.getApi()
         return treeItem;
       }
 
-      async getChildren(
-        element?: CommitHistoryItem,
-      ): Promise<CommitHistoryItem[]> {
+      async getChildren(element?: CommitHistoryItem): Promise<CommitHistoryItem[]> {
         if (element) {
           // No children for commits
           return [];
@@ -674,28 +639,19 @@ void ext.getApi()
 
         // If no playground is loaded, show empty list
         if (!currentPlaygroundHash) {
-          console.log(
-            "[ServerSync] No playground loaded, commit history is empty",
-          );
+          console.log("[ServerSync] No playground loaded, commit history is empty");
           return [];
         }
 
         try {
           // Fetch commits from server - GET /playgrounds/:hash/commits
-          const { data: commits, error } = await api(
-            "/api/playgrounds/:hash/commits",
-            {
-              method: "GET",
-              params: { hash: currentPlaygroundHash },
-            },
-          );
+          const { data: commits, error } = await api("/api/playgrounds/:hash/commits", {
+            method: "GET",
+            params: { hash: currentPlaygroundHash },
+          });
 
           if (error) {
-            console.error(
-              "[ServerSync] Failed to load commits:",
-              error.status,
-              error.value,
-            );
+            console.error("[ServerSync] Failed to load commits:", error.status, error.value);
             return [];
           }
 
@@ -732,12 +688,10 @@ void ext.getApi()
      * Shows the fork chain for the current playground
      */
     class ForkHistoryProvider implements TreeDataProvider<ForkHistoryItem> {
-      private _onDidChangeTreeData: vscode.EventEmitter<
-        ForkHistoryItem | undefined | void
-      > = new vscode.EventEmitter<ForkHistoryItem | undefined | void>();
-      readonly onDidChangeTreeData: vscode.Event<
-        ForkHistoryItem | undefined | void
-      > = this._onDidChangeTreeData.event;
+      private _onDidChangeTreeData: vscode.EventEmitter<ForkHistoryItem | undefined | void> =
+        new vscode.EventEmitter<ForkHistoryItem | undefined | void>();
+      readonly onDidChangeTreeData: vscode.Event<ForkHistoryItem | undefined | void> =
+        this._onDidChangeTreeData.event;
 
       private forkChain: ForkHistoryItem[] = [];
 
@@ -747,13 +701,9 @@ void ext.getApi()
 
       getTreeItem(element: ForkHistoryItem): TreeItem {
         const label = element.name || element.hash.substring(0, 8);
-        const treeItem = new vscode.TreeItem(
-          element.isCurrent ? `✓ ${label}` : label,
-        );
+        const treeItem = new vscode.TreeItem(element.isCurrent ? `✓ ${label}` : label);
         treeItem.id = element.hash;
-        treeItem.description = element.owner
-          ? `by ${element.owner}`
-          : "anonymous";
+        treeItem.description = element.owner ? `by ${element.owner}` : "anonymous";
         treeItem.tooltip = `${element.hash}${element.isCurrent ? " (current)" : ""}`;
         treeItem.contextValue = "fork";
         treeItem.iconPath = new vscode.ThemeIcon(
@@ -769,9 +719,7 @@ void ext.getApi()
         return treeItem;
       }
 
-      async getChildren(
-        element?: ForkHistoryItem,
-      ): Promise<ForkHistoryItem[]> {
+      async getChildren(element?: ForkHistoryItem): Promise<ForkHistoryItem[]> {
         if (element) {
           // No children for fork items
           return [];
@@ -804,17 +752,16 @@ void ext.getApi()
             });
 
             // Get the fork source (field may exist but isn't in the API's static type)
-            const forkOf: { hash: string } | null | undefined =
-              (playground as unknown as { fork_of?: { hash: string } | null }).fork_of;
+            const forkOf: { hash: string } | null | undefined = (
+              playground as unknown as { fork_of?: { hash: string } | null }
+            ).fork_of;
             currentHash = forkOf?.hash ?? null;
           }
 
           // Show from oldest to newest (fork source first)
           this.forkChain = chain.reverse();
 
-          console.log(
-            `[ServerSync] Fork history: ${this.forkChain.length} items`,
-          );
+          console.log(`[ServerSync] Fork history: ${this.forkChain.length} items`);
 
           return this.forkChain;
         } catch (err) {
@@ -854,186 +801,170 @@ void ext.getApi()
       forkHistoryProvider.refresh();
     });
 
-    vscode.commands.registerCommand(
-      SERVER_SYNC_VIEW_FORK_SOURCE,
-      (hash: string) => {
-        // Navigate to the fork source playground
-        const url = `/playgrounds/${hash}`;
-        console.log("[ServerSync] Opening fork source:", url);
+    vscode.commands.registerCommand(SERVER_SYNC_VIEW_FORK_SOURCE, (hash: string) => {
+      // Navigate to the fork source playground
+      const url = `/playgrounds/${hash}`;
+      console.log("[ServerSync] Opening fork source:", url);
 
-        if (window.navigation) {
-          window.navigation.navigate(url);
-        } else {
-          window.location.href = url;
-        }
-      },
-    );
+      if (window.navigation) {
+        window.navigation.navigate(url);
+      } else {
+        window.location.href = url;
+      }
+    });
 
-    vscode.commands.registerCommand(
-      SERVER_SYNC_VIEW_COMMIT,
-      async (commitId: string) => {
-        try {
-          await vscode.window.withProgress(
-            {
-              location: vscode.ProgressLocation.Notification,
-              title: "Loading commit diff...",
-              cancellable: false,
-            },
-            async () => {
-              // Need to know which playground this commit belongs to
-              if (!currentPlaygroundHash) {
-                vscode.window.showErrorMessage("No playground loaded");
-                return;
-              }
+    vscode.commands.registerCommand(SERVER_SYNC_VIEW_COMMIT, async (commitId: string) => {
+      try {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Loading commit diff...",
+            cancellable: false,
+          },
+          async () => {
+            // Need to know which playground this commit belongs to
+            if (!currentPlaygroundHash) {
+              vscode.window.showErrorMessage("No playground loaded");
+              return;
+            }
 
-              // Fetch diff from server - GET /playgrounds/:hash/commits/:commit_id/diff
-              const { data: result, error } = await api(
-                "/api/playgrounds/:hash/commits/:commit_id/diff",
-                {
-                  method: "GET",
-                  params: { hash: currentPlaygroundHash, commit_id: commitId },
-                },
+            // Fetch diff from server - GET /playgrounds/:hash/commits/:commit_id/diff
+            const { data: result, error } = await api(
+              "/api/playgrounds/:hash/commits/:commit_id/diff",
+              {
+                method: "GET",
+                params: { hash: currentPlaygroundHash, commit_id: commitId },
+              },
+            );
+
+            if (error) {
+              vscode.window.showErrorMessage(
+                `Failed to load commit diff: ${error.status} ${JSON.stringify(error.value)}`,
               );
+              return;
+            }
 
-              if (error) {
-                vscode.window.showErrorMessage(
-                  `Failed to load commit diff: ${error.status} ${JSON.stringify(error.value)}`,
-                );
-                return;
-              }
+            if (!result) {
+              vscode.window.showErrorMessage("Failed to load commit diff: no data");
+              return;
+            }
 
-              if (!result) {
-                vscode.window.showErrorMessage(
-                  "Failed to load commit diff: no data",
-                );
-                return;
-              }
+            // Result is the diff object directly
+            const diff = result;
 
-              // Result is the diff object directly
-              const diff = result;
+            console.log("[ServerSync] Viewing commit diff:", commitId);
+            console.log("[ServerSync] Files changed:", {
+              added: diff.added.length,
+              modified: diff.modified.length,
+              deleted: diff.deleted.length,
+            });
 
-              console.log("[ServerSync] Viewing commit diff:", commitId);
-              console.log("[ServerSync] Files changed:", {
-                added: diff.added.length,
-                modified: diff.modified.length,
-                deleted: diff.deleted.length,
+            // Show quick pick for file selection
+            interface DiffFileItem extends vscode.QuickPickItem {
+              file: { path: string; content?: string; oldContent?: string };
+              type: "added" | "modified" | "deleted";
+            }
+
+            const items: DiffFileItem[] = [
+              ...diff.added.map((f) => ({
+                label: `$(diff-added) ${f.path}`,
+                description: "Added",
+                file: f,
+                type: "added" as const,
+              })),
+              ...diff.modified.map((f) => ({
+                label: `$(diff-modified) ${f.path}`,
+                description: "Modified",
+                file: f,
+                type: "modified" as const,
+              })),
+              ...diff.deleted.map((f) => ({
+                label: `$(diff-removed) ${f.path}`,
+                description: "Deleted",
+                file: f,
+                type: "deleted" as const,
+              })),
+            ];
+
+            if (items.length === 0) {
+              vscode.window.showInformationMessage("No changes in this commit");
+              return;
+            }
+
+            const selected = await vscode.window.showQuickPick(items, {
+              placeHolder: `Select a file to view diff (${items.length} files changed)`,
+              matchOnDescription: true,
+            });
+
+            if (!selected) {
+              return;
+            }
+
+            // Create virtual documents for diff view
+            const scheme = "server-sync-commit";
+
+            if (selected.type === "added") {
+              // Show new file (no diff needed, just open the file)
+              const uri = vscode.Uri.file(selected.file.path);
+              await vscode.commands.executeCommand(VSCODE_OPEN, uri);
+            } else if (selected.type === "deleted") {
+              // Show deleted file content (read-only)
+              vscode.window.showInformationMessage(`File was deleted: ${selected.file.path}`);
+            } else {
+              // Show diff for modified files
+              const leftUri = vscode.Uri.parse(`${scheme}:${selected.file.path}?old`);
+              const rightUri = vscode.Uri.file(selected.file.path);
+
+              // Register content provider for old version
+              const disposable = vscode.workspace.registerTextDocumentContentProvider(scheme, {
+                provideTextDocumentContent(uri: vscode.Uri): string {
+                  if (uri.query === "old") {
+                    return selected.file.oldContent || "";
+                  }
+                  return "";
+                },
               });
 
-              // Show quick pick for file selection
-              interface DiffFileItem extends vscode.QuickPickItem {
-                file: { path: string; content?: string; oldContent?: string };
-                type: "added" | "modified" | "deleted";
-              }
-
-              const items: DiffFileItem[] = [
-                ...diff.added.map((f) => ({
-                  label: `$(diff-added) ${f.path}`,
-                  description: "Added",
-                  file: f,
-                  type: "added" as const,
-                })),
-                ...diff.modified.map((f) => ({
-                  label: `$(diff-modified) ${f.path}`,
-                  description: "Modified",
-                  file: f,
-                  type: "modified" as const,
-                })),
-                ...diff.deleted.map((f) => ({
-                  label: `$(diff-removed) ${f.path}`,
-                  description: "Deleted",
-                  file: f,
-                  type: "deleted" as const,
-                })),
-              ];
-
-              if (items.length === 0) {
-                vscode.window.showInformationMessage(
-                  "No changes in this commit",
+              try {
+                await vscode.commands.executeCommand(
+                  VSCODE_DIFF,
+                  leftUri,
+                  rightUri,
+                  `${selected.file.path} (Commit ${commitId.substring(0, 8)}) ↔ Current`,
                 );
-                return;
+              } finally {
+                disposable.dispose();
               }
+            }
+          },
+        );
+      } catch (err) {
+        console.error("[ServerSync] Error viewing commit diff:", err);
+        vscode.window.showErrorMessage(
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
 
-              const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: `Select a file to view diff (${items.length} files changed)`,
-                matchOnDescription: true,
-              });
+    vscode.commands.registerCommand(SERVER_SYNC_LOAD_COMMIT, (item: CommitHistoryItem | string) => {
+      // Handle being called from context menu (CommitHistoryItem) or directly (string)
+      const commitId = typeof item === "string" ? item : item.id;
 
-              if (!selected) {
-                return;
-              }
+      // Navigate to the commit URL - this will trigger the router
+      // which will load the workspace via workspaceSwitcher
+      // The playgroundId is the same as commitId for now (since playground = commit in current schema)
+      const playgroundId = commitId;
+      const url = `/playgrounds/${playgroundId}/commits/${commitId}`;
 
-              // Create virtual documents for diff view
-              const scheme = "server-sync-commit";
+      console.log("[ServerSync] Navigating to commit URL:", url);
 
-              if (selected.type === "added") {
-                // Show new file (no diff needed, just open the file)
-                const uri = vscode.Uri.file(selected.file.path);
-                await vscode.commands.executeCommand(VSCODE_OPEN, uri);
-              } else if (selected.type === "deleted") {
-                // Show deleted file content (read-only)
-                vscode.window.showInformationMessage(
-                  `File was deleted: ${selected.file.path}`,
-                );
-              } else {
-                // Show diff for modified files
-                const leftUri = vscode.Uri.parse(
-                  `${scheme}:${selected.file.path}?old`,
-                );
-                const rightUri = vscode.Uri.file(selected.file.path);
-
-                // Register content provider for old version
-                const disposable =
-                  vscode.workspace.registerTextDocumentContentProvider(scheme, {
-                    provideTextDocumentContent(uri: vscode.Uri): string {
-                      if (uri.query === "old") {
-                        return selected.file.oldContent || "";
-                      }
-                      return "";
-                    },
-                  });
-
-                try {
-                  await vscode.commands.executeCommand(
-                    VSCODE_DIFF,
-                    leftUri,
-                    rightUri,
-                    `${selected.file.path} (Commit ${commitId.substring(0, 8)}) ↔ Current`,
-                  );
-                } finally {
-                  disposable.dispose();
-                }
-              }
-            },
-          );
-        } catch (err) {
-          console.error("[ServerSync] Error viewing commit diff:", err);
-          vscode.window.showErrorMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      },
-    );
-
-    vscode.commands.registerCommand(
-      SERVER_SYNC_LOAD_COMMIT,
-      (item: CommitHistoryItem | string) => {
-        // Handle being called from context menu (CommitHistoryItem) or directly (string)
-        const commitId = typeof item === "string" ? item : item.id;
-
-        // Navigate to the commit URL - this will trigger the router
-        // which will load the workspace via workspaceSwitcher
-        // The playgroundId is the same as commitId for now (since playground = commit in current schema)
-        const playgroundId = commitId;
-        const url = `/playgrounds/${playgroundId}/commits/${commitId}`;
-
-        console.log("[ServerSync] Navigating to commit URL:", url);
-
-        if (window.navigation) {
-          window.navigation.navigate(url);
-        } else {
-          // Fallback: reload with URL (shouldn't happen with polyfill)
-          window.location.href = url;
-        }
-      },
-    );
+      if (window.navigation) {
+        window.navigation.navigate(url);
+      } else {
+        // Fallback: reload with URL (shouldn't happen with polyfill)
+        window.location.href = url;
+      }
+    });
 
     vscode.commands.registerCommand(
       SERVER_SYNC_RESTORE_COMMIT,
@@ -1059,13 +990,10 @@ void ext.getApi()
           }
 
           // Fetch commit - GET /playgrounds/:hash/commits/:commit_id
-          const { data: commit, error } = await api(
-            "/api/playgrounds/:hash/commits/:commit_id",
-            {
-              method: "GET",
-              params: { hash: currentPlaygroundHash, commit_id: commitId },
-            },
-          );
+          const { data: commit, error } = await api("/api/playgrounds/:hash/commits/:commit_id", {
+            method: "GET",
+            params: { hash: currentPlaygroundHash, commit_id: commitId },
+          });
 
           if (error) {
             vscode.window.showErrorMessage(
@@ -1080,10 +1008,7 @@ void ext.getApi()
           }
 
           // Delete all existing files first
-          const allFiles = await vscode.workspace.findFiles(
-            "**/*",
-            "**/node_modules/**",
-          );
+          const allFiles = await vscode.workspace.findFiles("**/*", "**/node_modules/**");
           for (const file of allFiles) {
             try {
               await vscode.workspace.fs.delete(file);
@@ -1099,9 +1024,7 @@ void ext.getApi()
               const content = new TextEncoder().encode(file.content);
 
               // Create parent directories if needed
-              const dirUri = vscode.Uri.file(
-                file.path.substring(0, file.path.lastIndexOf("/")),
-              );
+              const dirUri = vscode.Uri.file(file.path.substring(0, file.path.lastIndexOf("/")));
               try {
                 await vscode.workspace.fs.createDirectory(dirUri);
               } catch {
@@ -1114,9 +1037,7 @@ void ext.getApi()
             }
           }
 
-          vscode.window.showInformationMessage(
-            `Restored ${commit.files.length} files from commit`,
-          );
+          vscode.window.showInformationMessage(`Restored ${commit.files.length} files from commit`);
 
           // Update current commit tracking
           currentCommitId = commitId;
@@ -1135,7 +1056,9 @@ void ext.getApi()
           // Refresh tree to show the active commit
           commitHistoryProvider.refresh();
         } catch (err) {
-          vscode.window.showErrorMessage(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
+          vscode.window.showErrorMessage(
+            `Restore failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       },
     );
@@ -1193,17 +1116,10 @@ void ext.getApi()
     );
 
     // Register baseline content provider for quick diff
-    vscode.workspace.registerTextDocumentContentProvider(
-      BASELINE_SCHEME,
-      baselineContentProvider,
-    );
+    vscode.workspace.registerTextDocumentContentProvider(BASELINE_SCHEME, baselineContentProvider);
 
     // Create SCM provider
-    const scm = vscode.scm.createSourceControl(
-      "server-sync",
-      "Server Sync",
-      workspaceFolder.uri,
-    );
+    const scm = vscode.scm.createSourceControl("server-sync", "Server Sync", workspaceFolder.uri);
     scm.inputBox.placeholder = "Commit message (optional)";
     scm.acceptInputCommand = {
       command: SERVER_SYNC_COMMIT,
@@ -1236,13 +1152,10 @@ void ext.getApi()
 
       try {
         // Fetch commits to determine position
-        const { data: commits, error } = await api(
-          "/api/playgrounds/:hash/commits",
-          {
-            method: "GET",
-            params: { hash: currentPlaygroundHash },
-          },
-        );
+        const { data: commits, error } = await api("/api/playgrounds/:hash/commits", {
+          method: "GET",
+          params: { hash: currentPlaygroundHash },
+        });
 
         if (error || !commits) {
           scm.statusBarCommands = undefined;
@@ -1250,9 +1163,7 @@ void ext.getApi()
         }
 
         totalCommits = commits.length;
-        currentCommitIndex = commits.findIndex(
-          (c) => c.id === currentCommitId,
-        );
+        currentCommitIndex = commits.findIndex((c) => c.id === currentCommitId);
 
         if (currentCommitIndex === -1) {
           currentCommitIndex = 0;
@@ -1282,13 +1193,10 @@ void ext.getApi()
       }
 
       try {
-        const { data: commits, error } = await api(
-          "/api/playgrounds/:hash/commits",
-          {
-            method: "GET",
-            params: { hash: currentPlaygroundHash },
-          },
-        );
+        const { data: commits, error } = await api("/api/playgrounds/:hash/commits", {
+          method: "GET",
+          params: { hash: currentPlaygroundHash },
+        });
 
         if (error || !commits) {
           vscode.window.showErrorMessage("Failed to load commits");
@@ -1361,20 +1269,14 @@ void ext.getApi()
 
     // Initialize baseline from workspace (start with clean state)
     // On first load, we'll compare against current state (so initially nothing is "changed")
-    const allFiles = await vscode.workspace.findFiles(
-      "**/*",
-      "**/node_modules/**",
-    );
+    const allFiles = await vscode.workspace.findFiles("**/*", "**/node_modules/**");
     for (const fileUri of allFiles) {
       try {
         const content = await vscode.workspace.fs.readFile(fileUri);
         const textContent = new TextDecoder().decode(content);
         baselineFiles.set(fileUri.path, textContent);
       } catch (err) {
-        console.warn(
-          `[ServerSync] Failed to read initial file ${fileUri.path}:`,
-          err,
-        );
+        console.warn(`[ServerSync] Failed to read initial file ${fileUri.path}:`, err);
       }
     }
 

@@ -19,9 +19,7 @@ export class MarkdownSerializer implements vscode.NotebookSerializer {
   }
 }
 
-export function rawToNotebookCellData(
-  data: RawNotebookCell,
-): vscode.NotebookCellData {
+export function rawToNotebookCellData(data: RawNotebookCell): vscode.NotebookCellData {
   return {
     kind: data.kind,
     languageId: data.language,
@@ -98,9 +96,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
 
   function parseWhitespaceLines(isFirst: boolean): string {
     const start = i;
-    const nextNonWhitespaceLineOffset = lines
-      .slice(start)
-      .findIndex((l) => l !== "");
+    const nextNonWhitespaceLineOffset = lines.slice(start).findIndex((l) => l !== "");
     let end: number; // will be next line or overflow
     let isLast = false;
     if (nextNonWhitespaceLineOffset < 0) {
@@ -115,10 +111,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
     return "\n".repeat(numWhitespaceLines);
   }
 
-  function parseCodeBlock(
-    leadingWhitespace: string,
-    codeBlockStart: ICodeBlockStart,
-  ): void {
+  function parseCodeBlock(leadingWhitespace: string, codeBlockStart: ICodeBlockStart): void {
     const startSourceIdx = ++i;
     while (true) {
       const currLine = lines[i];
@@ -134,9 +127,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
 
     const content = lines
       .slice(startSourceIdx, i - 1)
-      .map((line) =>
-        line.replace(new RegExp("^" + codeBlockStart.indentation), ""),
-      )
+      .map((line) => line.replace(new RegExp("^" + codeBlockStart.indentation), ""))
       .join("\n");
     const trailingWhitespace = parseWhitespaceLines(false);
     cells.push({
@@ -178,9 +169,7 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
   return cells;
 }
 
-export function writeCellsToMarkdown(
-  cells: ReadonlyArray<vscode.NotebookCellData>,
-): string {
+export function writeCellsToMarkdown(cells: ReadonlyArray<vscode.NotebookCellData>): string {
   let result = "";
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i]!;

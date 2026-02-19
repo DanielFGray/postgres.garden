@@ -8,13 +8,24 @@ import stream from "node:stream";
 const PORT = 5555;
 
 /** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
-function demuxStream(container: Docker.Container, input: NodeJS.ReadableStream, stdout: NodeJS.WritableStream, stderr: NodeJS.WritableStream): void {
-  (container.modem as { demuxStream(s: NodeJS.ReadableStream, o: NodeJS.WritableStream, e: NodeJS.WritableStream): void }).demuxStream(input, stdout, stderr);
+function demuxStream(
+  container: Docker.Container,
+  input: NodeJS.ReadableStream,
+  stdout: NodeJS.WritableStream,
+  stderr: NodeJS.WritableStream,
+): void {
+  (
+    container.modem as {
+      demuxStream(
+        s: NodeJS.ReadableStream,
+        o: NodeJS.WritableStream,
+        e: NodeJS.WritableStream,
+      ): void;
+    }
+  ).demuxStream(input, stdout, stderr);
 }
 
-function routeHandler(
-  handler: (req: http.IncomingMessage, res: http.ServerResponse) => string,
-) {
+function routeHandler(handler: (req: http.IncomingMessage, res: http.ServerResponse) => string) {
   return (req: http.IncomingMessage, res: http.ServerResponse) => {
     try {
       const response = handler(req, res);
@@ -96,7 +107,6 @@ wss.on("connection", (ws) => {
   );
 });
 server.listen(PORT, () => {
-   
   console.log(`Server started on port ${PORT} :)`);
 });
 
@@ -106,9 +116,7 @@ const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 async function createContainer() {
   const stream = await docker.pull(image);
   await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(stream, (err) =>
-      err == null ? resolve() : reject(err),
-    );
+    docker.modem.followProgress(stream, (err) => (err == null ? resolve() : reject(err)));
   });
   await fs.promises.mkdir("/tmp/workspace", {
     recursive: true,
@@ -134,7 +142,7 @@ async function createContainer() {
 
 async function prepareContainer(container: Docker.Container) {
   await container.start();
-   
+
   console.log("Installing node");
   const exec = await container.exec({
     Cmd: ["gu", "install", "nodejs"],
@@ -146,16 +154,14 @@ async function prepareContainer(container: Docker.Container) {
   });
   execStream.pipe(process.stdout);
   await new Promise((resolve) => execStream.on("end", resolve));
-   
+
   console.log("Node installed");
 }
 
- 
 console.log("Pulling image/starting container...");
 const containerPromise = createContainer();
 
 async function exitHandler() {
-   
   console.log("Exiting...");
   try {
     const container = await containerPromise;
@@ -190,7 +196,7 @@ class DAPSocket {
 
   private onData = (data: Buffer) => {
     this.rawData = Buffer.concat([this.rawData, data]);
-     
+
     while (true) {
       if (this.contentLength >= 0) {
         if (this.rawData.length >= this.contentLength) {

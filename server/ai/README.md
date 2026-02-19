@@ -25,40 +25,41 @@ server/ai/
 ### Basic Usage (User-Provided API Key)
 
 ```typescript
-import { generateText } from "./server/ai"
-import { Redacted } from "effect"
+import { generateText } from "./server/ai";
+import { Redacted } from "effect";
 
 // Use any supported model with user's API key
-const result = yield* generateText({
-  prompt: "Explain Effect in one sentence",
-  model: "gpt-4o",
-  apiKey: Redacted.make("sk-...")
-})
+const result =
+  yield *
+  generateText({
+    prompt: "Explain Effect in one sentence",
+    model: "gpt-4o",
+    apiKey: Redacted.make("sk-..."),
+  });
 
-console.log(result.text)
+console.log(result.text);
 ```
 
 ### Environment-Based API Keys
 
 ```typescript
-import { generateTextFromEnv } from "./server/ai"
+import { generateTextFromEnv } from "./server/ai";
 
 // API key loaded from OPENAI_API_KEY environment variable
-const result = yield* generateTextFromEnv(
-  "Explain TypeScript",
-  "gpt-4o"
-)
+const result = yield * generateTextFromEnv("Explain TypeScript", "gpt-4o");
 ```
 
 ## Supported Models
 
 ### OpenAI
+
 - `gpt-4o`
 - `gpt-4-turbo`
 - `gpt-4`
 - `gpt-3.5-turbo`
 
 ### Anthropic
+
 - `claude-3-5-sonnet-20241022`
 - `claude-3-5-sonnet`
 - `claude-3-opus-20240229`
@@ -67,6 +68,7 @@ const result = yield* generateTextFromEnv(
 - `claude-3-haiku`
 
 ### Google
+
 - `gemini-2.0-flash`
 - `gemini-2.0-flash-exp`
 - `gemini-1.5-pro`
@@ -74,6 +76,7 @@ const result = yield* generateTextFromEnv(
 - `gemini-pro`
 
 ### OpenRouter (with provider prefix)
+
 - `openai/gpt-4o`
 - `anthropic/claude-3.5-sonnet`
 - `google/gemini-2.0-flash`
@@ -83,10 +86,10 @@ const result = yield* generateTextFromEnv(
 Add models to the registry in `registry.ts`:
 
 ```typescript
-import { registerModel } from "./server/ai"
+import { registerModel } from "./server/ai";
 
 // Register a new model at runtime
-registerModel("my-custom-model", "openai")
+registerModel("my-custom-model", "openai");
 ```
 
 Or edit the `MODEL_REGISTRY` in `server/ai/registry.ts`:
@@ -95,7 +98,7 @@ Or edit the `MODEL_REGISTRY` in `server/ai/registry.ts`:
 const MODEL_REGISTRY: Record<string, ProviderName> = {
   // ... existing models ...
   "my-custom-model": "openai",
-}
+};
 ```
 
 ## API Reference
@@ -105,6 +108,7 @@ const MODEL_REGISTRY: Record<string, ProviderName> = {
 Generate text using any supported model with user-provided API key.
 
 **Parameters:**
+
 - `options.prompt: string` - The prompt to send to the model
 - `options.model: string` - Model name (see supported models above)
 - `options.apiKey: Redacted | string` - User's API key
@@ -113,12 +117,15 @@ Generate text using any supported model with user-provided API key.
 **Returns:** `Effect<GenerateTextResponse>`
 
 **Example:**
+
 ```typescript
-const result = yield* generateText({
-  prompt: "Write a haiku about functional programming",
-  model: "claude-3-5-sonnet-20241022",
-  apiKey: Redacted.make(userApiKey)
-})
+const result =
+  yield *
+  generateText({
+    prompt: "Write a haiku about functional programming",
+    model: "claude-3-5-sonnet-20241022",
+    apiKey: Redacted.make(userApiKey),
+  });
 ```
 
 ### `generateTextFromEnv(prompt, model)`
@@ -126,48 +133,48 @@ const result = yield* generateText({
 Generate text using environment-configured API keys.
 
 **Parameters:**
+
 - `prompt: string` - The prompt to send to the model
 - `model: string` - Model name
 
 **Environment Variables:**
+
 - `OPENAI_API_KEY` - for OpenAI models
-- `ANTHROPIC_API_KEY` - for Anthropic models  
+- `ANTHROPIC_API_KEY` - for Anthropic models
 - `GOOGLE_API_KEY` - for Google models
 - `OPENROUTER_API_KEY` - for OpenRouter models
 
 **Returns:** `Effect<GenerateTextResponse>`
 
 **Example:**
+
 ```typescript
 // Requires ANTHROPIC_API_KEY in environment
-const result = yield* generateTextFromEnv(
-  "Explain monads",
-  "claude-3-opus"
-)
+const result = yield * generateTextFromEnv("Explain monads", "claude-3-opus");
 ```
 
 ### Registry Functions
 
 ```typescript
-import { 
+import {
   resolveProvider,
   getModelsForProvider,
   registerModel,
-  isModelRegistered
-} from "./server/ai"
+  isModelRegistered,
+} from "./server/ai";
 
 // Get provider for a model
-const provider = resolveProvider("gpt-4o") // "openai"
+const provider = resolveProvider("gpt-4o"); // "openai"
 
 // Get all models for a provider
-const models = getModelsForProvider("anthropic") 
+const models = getModelsForProvider("anthropic");
 // ["claude-3-5-sonnet-20241022", "claude-3-opus", ...]
 
 // Check if model is registered
-const exists = isModelRegistered("gpt-4o") // true
+const exists = isModelRegistered("gpt-4o"); // true
 
 // Register new model
-registerModel("my-model", "openai")
+registerModel("my-model", "openai");
 ```
 
 ## Testing
@@ -196,6 +203,7 @@ OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... bun run server/ai/test.ts
 4. **Text Generation**: The unified `LanguageModel.generateText()` API is used across all providers
 
 This architecture allows:
+
 - ✅ Runtime provider selection
 - ✅ User-provided API keys
 - ✅ Type-safe model lookup
@@ -205,18 +213,18 @@ This architecture allows:
 ## Error Handling
 
 ```typescript
-import { Effect } from "effect"
+import { Effect } from "effect";
 
 const program = generateText({
   prompt: "test",
   model: "unknown-model",
-  apiKey: Redacted.make("sk-...")
+  apiKey: Redacted.make("sk-..."),
 }).pipe(
   Effect.catchAll((error) => {
-    console.error("Generation failed:", error)
-    return Effect.succeed({ text: "Fallback response" })
-  })
-)
+    console.error("Generation failed:", error);
+    return Effect.succeed({ text: "Fallback response" });
+  }),
+);
 ```
 
 ## Next Steps

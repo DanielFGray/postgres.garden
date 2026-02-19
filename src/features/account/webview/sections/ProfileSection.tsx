@@ -87,7 +87,9 @@ export const ProfileSection = () =>
         <div class="section-error">
           <i class="codicon codicon-error" />
           <span>{error}</span>
-          <button class="button" onClick={() => loadProfile(registry)}>Retry</button>
+          <button class="button" onClick={() => loadProfile(registry)}>
+            Retry
+          </button>
         </div>
       );
     }
@@ -119,7 +121,9 @@ export const ProfileSection = () =>
               type="text"
               class="setting-input"
               value={editName}
-              onInput={(e: Event) => { registry.set(editNameAtom, (e.target as HTMLInputElement).value); }}
+              onInput={(e: Event) => {
+                registry.set(editNameAtom, (e.target as HTMLInputElement).value);
+              }}
             />
           </div>
 
@@ -129,7 +133,9 @@ export const ProfileSection = () =>
               class="setting-input setting-textarea"
               maxLength={500}
               value={editBio}
-              onInput={(e: Event) => { registry.set(editBioAtom, (e.target as HTMLTextAreaElement).value); }}
+              onInput={(e: Event) => {
+                registry.set(editBioAtom, (e.target as HTMLTextAreaElement).value);
+              }}
             />
             <div class="field-hint" style={{ textAlign: "right" }}>
               {editBio.length}/500
@@ -142,7 +148,9 @@ export const ProfileSection = () =>
               type="text"
               class="setting-input"
               value={editAvatarUrl}
-              onInput={(e: Event) => { registry.set(editAvatarUrlAtom, (e.target as HTMLInputElement).value); }}
+              onInput={(e: Event) => {
+                registry.set(editAvatarUrlAtom, (e.target as HTMLInputElement).value);
+              }}
             />
             <div class="field-hint">Syncs from GitHub on login</div>
           </div>

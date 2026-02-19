@@ -34,10 +34,7 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
   })
 
   .get("/clearTestUsers", async () => {
-    await rootDb
-      .deleteFrom("app_public.users")
-      .where("username", "like", "test%")
-      .execute();
+    await rootDb.deleteFrom("app_public.users").where("username", "like", "test%").execute();
     // Clear orphaned Valkey sessions (test-only, safe to flush all)
     const keys = await valkey.keys("session:*");
     if (keys.length > 0) await valkey.del(...keys);
@@ -45,10 +42,7 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
   })
 
   .get("/clearTestOrganizations", async () => {
-    await rootDb
-      .deleteFrom("app_public.organizations")
-      .where("slug", "like", "test%")
-      .execute();
+    await rootDb.deleteFrom("app_public.organizations").where("slug", "like", "test%").execute();
     return { success: true };
   })
 
@@ -60,9 +54,7 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
       let orgs: [string, string, boolean?][] | undefined;
       if (query.orgs) {
         try {
-          const raw: unknown = typeof query.orgs === "string"
-            ? JSON.parse(query.orgs)
-            : query.orgs;
+          const raw: unknown = typeof query.orgs === "string" ? JSON.parse(query.orgs) : query.orgs;
           orgs = S.decodeUnknownSync(OrgsSchema)(raw) as [string, string, boolean?][];
         } catch (e) {
           console.error("Failed to parse orgs parameter:", e);
@@ -81,9 +73,7 @@ export const testingServer = new Elysia({ prefix: "/api/testingCommand" })
       });
 
       // Set session cookie
-      cookie[sessionCookieName]?.set(
-        buildSessionCookie(session.token, session.expiresAt),
-      );
+      cookie[sessionCookieName]?.set(buildSessionCookie(session.token, session.expiresAt));
 
       // Delay required for GitHub actions (from original Express implementation)
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -345,28 +335,26 @@ async function reallyCreateUser({
 
       await setSession(sessionData);
       await Promise.all(
-        orgs.map(
-          async ([name, slug, owner = true]: [string, string, boolean?]) => {
-            if (!owner) await setSession(otherSession);
+        orgs.map(async ([name, slug, owner = true]: [string, string, boolean?]) => {
+          if (!owner) await setSession(otherSession);
 
-            const {
-              rows: [organization],
-            } =
-              await sql<AppPublicOrganizations>`select * from app_public.create_organization(${slug}, ${name})`.execute(
-                trx,
-              );
+          const {
+            rows: [organization],
+          } =
+            await sql<AppPublicOrganizations>`select * from app_public.create_organization(${slug}, ${name})`.execute(
+              trx,
+            );
 
-            if (!owner && organization) {
-              await sql`select app_public.invite_to_organization(${organization.id}::uuid, ${user.username}::citext, null::citext)`.execute(
-                trx,
-              );
-              await setSession(sessionData);
-              await sql`select app_public.accept_invitation_to_organization(organization_invitations.id) from app_public.organization_invitations where user_id = ${user.id}`.execute(
-                trx,
-              );
-            }
-          },
-        ),
+          if (!owner && organization) {
+            await sql`select app_public.invite_to_organization(${organization.id}::uuid, ${user.username}::citext, null::citext)`.execute(
+              trx,
+            );
+            await setSession(sessionData);
+            await sql`select app_public.accept_invitation_to_organization(organization_invitations.id) from app_public.organization_invitations where user_id = ${user.id}`.execute(
+              trx,
+            );
+          }
+        }),
       );
     });
   }

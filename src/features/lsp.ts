@@ -1,7 +1,4 @@
-import {
-  ExtensionHostKind,
-  registerExtension,
-} from "@codingame/monaco-vscode-api/extensions";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import { LanguageClient } from "vscode-languageclient/browser";
 import type { Introspection } from "pg-introspection";
 import { syncSchema } from "./lsp/schemaSync.js";
@@ -32,35 +29,38 @@ export function updateSchema(introspection: Introspection): void {
   });
 }
 
-void ext.getApi().then(() => {
-  const worker = new Worker(
-    new URL("./lsp/pgls.worker.ts", import.meta.url),
-    { type: "module" },
-  );
+void ext
+  .getApi()
+  .then(() => {
+    const worker = new Worker(new URL("./lsp/pgls.worker.ts", import.meta.url), { type: "module" });
 
-  const client = new LanguageClient(
-    "pgls",
-    "Postgres Language Server",
-    {
-      documentSelector: [{ language: "sql" }],
-      synchronize: {},
-      initializationOptions: {},
-    },
-    worker,
-  );
+    const client = new LanguageClient(
+      "pgls",
+      "Postgres Language Server",
+      {
+        documentSelector: [{ language: "sql" }],
+        synchronize: {},
+        initializationOptions: {},
+      },
+      worker,
+    );
 
-  void client.start().then(() => {
-    console.log("[PGLS] Language client started");
-    resolveClient(client);
-  }).catch((err: unknown) => {
-    console.warn(
-      "[PGLS] Language client failed to start:",
+    void client
+      .start()
+      .then(() => {
+        console.log("[PGLS] Language client started");
+        resolveClient(client);
+      })
+      .catch((err: unknown) => {
+        console.warn(
+          "[PGLS] Language client failed to start:",
+          err instanceof Error ? err.message : String(err),
+        );
+      });
+  })
+  .catch((err: unknown) => {
+    console.error(
+      "[PGLS] Extension activation failed:",
       err instanceof Error ? err.message : String(err),
     );
   });
-}).catch((err: unknown) => {
-  console.error(
-    "[PGLS] Extension activation failed:",
-    err instanceof Error ? err.message : String(err),
-  );
-});

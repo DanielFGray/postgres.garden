@@ -89,7 +89,9 @@ export const LinkedAccountsSection = () =>
         <div class="section-error">
           <i class="codicon codicon-error" />
           <span>{error}</span>
-          <button class="button" onClick={() => loadAccounts(registry)}>Retry</button>
+          <button class="button" onClick={() => loadAccounts(registry)}>
+            Retry
+          </button>
         </div>
       );
     }
@@ -104,9 +106,7 @@ export const LinkedAccountsSection = () =>
           {accounts.length === 0 ? (
             <div class="field">
               <div class="field-value">
-                <span class="field-empty">
-                  No linked accounts. Connect a service below.
-                </span>
+                <span class="field-empty">No linked accounts. Connect a service below.</span>
               </div>
             </div>
           ) : (
@@ -116,13 +116,9 @@ export const LinkedAccountsSection = () =>
                   <i class={`codicon ${serviceIcon(account.service)}`} />
                 </div>
                 <div class="linked-account-details">
-                  <div class="linked-account-service">
-                    {capitalize(account.service)}
-                  </div>
+                  <div class="linked-account-service">{capitalize(account.service)}</div>
                   <div class="linked-account-meta">
-                    <span class="linked-account-identifier">
-                      {account.identifier}
-                    </span>
+                    <span class="linked-account-identifier">{account.identifier}</span>
                     <span class="linked-account-date">
                       Connected {formatDate(account.created_at)}
                     </span>

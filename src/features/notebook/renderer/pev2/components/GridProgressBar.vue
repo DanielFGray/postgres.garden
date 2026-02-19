@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 interface Props {
-  percentage: number
-  percentage2?: number
+  percentage: number;
+  percentage2?: number;
 }
-defineProps<Props>()
+defineProps<Props>();
 </script>
 
 <template>

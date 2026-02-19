@@ -1,15 +1,15 @@
 <script lang="ts" setup>
-import { ref, watch } from "vue"
-import { animate } from "motion"
+import { ref, watch } from "vue";
+import { animate } from "motion";
 
 interface Props {
-  d: string
-  strokeColor: string
-  strokeWidth?: number
+  d: string;
+  strokeColor: string;
+  strokeWidth?: number;
 }
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
-const path = ref<SVGPathElement | null>(null)
+const path = ref<SVGPathElement | null>(null);
 
 watch(
   () => props.d,
@@ -22,20 +22,14 @@ watch(
           duration: 0.2,
           ease: "easeInOut",
         },
-      )
+      );
     }
   },
-)
+);
 </script>
 
 <template>
-  <path
-    ref="path"
-    :d="d"
-    :stroke="strokeColor"
-    fill="none"
-    :stroke-width="strokeWidth"
-  />
+  <path ref="path" :d="d" :stroke="strokeColor" fill="none" :stroke-width="strokeWidth" />
 </template>
 
 <style scoped>

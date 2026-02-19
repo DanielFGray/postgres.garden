@@ -2,7 +2,7 @@
  * Model registry - maps model names to providers
  */
 
-import type { ProviderName } from "./types"
+import type { ProviderName } from "./types";
 
 /**
  * Comprehensive model-to-provider mapping
@@ -40,24 +40,24 @@ const MODEL_REGISTRY: Record<string, ProviderName> = {
   "anthropic/claude-3.5-sonnet": "openrouter",
   "anthropic/claude-3-opus": "openrouter",
   "google/gemini-2.0-flash": "openrouter",
-  "google/gemini-1.5-pro": "openrouter"
-}
+  "google/gemini-1.5-pro": "openrouter",
+};
 
 /**
  * Resolve provider from model name
  * Returns provider if known, otherwise throws error
  */
 export const resolveProvider = (modelName: string): ProviderName => {
-  const provider = MODEL_REGISTRY[modelName]
+  const provider = MODEL_REGISTRY[modelName];
 
   if (!provider) {
     throw new Error(
-      `Unknown model: ${modelName}. Add it to the model registry in server/ai/registry.ts`
-    )
+      `Unknown model: ${modelName}. Add it to the model registry in server/ai/registry.ts`,
+    );
   }
 
-  return provider
-}
+  return provider;
+};
 
 /**
  * Get all models for a provider
@@ -65,19 +65,19 @@ export const resolveProvider = (modelName: string): ProviderName => {
 export const getModelsForProvider = (provider: ProviderName): string[] => {
   return Object.entries(MODEL_REGISTRY)
     .filter(([, p]) => p === provider)
-    .map(([model]) => model)
-}
+    .map(([model]) => model);
+};
 
 /**
  * Register a new model (for adding custom models at runtime)
  */
 export const registerModel = (modelName: string, provider: ProviderName) => {
-  MODEL_REGISTRY[modelName] = provider
-}
+  MODEL_REGISTRY[modelName] = provider;
+};
 
 /**
  * Check if a model is registered
  */
 export const isModelRegistered = (modelName: string): boolean => {
-  return modelName in MODEL_REGISTRY
-}
+  return modelName in MODEL_REGISTRY;
+};

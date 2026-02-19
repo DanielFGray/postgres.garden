@@ -1,44 +1,39 @@
 <script lang="ts" setup>
-import { computed, inject, reactive, ref, watch } from "vue"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faArrowDown, faArrowUp } from "@fortawesome/free-solid-svg-icons"
-import {
-  HighlightedNodeIdKey,
-  SelectedNodeIdKey,
-  SelectNodeKey,
-  ViewOptionsKey,
-} from "@/symbols"
-import type { ViewOptions } from "@/interfaces"
-import { EstimateDirection, BufferLocation, NodeProp, Metric } from "../enums"
-import LevelDivider from "@/components/LevelDivider.vue"
-import TimeTooltip from "@/components/tooltip/TimeTooltip.vue"
-import IoTooltip from "@/components/tooltip/IoTooltip.vue"
-import useNode from "@/node"
-import { store } from "@/store"
-import type { FlattenedPlanNode } from "@/store"
+import { computed, inject, reactive, ref, watch } from "vue";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import { faArrowDown, faArrowUp } from "@fortawesome/free-solid-svg-icons";
+import { HighlightedNodeIdKey, SelectedNodeIdKey, SelectNodeKey, ViewOptionsKey } from "@/symbols";
+import type { ViewOptions } from "@/interfaces";
+import { EstimateDirection, BufferLocation, NodeProp, Metric } from "../enums";
+import LevelDivider from "@/components/LevelDivider.vue";
+import TimeTooltip from "@/components/tooltip/TimeTooltip.vue";
+import IoTooltip from "@/components/tooltip/IoTooltip.vue";
+import useNode from "@/node";
+import { store } from "@/store";
+import type { FlattenedPlanNode } from "@/store";
 
-import { Tippy } from "vue-tippy"
+import { Tippy } from "vue-tippy";
 
 interface Props {
-  row: FlattenedPlanNode
+  row: FlattenedPlanNode;
   viewOptions: {
-    metric: Metric
-    buffersMetric: BufferLocation
-  }
+    metric: Metric;
+    buffersMetric: BufferLocation;
+  };
 }
-const props = defineProps<Props>()
-const node = props.row.node
-const diagramViewOptions = reactive(props.viewOptions)
-const rootEl = ref(null)
+const props = defineProps<Props>();
+const node = props.row.node;
+const diagramViewOptions = reactive(props.viewOptions);
+const rootEl = ref(null);
 
-const selectedNodeId = inject(SelectedNodeIdKey)
-const selectNode = inject(SelectNodeKey)
+const selectedNodeId = inject(SelectedNodeIdKey);
+const selectNode = inject(SelectNodeKey);
 if (!selectNode) {
-  throw new Error(`Could not resolve ${SelectNodeKey.description}`)
+  throw new Error(`Could not resolve ${SelectNodeKey.description}`);
 }
-const highlightedNodeId = inject(HighlightedNodeIdKey)
+const highlightedNodeId = inject(HighlightedNodeIdKey);
 
-const _viewOptions = inject(ViewOptionsKey) as ViewOptions
+const _viewOptions = inject(ViewOptionsKey) as ViewOptions;
 const {
   buffersByLocationTooltip,
   costTooltip,
@@ -47,25 +42,25 @@ const {
   isNeverExecuted,
   nodeName,
   rowsTooltip,
-} = useNode(node, _viewOptions)
+} = useNode(node, _viewOptions);
 
-const scrollTo = inject<(el: Element) => null>("scrollTo")
+const scrollTo = inject<(el: Element) => null>("scrollTo");
 
 watch(
   () => selectedNodeId?.value,
   (newVal) => {
     if (newVal == node.nodeId && rootEl.value) {
-      scrollTo?.(rootEl.value)
+      scrollTo?.(rootEl.value);
     }
   },
-)
+);
 
 const isHighlighted = computed(
   () =>
     highlightedNodeId?.value &&
     (highlightedNodeId?.value == props.row.node.nodeId ||
       props.row.path[props.row.path.length - 2] == highlightedNodeId?.value),
-)
+);
 </script>
 
 <template>
@@ -86,10 +81,7 @@ const isHighlighted = computed(
           <em>CTE {{ node[NodeProp.CTE_NAME] }} </em>
         </div>
       </template>
-      <TimeTooltip
-        :node="node"
-        v-if="diagramViewOptions.metric == Metric.time"
-      />
+      <TimeTooltip :node="node" v-if="diagramViewOptions.metric == Metric.time" />
       <IoTooltip
         :node="node"
         v-else-if="diagramViewOptions.metric == Metric.io"
@@ -106,20 +98,14 @@ const isHighlighted = computed(
         <div v-html="costTooltip"></div>
       </template>
       <template v-else-if="diagramViewOptions.metric == Metric.buffers">
-        <div
-          v-html="buffersByLocationTooltip(diagramViewOptions.buffersMetric)"
-        ></div
+        <div v-html="buffersByLocationTooltip(diagramViewOptions.buffersMetric)"></div
       ></template>
     </template>
     <td class="text-body-secondary" ref="rootEl">
       <span class="fw-normal small">#{{ node.nodeId }} </span>
     </td>
     <td>
-      <LevelDivider
-        :row="row"
-        :isSubplan="!!node[NodeProp.SUBPLAN_NAME]"
-        dense
-      ></LevelDivider>
+      <LevelDivider :row="row" :isSubplan="!!node[NodeProp.SUBPLAN_NAME]" dense></LevelDivider>
       <span
         :class="[
           isHighlighted
@@ -165,8 +151,7 @@ const isHighlighted = computed(
           style="height: 5px"
           :style="{
             width:
-              (((node[NodeProp.ACTUAL_TOTAL_TIME] || 0) -
-                node[NodeProp.EXCLUSIVE_DURATION]) /
+              (((node[NodeProp.ACTUAL_TOTAL_TIME] || 0) - node[NodeProp.EXCLUSIVE_DURATION]) /
                 (store.stats.executionTime ||
                   store.plan?.content.Plan[NodeProp.ACTUAL_TOTAL_TIME] ||
                   0)) *
@@ -190,10 +175,7 @@ const isHighlighted = computed(
           style="height: 5px"
           :style="{
             width:
-              Math.round(
-                (node[NodeProp.ACTUAL_ROWS_REVISED] / store.stats.maxRows) *
-                  100,
-              ) + '%',
+              Math.round((node[NodeProp.ACTUAL_ROWS_REVISED] / store.stats.maxRows) * 100) + '%',
           }"
           aria-valuenow="15"
           aria-valuemin="0"
@@ -210,18 +192,14 @@ const isHighlighted = computed(
           <FontAwesomeIcon
             fixed-width
             :icon="faArrowDown"
-            v-if="
-              node[NodeProp.PLANNER_ESTIMATE_DIRECTION] ===
-              EstimateDirection.under
-            "
+            v-if="node[NodeProp.PLANNER_ESTIMATE_DIRECTION] === EstimateDirection.under"
           ></FontAwesomeIcon>
           <i class="fa fa-fw d-inline-block" v-else />
         </span>
         <div
           class="progress-bar"
           :class="[
-            node[NodeProp.PLANNER_ESTIMATE_DIRECTION] ===
-            EstimateDirection.under
+            node[NodeProp.PLANNER_ESTIMATE_DIRECTION] === EstimateDirection.under
               ? 'bg-secondary'
               : 'bg-transparent',
           ]"
@@ -258,10 +236,7 @@ const isHighlighted = computed(
           <FontAwesomeIcon
             fixed-width
             :icon="faArrowUp"
-            v-if="
-              node[NodeProp.PLANNER_ESTIMATE_DIRECTION] ===
-              EstimateDirection.over
-            "
+            v-if="node[NodeProp.PLANNER_ESTIMATE_DIRECTION] === EstimateDirection.over"
           ></FontAwesomeIcon>
           <i class="fa fa-fw d-inline-block" v-else />
         </span>
@@ -280,10 +255,7 @@ const isHighlighted = computed(
           role="progressbar"
           style="height: 5px"
           :style="{
-            width:
-              Math.round(
-                (node[NodeProp.EXCLUSIVE_COST] / store.stats.maxCost) * 100,
-              ) + '%',
+            width: Math.round((node[NodeProp.EXCLUSIVE_COST] / store.stats.maxCost) * 100) + '%',
           }"
           aria-valuenow="15"
           aria-valuemin="0"
@@ -303,8 +275,7 @@ const isHighlighted = computed(
         <div
           class="bg-hit"
           :class="{
-            'border-start border-hit':
-              node[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS] > 0,
+            'border-start border-hit': node[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS] > 0,
           }"
           role="progressbar"
           style="height: 5px"
@@ -324,8 +295,7 @@ const isHighlighted = computed(
           class="bg-read"
           role="progressbar"
           :class="{
-            'border-start border-read':
-              node[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS] > 0,
+            'border-start border-read': node[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS] > 0,
           }"
           style="height: 5px"
           :style="{
@@ -343,8 +313,7 @@ const isHighlighted = computed(
         <div
           class="bg-dirtied"
           :class="{
-            'border-start border-dirtied':
-              node[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS] > 0,
+            'border-start border-dirtied': node[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS] > 0,
           }"
           role="progressbar"
           style="height: 5px"
@@ -363,8 +332,7 @@ const isHighlighted = computed(
         <div
           class="bg-written"
           :class="{
-            'border-start border-written':
-              node[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS] > 0,
+            'border-start border-written': node[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS] > 0,
           }"
           role="progressbar"
           style="height: 5px"
@@ -515,11 +483,8 @@ const isHighlighted = computed(
           style="height: 5px"
           :style="{
             width:
-              (Math.round(
-                (node[NodeProp.EXCLUSIVE_SUM_IO_READ_TIME] /
-                  store.stats.maxIo) *
-                  100,
-              ) || 0) + '%',
+              (Math.round((node[NodeProp.EXCLUSIVE_SUM_IO_READ_TIME] / store.stats.maxIo) * 100) ||
+                0) + '%',
           }"
           aria-valuenow="15"
           aria-valuemin="0"
@@ -531,11 +496,8 @@ const isHighlighted = computed(
           style="height: 5px"
           :style="{
             width:
-              (Math.round(
-                (node[NodeProp.EXCLUSIVE_SUM_IO_WRITE_TIME] /
-                  store.stats.maxIo) *
-                  100,
-              ) || 0) + '%',
+              (Math.round((node[NodeProp.EXCLUSIVE_SUM_IO_WRITE_TIME] / store.stats.maxIo) * 100) ||
+                0) + '%',
           }"
           aria-valuenow="15"
           aria-valuemin="0"

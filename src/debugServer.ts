@@ -7,8 +7,21 @@ import stream from "node:stream";
 const PORT = 5555;
 
 /** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
-function demuxStream(container: Docker.Container, input: NodeJS.ReadableStream, stdout: NodeJS.WritableStream, stderr: NodeJS.WritableStream): void {
-  (container.modem as { demuxStream(s: NodeJS.ReadableStream, o: NodeJS.WritableStream, e: NodeJS.WritableStream): void }).demuxStream(input, stdout, stderr);
+function demuxStream(
+  container: Docker.Container,
+  input: NodeJS.ReadableStream,
+  stdout: NodeJS.WritableStream,
+  stderr: NodeJS.WritableStream,
+): void {
+  (
+    container.modem as {
+      demuxStream(
+        s: NodeJS.ReadableStream,
+        o: NodeJS.WritableStream,
+        e: NodeJS.WritableStream,
+      ): void;
+    }
+  ).demuxStream(input, stdout, stderr);
 }
 
 const docker = new Docker();
@@ -17,9 +30,7 @@ const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 async function createContainer() {
   const pullStream = await docker.pull(image);
   await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(pullStream, (err) =>
-      err == null ? resolve() : reject(err),
-    );
+    docker.modem.followProgress(pullStream, (err) => (err == null ? resolve() : reject(err)));
   });
   await fs.promises.mkdir("/tmp/workspace", { recursive: true });
   return docker.createContainer({
@@ -228,12 +239,8 @@ new Elysia()
               const stderr = new stream.PassThrough();
               demuxStream(container, execStream, stdout, stderr);
 
-              stdout.on("data", (buf: Buffer) =>
-                ws.send(makeOutput("stdout", buf)),
-              );
-              stderr.on("data", (buf: Buffer) =>
-                ws.send(makeOutput("stderr", buf)),
-              );
+              stdout.on("data", (buf: Buffer) => ws.send(makeOutput("stdout", buf)));
+              stderr.on("data", (buf: Buffer) => ws.send(makeOutput("stderr", buf)));
 
               execStream.on("end", () => ws.close());
 

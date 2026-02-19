@@ -110,24 +110,15 @@ const workers: Partial<Record<string, Worker>> = {
     { type: "module" },
   ),
   extensionHostWorkerMain: new Worker(
-    new URL(
-      "@codingame/monaco-vscode-api/workers/extensionHost.worker",
-      import.meta.url,
-    ),
+    new URL("@codingame/monaco-vscode-api/workers/extensionHost.worker", import.meta.url),
     { type: "module" },
   ),
   TextMateWorker: new Worker(
-    new URL(
-      "@codingame/monaco-vscode-textmate-service-override/worker",
-      import.meta.url,
-    ),
+    new URL("@codingame/monaco-vscode-textmate-service-override/worker", import.meta.url),
     { type: "module" },
   ),
   OutputLinkDetectionWorker: new Worker(
-    new URL(
-      "@codingame/monaco-vscode-output-service-override/worker",
-      import.meta.url,
-    ),
+    new URL("@codingame/monaco-vscode-output-service-override/worker", import.meta.url),
     { type: "module" },
   ),
   LanguageDetectionWorker: new Worker(
@@ -138,17 +129,11 @@ const workers: Partial<Record<string, Worker>> = {
     { type: "module" },
   ),
   NotebookEditorWorker: new Worker(
-    new URL(
-      "@codingame/monaco-vscode-notebook-service-override/worker",
-      import.meta.url,
-    ),
+    new URL("@codingame/monaco-vscode-notebook-service-override/worker", import.meta.url),
     { type: "module" },
   ),
   LocalFileSearchWorker: new Worker(
-    new URL(
-      "@codingame/monaco-vscode-search-service-override/worker",
-      import.meta.url,
-    ),
+    new URL("@codingame/monaco-vscode-search-service-override/worker", import.meta.url),
     { type: "module" },
   ),
 };
@@ -220,10 +205,8 @@ export const constructOptions: IWorkbenchConstructionOptions = {
     nameLong: "postgres.garden",
     extensionsGallery: {
       serviceUrl: "https://open-vsx.org/vscode/gallery",
-      resourceUrlTemplate:
-        "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
-      extensionUrlTemplate:
-        "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest", // https://github.com/eclipse/openvsx/issues/1036#issuecomment-2476449435
+      resourceUrlTemplate: "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
+      extensionUrlTemplate: "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest", // https://github.com/eclipse/openvsx/issues/1036#issuecomment-2476449435
       controlUrl: "",
       nlsBaseUrl: "",
     },

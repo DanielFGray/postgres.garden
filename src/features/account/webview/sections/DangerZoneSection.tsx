@@ -79,7 +79,9 @@ export const DangerZoneSection = () =>
         <div class="section-error">
           <i class="codicon codicon-error" />
           <span>{error}</span>
-          <button class="button" onClick={() => loadUsername(registry)}>Retry</button>
+          <button class="button" onClick={() => loadUsername(registry)}>
+            Retry
+          </button>
         </div>
       );
     }
@@ -98,14 +100,25 @@ export const DangerZoneSection = () =>
             padding: "16px",
           }}
         >
-          <p style={{ margin: "0 0 8px", fontWeight: 500 }}>
-            Delete Account
-          </p>
-          <p style={{ margin: "0 0 16px", color: "var(--vscode-descriptionForeground)", fontSize: "12px" }}>
+          <p style={{ margin: "0 0 8px", fontWeight: 500 }}>Delete Account</p>
+          <p
+            style={{
+              margin: "0 0 16px",
+              color: "var(--vscode-descriptionForeground)",
+              fontSize: "12px",
+            }}
+          >
             Permanently delete your account and all associated data. This action cannot be undone.
           </p>
 
-          <ul style={{ margin: "0 0 16px", paddingLeft: "20px", fontSize: "12px", color: "var(--vscode-descriptionForeground)" }}>
+          <ul
+            style={{
+              margin: "0 0 16px",
+              paddingLeft: "20px",
+              fontSize: "12px",
+              color: "var(--vscode-descriptionForeground)",
+            }}
+          >
             <li>All playgrounds</li>
             <li>All comments</li>
             <li>All stars</li>
@@ -115,8 +128,9 @@ export const DangerZoneSection = () =>
 
           {requested ? (
             <p style={{ margin: 0, color: "var(--vscode-charts-green)" }}>
-              <i class="codicon codicon-mail" style={{ marginRight: "6px" }} />
-              A confirmation email has been sent to your primary email address. Click the link in the email to complete the deletion.
+              <i class="codicon codicon-mail" style={{ marginRight: "6px" }} />A confirmation email
+              has been sent to your primary email address. Click the link in the email to complete
+              the deletion.
             </p>
           ) : !showConfirm ? (
             <button
@@ -130,7 +144,9 @@ export const DangerZoneSection = () =>
                 fontFamily: "var(--vscode-font-family)",
                 fontSize: "var(--vscode-font-size)",
               }}
-              onClick={() => { registry.set(showConfirmAtom, true); }}
+              onClick={() => {
+                registry.set(showConfirmAtom, true);
+              }}
             >
               Delete Account
             </button>
@@ -187,11 +203,7 @@ export const DangerZoneSection = () =>
                 >
                   {requesting ? "Requesting..." : "I understand, delete my account"}
                 </button>
-                <button
-                  class="button"
-                  onClick={handleCancel}
-                  disabled={requesting}
-                >
+                <button class="button" onClick={handleCancel} disabled={requesting}>
                   Cancel
                 </button>
               </div>

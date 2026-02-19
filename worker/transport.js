@@ -58,9 +58,7 @@ export default async function getTransport() {
       if (!process.env.AWS_SECRET_ACCESS_KEY) {
         throw new Error("no AWS_SECRET_ACCESS_KEY configured");
       }
-      const { SendEmailCommand, SESv2Client } = await import(
-        "@aws-sdk/client-sesv2"
-      );
+      const { SendEmailCommand, SESv2Client } = await import("@aws-sdk/client-sesv2");
       const sesClient = new SESv2Client({ region: awsRegion });
       return nodemailer.createTransport({
         SES: { sesClient, SendEmailCommand },

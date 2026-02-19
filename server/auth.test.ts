@@ -28,10 +28,7 @@ const generateStr = (length: number) =>
 
 // Helper to clean up a specific user
 const cleanupUser = async (username: string) => {
-  await rootDb
-    .deleteFrom("app_public.users")
-    .where("username", "=", username)
-    .execute();
+  await rootDb.deleteFrom("app_public.users").where("username", "=", username).execute();
 };
 
 describe("Session Validation", () => {

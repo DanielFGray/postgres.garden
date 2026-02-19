@@ -4,10 +4,7 @@
  */
 
 import * as vscode from "vscode";
-import {
-  registerExtension,
-  ExtensionHostKind,
-} from "@codingame/monaco-vscode-api/extensions";
+import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
 import * as S from "effect/Schema";
 import { api } from "../api-client";
 import {
@@ -47,8 +44,7 @@ class GitHubAuthSession implements vscode.AuthenticationSession {
  * GitHub authentication provider
  * Uses localStorage for persistence and syncs with server via cookies
  */
-export class GitHubAuthProvider
-  implements vscode.AuthenticationProvider, vscode.Disposable {
+export class GitHubAuthProvider implements vscode.AuthenticationProvider, vscode.Disposable {
   static id = GITHUB_AUTH_ID;
   static label = "GitHub";
   private static storageKey = "github-username";
@@ -122,9 +118,7 @@ export class GitHubAuthProvider
 
   getSessions(): Promise<vscode.AuthenticationSession[]> {
     this.ensureInitialized();
-    const username =
-      this.currentUsername ||
-      localStorage.getItem(GitHubAuthProvider.storageKey);
+    const username = this.currentUsername || localStorage.getItem(GitHubAuthProvider.storageKey);
     return Promise.resolve(username ? [new GitHubAuthSession(username, username)] : []);
   }
 
@@ -178,9 +172,7 @@ export class GitHubAuthProvider
 
       if (!popup) {
         reject(
-          new Error(
-            "Failed to open authentication popup. Please allow popups for this site.",
-          ),
+          new Error("Failed to open authentication popup. Please allow popups for this site."),
         );
         return;
       }
@@ -348,10 +340,7 @@ void ext.getApi().then((vsapi) => {
 
   // === Status Bar Integration ===
   // Create status bar item (now that provider is registered)
-  const statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Right,
-    100,
-  );
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.show();
 
   // Update status bar based on current auth state
@@ -381,7 +370,9 @@ void ext.getApi().then((vsapi) => {
       });
       void vscode.window.showInformationMessage("Successfully signed in!");
     } catch (error) {
-      void vscode.window.showErrorMessage(`Sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(
+        `Sign in failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   });
 
@@ -430,7 +421,9 @@ void ext.getApi().then((vsapi) => {
           break;
       }
     } catch (error) {
-      void vscode.window.showErrorMessage(`Account menu failed: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage(
+        `Account menu failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   });
 

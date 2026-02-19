@@ -1,28 +1,28 @@
 <script lang="ts" setup>
-import _ from "lodash"
-import { computed, onMounted } from "vue"
-import type { Node } from "@/interfaces"
-import GridRow from "@/components/GridRow.vue"
-import { NodeProp } from "../enums"
-import LevelDivider from "@/components/LevelDivider.vue"
-import { store } from "@/store"
-import type { FlattenedPlanNode } from "@/store"
+import _ from "lodash";
+import { computed, onMounted } from "vue";
+import type { Node } from "@/interfaces";
+import GridRow from "@/components/GridRow.vue";
+import { NodeProp } from "../enums";
+import LevelDivider from "@/components/LevelDivider.vue";
+import { store } from "@/store";
+import type { FlattenedPlanNode } from "@/store";
 
 onMounted((): void => {
-  localStorage.setItem("gridIsNotNew", "true")
-})
+  localStorage.setItem("gridIsNotNew", "true");
+});
 
 function isCTE(node: Node): boolean {
-  return _.startsWith(node[NodeProp.SUBPLAN_NAME], "CTE")
+  return _.startsWith(node[NodeProp.SUBPLAN_NAME], "CTE");
 }
 
 const hasTime = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_DURATION] || 0 > 1
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_DURATION] || 0 > 1;
+    });
+  });
+});
 
 const hasIORead = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
@@ -32,10 +32,10 @@ const hasIORead = computed((): boolean => {
         row.node[NodeProp.SHARED_IO_READ_TIME] ||
         row.node[NodeProp.LOCAL_IO_READ_TIME] ||
         row.node[NodeProp.TEMP_IO_READ_TIME]
-      )
-    })
-  })
-})
+      );
+    });
+  });
+});
 
 const hasIOWrite = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
@@ -45,50 +45,50 @@ const hasIOWrite = computed((): boolean => {
         row.node[NodeProp.SHARED_IO_WRITE_TIME] ||
         row.node[NodeProp.LOCAL_IO_WRITE_TIME] ||
         row.node[NodeProp.TEMP_IO_WRITE_TIME]
-      )
-    })
-  })
-})
+      );
+    });
+  });
+});
 
 const hasIO = computed((): boolean => {
-  return hasIORead.value || hasIOWrite.value
-})
+  return hasIORead.value || hasIOWrite.value;
+});
 
 const ioColumns = computed((): number => {
-  return _.filter([hasIORead.value, hasIOWrite.value], (v) => v).length
-})
+  return _.filter([hasIORead.value, hasIOWrite.value], (v) => v).length;
+});
 
 const hasRows = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.ACTUAL_ROWS_REVISED] || 0 > 1
-    })
-  })
-})
+      return row.node[NodeProp.ACTUAL_ROWS_REVISED] || 0 > 1;
+    });
+  });
+});
 
 const hasEstimation = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.PLANNER_ESTIMATE_FACTOR] || 0 > 1
-    })
-  })
-})
+      return row.node[NodeProp.PLANNER_ESTIMATE_FACTOR] || 0 > 1;
+    });
+  });
+});
 
 const hasLoops = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.ACTUAL_LOOPS] > 1
-    })
-  })
-})
+      return row.node[NodeProp.ACTUAL_LOOPS] > 1;
+    });
+  });
+});
 
 const hasCost = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_COST] > 1
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_COST] > 1;
+    });
+  });
+});
 
 const hasFilter = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
@@ -97,197 +97,187 @@ const hasFilter = computed((): boolean => {
         row.node[NodeProp.ROWS_REMOVED_BY_FILTER] ||
         row.node[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER] ||
         row.node[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK]
-      )
-    })
-  })
-})
+      );
+    });
+  });
+});
 
 const hasHeapFetches = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.HEAP_FETCHES]
-    })
-  })
-})
+      return row.node[NodeProp.HEAP_FETCHES];
+    });
+  });
+});
 
 const sharedBlocksColumns = computed((): number => {
   return _.filter(
-    [
-      hasSharedHit.value,
-      hasSharedRead.value,
-      hasSharedDirtied.value,
-      hasSharedWritten.value,
-    ],
+    [hasSharedHit.value, hasSharedRead.value, hasSharedDirtied.value, hasSharedWritten.value],
     (v) => v,
-  ).length
-})
+  ).length;
+});
 
 const hasSharedHit = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS];
+    });
+  });
+});
 
 const hasSharedRead = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS];
+    });
+  });
+});
 
 const hasSharedDirtied = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS];
+    });
+  });
+});
 
 const hasSharedWritten = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS];
+    });
+  });
+});
 
 const tempBlocksColumns = computed((): number => {
-  return _.filter([hasTempRead.value, hasTempWritten.value], (v) => v).length
-})
+  return _.filter([hasTempRead.value, hasTempWritten.value], (v) => v).length;
+});
 
 const hasTempRead = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS];
+    });
+  });
+});
 
 const hasTempWritten = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS];
+    });
+  });
+});
 
 const localBlocksColumns = computed((): number => {
   return _.filter(
-    [
-      hasLocalHit.value,
-      hasLocalRead.value,
-      hasLocalDirtied.value,
-      hasLocalWritten.value,
-    ],
+    [hasLocalHit.value, hasLocalRead.value, hasLocalDirtied.value, hasLocalWritten.value],
     (v) => v,
-  ).length
-})
+  ).length;
+});
 
 const hasLocalHit = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS];
+    });
+  });
+});
 
 const hasLocalRead = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS];
+    });
+  });
+});
 
 const hasLocalDirtied = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS];
+    });
+  });
+});
 
 const hasLocalWritten = computed((): boolean => {
   return _.some(store.flat, (plan: FlattenedPlanNode[]) => {
     return _.some(plan, (row: FlattenedPlanNode) => {
-      return row.node[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS]
-    })
-  })
-})
+      return row.node[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS];
+    });
+  });
+});
 
 const columnsLeft = computed<string[]>(() => {
-  const cols = []
+  const cols = [];
   if (hasTime.value) {
-    cols.push("time")
+    cols.push("time");
   }
   if (hasIORead.value) {
-    cols.push("ioread")
+    cols.push("ioread");
   }
   if (hasIOWrite.value) {
-    cols.push("iowrite")
+    cols.push("iowrite");
   }
   if (hasRows.value) {
-    cols.push("rows")
+    cols.push("rows");
   }
   if (hasEstimation.value) {
-    cols.push("estimation")
+    cols.push("estimation");
   }
   if (hasCost.value) {
-    cols.push("cost")
+    cols.push("cost");
   }
   if (hasLoops.value) {
-    cols.push("loops")
+    cols.push("loops");
   }
   if (hasFilter.value) {
-    cols.push("filter")
+    cols.push("filter");
   }
   if (hasHeapFetches.value) {
-    cols.push("heapfetches")
+    cols.push("heapfetches");
   }
-  return cols
-})
+  return cols;
+});
 
 const columnsRight = computed<string[]>(() => {
-  const cols = []
+  const cols = [];
   if (hasSharedHit.value) {
-    cols.push("shared.hit")
+    cols.push("shared.hit");
   }
   if (hasSharedRead.value) {
-    cols.push("shared.read")
+    cols.push("shared.read");
   }
   if (hasSharedDirtied.value) {
-    cols.push("shared.dirtied")
+    cols.push("shared.dirtied");
   }
   if (hasSharedWritten.value) {
-    cols.push("shared.written")
+    cols.push("shared.written");
   }
   if (hasTempRead.value) {
-    cols.push("temp.read")
+    cols.push("temp.read");
   }
   if (hasTempWritten.value) {
-    cols.push("temp.written")
+    cols.push("temp.written");
   }
   if (hasLocalHit.value) {
-    cols.push("local.hit")
+    cols.push("local.hit");
   }
   if (hasLocalRead.value) {
-    cols.push("local.read")
+    cols.push("local.read");
   }
   if (hasLocalDirtied.value) {
-    cols.push("local.dirtied")
+    cols.push("local.dirtied");
   }
   if (hasLocalWritten.value) {
-    cols.push("local.written")
+    cols.push("local.written");
   }
-  return cols
-})
+  return cols;
+});
 
 const columns = computed(() => {
-  return ([] as string[]).concat(columnsLeft.value, columnsRight.value)
-})
+  return ([] as string[]).concat(columnsLeft.value, columnsRight.value);
+});
 </script>
 
 <template>
@@ -300,25 +290,13 @@ const columns = computed(() => {
           </th>
           <th class="text-center" :colspan="ioColumns" v-if="hasIO">io</th>
           <th :colspan="columnsLeft.length - ioColumns"></th>
-          <th
-            class="text-center"
-            :colspan="sharedBlocksColumns"
-            v-if="sharedBlocksColumns > 0"
-          >
+          <th class="text-center" :colspan="sharedBlocksColumns" v-if="sharedBlocksColumns > 0">
             shared
           </th>
-          <th
-            class="text-center"
-            :colspan="tempBlocksColumns"
-            v-if="tempBlocksColumns > 0"
-          >
+          <th class="text-center" :colspan="tempBlocksColumns" v-if="tempBlocksColumns > 0">
             temp
           </th>
-          <th
-            class="text-center"
-            :colspan="localBlocksColumns"
-            v-if="localBlocksColumns > 0"
-          >
+          <th class="text-center" :colspan="localBlocksColumns" v-if="localBlocksColumns > 0">
             local
           </th>
         </tr>

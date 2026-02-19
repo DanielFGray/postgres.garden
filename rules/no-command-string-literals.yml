@@ -3,11 +3,11 @@ language: TypeScript
 severity: error
 message: |
   Use named constants from './constants' instead of string literals for command IDs.
-  
+
   Common patterns:
   - registerCommand("command.id", ...) → registerCommand(COMMAND_ID, ...)
   - executeCommand("command.id", ...) → executeCommand(COMMAND_ID, ...)
-  
+
   All command IDs should be defined in src/features/constants.ts
 
 note: |
@@ -21,7 +21,7 @@ rule:
       has:
         kind: string
         stopBy: end
-    
+
     # Match any executeCommand call where first argument is a string literal
     - pattern: $_.executeCommand($CMD, $$$)
       has:

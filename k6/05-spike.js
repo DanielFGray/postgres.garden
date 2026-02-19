@@ -22,17 +22,17 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "5s", target: 500 },   // instant spike
-        { duration: "2m", target: 500 },    // hold the chaos
-        { duration: "30s", target: 50 },    // most leave
-        { duration: "1m", target: 50 },     // lingering traffic
+        { duration: "5s", target: 500 }, // instant spike
+        { duration: "2m", target: 500 }, // hold the chaos
+        { duration: "30s", target: 50 }, // most leave
+        { duration: "1m", target: 50 }, // lingering traffic
         { duration: "10s", target: 0 },
       ],
     },
   },
   thresholds: {
     http_req_duration: ["p(95)<5000"], // relaxed — we expect degradation
-    http_req_failed: ["rate<0.1"],     // less than 10% errors
+    http_req_failed: ["rate<0.1"], // less than 10% errors
   },
 };
 
@@ -51,12 +51,10 @@ export default function () {
       try {
         const playgrounds = res.json();
         if (Array.isArray(playgrounds) && playgrounds.length > 0) {
-          const pg =
-            playgrounds[Math.floor(Math.random() * playgrounds.length)];
-          const detailRes = http.get(
-            `${BASE_URL}/api/playgrounds/${pg.hash}`,
-            { tags: { name: "GET /api/playgrounds/:hash" } },
-          );
+          const pg = playgrounds[Math.floor(Math.random() * playgrounds.length)];
+          const detailRes = http.get(`${BASE_URL}/api/playgrounds/${pg.hash}`, {
+            tags: { name: "GET /api/playgrounds/:hash" },
+          });
           spikeDuration.add(detailRes.timings.duration);
         }
       } catch {

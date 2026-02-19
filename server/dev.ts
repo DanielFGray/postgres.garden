@@ -78,18 +78,14 @@ function runViteMiddleware(
     // Override write/end to capture body without hitting the mock socket
     res.write = function (chunk: any) {
       if (chunk != null) {
-        chunks.push(
-          Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)),
-        );
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       }
       return true;
     } as any;
 
     res.end = function (this: ServerResponse, chunk?: any) {
       if (chunk != null) {
-        chunks.push(
-          Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)),
-        );
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       }
       finish();
       return this;
@@ -153,11 +149,7 @@ export async function createDevServer(rootApp: App) {
       html = await vite.transformIndexHtml(url.pathname, html);
 
       // SSR data injection (identical to prod)
-      const initialData = await getInitialData(
-        rootApp,
-        url.pathname,
-        cookieHeader,
-      );
+      const initialData = await getInitialData(rootApp, url.pathname, cookieHeader);
       html = html.replace(
         "<!-- {INITIAL_DATA} -->",
         `<script>window.__INITIAL_DATA__ = ${JSON.stringify(initialData)};</script>`,

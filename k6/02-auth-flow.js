@@ -119,10 +119,10 @@ export default function () {
   sleep(0.3);
 
   // 5. List commits
-  const listCommitsRes = http.get(
-    `${BASE_URL}/api/playgrounds/${hash}/commits`,
-    { headers, tags: { name: "GET /api/playgrounds/:hash/commits" } },
-  );
+  const listCommitsRes = http.get(`${BASE_URL}/api/playgrounds/${hash}/commits`, {
+    headers,
+    tags: { name: "GET /api/playgrounds/:hash/commits" },
+  });
   check(listCommitsRes, {
     "list commits 200": (r) => r.status === 200,
     "has 2+ commits": (r) => {
@@ -140,17 +140,17 @@ export default function () {
     if (Array.isArray(commits) && commits.length > 0) {
       const latestId = commits[0].id;
 
-      const detailRes = http.get(
-        `${BASE_URL}/api/playgrounds/${hash}/commits/${latestId}`,
-        { headers, tags: { name: "GET /api/playgrounds/:hash/commits/:id" } },
-      );
+      const detailRes = http.get(`${BASE_URL}/api/playgrounds/${hash}/commits/${latestId}`, {
+        headers,
+        tags: { name: "GET /api/playgrounds/:hash/commits/:id" },
+      });
       check(detailRes, { "commit detail 200": (r) => r.status === 200 });
 
       // 7. Get diff
-      const diffRes = http.get(
-        `${BASE_URL}/api/playgrounds/${hash}/commits/${latestId}/diff`,
-        { headers, tags: { name: "GET /api/playgrounds/:hash/commits/:id/diff" } },
-      );
+      const diffRes = http.get(`${BASE_URL}/api/playgrounds/${hash}/commits/${latestId}/diff`, {
+        headers,
+        tags: { name: "GET /api/playgrounds/:hash/commits/:id/diff" },
+      });
       check(diffRes, { "diff 200": (r) => r.status === 200 });
     }
   } catch {

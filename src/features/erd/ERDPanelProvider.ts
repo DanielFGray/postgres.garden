@@ -34,10 +34,7 @@ export class ERDPanelProvider {
     }, 300);
   }
 
-  public static createOrShow(
-    extensionUri: vscode.Uri,
-    pgliteService: PGliteService,
-  ) {
+  public static createOrShow(extensionUri: vscode.Uri, pgliteService: PGliteService) {
     // Check if we already have a panel
     if (ERDPanelProvider.panel) {
       ERDPanelProvider.panel._panel.reveal();
@@ -51,13 +48,7 @@ export class ERDPanelProvider {
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(
-            extensionUri,
-            "src",
-            "webview-dist",
-          ),
-        ],
+        localResourceRoots: [vscode.Uri.joinPath(extensionUri, "src", "webview-dist")],
         retainContextWhenHidden: true,
       },
     );
@@ -137,7 +128,7 @@ export class ERDPanelProvider {
     }
   }
 
-   private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(webview: vscode.Webview) {
     const baseUri = this._extensionUri.toString().replace(/\/$/, "");
     const scriptUri = `${baseUri}/src/webview-dist/erd-viewer.js`;
     const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
@@ -163,8 +154,7 @@ export class ERDPanelProvider {
 
 function getNonce() {
   let text = "";
-  const possible =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   for (let i = 0; i < 32; i++) {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }

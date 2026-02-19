@@ -34,9 +34,7 @@ const gql = templateHack;
 const html = templateHack;
 const tracer = trace.getTracer("postgres-garden");
 
-const PositiveNumber = S.Number.pipe(
-  S.filter((n) => n > 0 || "a positive number"),
-);
+const PositiveNumber = S.Number.pipe(S.filter((n) => n > 0 || "a positive number"));
 const LessThan = <T extends number>(than: number) =>
   S.filter<S.Schema<T, T>>((n) => n < than || "a number less than 100");
 
@@ -113,9 +111,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         const result = await rootDb
           .selectNoFrom((eb) =>
             eb
-              .fn<boolean>("app_public.confirm_account_deletion", [
-                eb.val(query.token),
-              ])
+              .fn<boolean>("app_public.confirm_account_deletion", [eb.val(query.token)])
               .as("confirm_account_deletion"),
           )
           .executeTakeFirst();
@@ -235,10 +231,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           if (!result) return status(404, { error: "Email not found" });
           return result;
         } catch (e) {
-          if (
-            e instanceof pg.DatabaseError &&
-            e.message.includes("prevent_delete_last_email")
-          ) {
+          if (e instanceof pg.DatabaseError && e.message.includes("prevent_delete_last_email")) {
             return status(400, {
               error: "Cannot delete your last email address",
             });
@@ -266,10 +259,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           .execute();
         return auths;
       } catch (e) {
-        const { code, error } = handleDbError(
-          e,
-          "Failed to fetch authentications",
-        );
+        const { code, error } = handleDbError(e, "Failed to fetch authentications");
         return status(code, { error });
       }
     });
@@ -287,14 +277,10 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             .where("id", "=", params.id)
             .returningAll()
             .executeTakeFirst();
-          if (!result)
-            return status(404, { error: "Authentication not found" });
+          if (!result) return status(404, { error: "Authentication not found" });
           return { id: result.id };
         } catch (e) {
-          const { code, error } = handleDbError(
-            e,
-            "Failed to unlink authentication",
-          );
+          const { code, error } = handleDbError(e, "Failed to unlink authentication");
           return status(code, { error });
         }
       });
@@ -318,10 +304,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         if (!row) return status(404, { error: "User not found" });
         return { has_password: row.has_password };
       } catch (e) {
-        const { code, error } = handleDbError(
-          e,
-          "Failed to check password status",
-        );
+        const { code, error } = handleDbError(e, "Failed to check password status");
         return status(code, { error });
       }
     });
@@ -334,18 +317,13 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         await rootDb
           .selectNoFrom((eb) =>
             eb
-              .fn<void>("app_public.forgot_password", [
-                sql`${body.email}::citext`,
-              ])
+              .fn<void>("app_public.forgot_password", [sql`${body.email}::citext`])
               .as("forgot_password"),
           )
           .executeTakeFirst();
         return { success: true };
       } catch (e) {
-        const { code, error } = handleDbError(
-          e,
-          "Failed to send password reset email",
-        );
+        const { code, error } = handleDbError(e, "Failed to send password reset email");
         return status(code, { error });
       }
     },
@@ -451,19 +429,16 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           const result = await tx
             .selectFrom((eb) =>
               eb
-                .fn<
-                  Selectable<AppPublicUserEmails>
-                >("app_public.make_email_primary", [sql`${body.emailId}::uuid`])
+                .fn<Selectable<AppPublicUserEmails>>("app_public.make_email_primary", [
+                  sql`${body.emailId}::uuid`,
+                ])
                 .as("make_email_primary"),
             )
             .selectAll()
             .executeTakeFirstOrThrow();
           return result;
         } catch (e) {
-          const { code, error } = handleDbError(
-            e,
-            "Failed to update primary email",
-          );
+          const { code, error } = handleDbError(e, "Failed to update primary email");
           return status(code, { error });
         }
       });
@@ -503,19 +478,12 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             (eb) =>
               eb
                 .selectFrom("app_public.playground_stars")
-                .select((eb) => [
-                  "playground_hash",
-                  eb.fn.countAll<string>().as("stars"),
-                ])
+                .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
                 .groupBy("playground_hash")
                 .as("star_counts"),
-            (join) =>
-              join.onRef("star_counts.playground_hash", "=", "p.hash"),
+            (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
-          .orderBy(
-            sql.ref(query.sort ?? "created_at"),
-            query.sort === "stars" ? "desc" : "desc",
-          )
+          .orderBy(sql.ref(query.sort ?? "created_at"), query.sort === "stars" ? "desc" : "desc")
           .limit(query.limit ?? 50)
           .where("u.username", "=", params.username)
           .select([
@@ -552,19 +520,12 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             (eb) =>
               eb
                 .selectFrom("app_public.playground_stars")
-                .select((eb) => [
-                  "playground_hash",
-                  eb.fn.countAll<string>().as("stars"),
-                ])
+                .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
                 .groupBy("playground_hash")
                 .as("star_counts"),
-            (join) =>
-              join.onRef("star_counts.playground_hash", "=", "p.hash"),
+            (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
-          .orderBy(
-            sql.ref(query.sort ?? "created_at"),
-            query.sort === "stars" ? "desc" : "desc",
-          )
+          .orderBy(sql.ref(query.sort ?? "created_at"), query.sort === "stars" ? "desc" : "desc")
           .limit(query.limit ?? 50)
           .where("u.username", "=", params.username)
           .groupBy("u.id")
@@ -609,19 +570,12 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             (eb) =>
               eb
                 .selectFrom("app_public.playground_stars")
-                .select((eb) => [
-                  "playground_hash",
-                  eb.fn.countAll<string>().as("stars"),
-                ])
+                .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
                 .groupBy("playground_hash")
                 .as("star_counts"),
-            (join) =>
-              join.onRef("star_counts.playground_hash", "=", "p.hash"),
+            (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
-          .orderBy(
-            sql.ref(query.sort ?? "created_at"),
-            query.sort === "stars" ? "desc" : "desc",
-          )
+          .orderBy(sql.ref(query.sort ?? "created_at"), query.sort === "stars" ? "desc" : "desc")
           .limit(query.limit ?? 50)
           .select((eb) => [
             "p.hash",
@@ -710,28 +664,16 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           .selectFrom("app_public.playgrounds as p")
           .leftJoin("app_public.users as u", "p.user_id", "u.id")
           // Join to get fork parent info
-          .leftJoin(
-            "app_public.playgrounds as fork_parent",
-            "p.fork_hash",
-            "fork_parent.hash",
-          )
-          .leftJoin(
-            "app_public.users as fork_owner",
-            "fork_parent.user_id",
-            "fork_owner.id",
-          )
+          .leftJoin("app_public.playgrounds as fork_parent", "p.fork_hash", "fork_parent.hash")
+          .leftJoin("app_public.users as fork_owner", "fork_parent.user_id", "fork_owner.id")
           .leftJoin(
             (eb) =>
               eb
                 .selectFrom("app_public.playground_stars")
-                .select((eb) => [
-                  "playground_hash",
-                  eb.fn.countAll<string>().as("stars"),
-                ])
+                .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
                 .groupBy("playground_hash")
                 .as("star_counts"),
-            (join) =>
-              join.onRef("star_counts.playground_hash", "=", "p.hash"),
+            (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
           )
           .selectAll("p")
           .select((eb) => [
@@ -814,19 +756,14 @@ const apiRoutes = new Elysia({ prefix: "/api" })
       if (!session || !user) return status(401, { error: "Unauthorized" });
 
       // Private playgrounds require sponsor/pro/admin role
-      if (
-        body.privacy === "private" &&
-        !["sponsor", "pro", "admin"].includes(user.role)
-      ) {
+      if (body.privacy === "private" && !["sponsor", "pro", "admin"].includes(user.role)) {
         return status(403, {
           error: "Private playgrounds require a sponsor account",
         });
       }
 
       return await withAuthContext(session.id, async (tx) => {
-        let query = tx
-          .updateTable("app_public.playgrounds")
-          .where("hash", "=", params.hash);
+        let query = tx.updateTable("app_public.playgrounds").where("hash", "=", params.hash);
 
         if (body.name !== undefined) {
           query = query.set("name", body.name);
@@ -850,11 +787,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         name: S.NullishOr(S.String),
         description: S.NullishOr(S.String),
         privacy: S.NullishOr(
-          S.Union(
-            S.Literal("private"),
-            S.Literal("secret"),
-            S.Literal("public"),
-          ),
+          S.Union(S.Literal("private"), S.Literal("secret"), S.Literal("public")),
         ),
       }).pipe(S.standardSchemaV1),
     },
@@ -974,14 +907,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           const commits = await tx
             .selectFrom("app_public.playground_commits as c")
             .leftJoin("app_public.users as u", "c.user_id", "u.id")
-            .select([
-              "c.id",
-              "c.message",
-              "c.created_at",
-              "c.parent_id",
-              "c.user_id",
-              "u.username",
-            ])
+            .select(["c.id", "c.message", "c.created_at", "c.parent_id", "c.user_id", "u.username"])
             .where("c.playground_hash", "=", playgroundHash)
             .orderBy("c.created_at", "desc")
             .execute();
@@ -1010,14 +936,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
           const playgroundHash = params.hash;
           const commit = await tx
             .selectFrom("app_public.playground_commits")
-            .select([
-              "id",
-              "message",
-              "data",
-              "created_at",
-              "playground_hash",
-              "parent_id",
-            ])
+            .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
             .where("id", "=", params.commit_id)
             .where("playground_hash", "=", playgroundHash)
             .executeTakeFirst();
@@ -1134,9 +1053,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
         hash: S.String,
         commit_id: S.String,
       }).pipe(S.standardSchemaV1),
-      query: S.Struct({ limit: S.NullishOr(S.Number) }).pipe(
-        S.standardSchemaV1,
-      ),
+      query: S.Struct({ limit: S.NullishOr(S.Number) }).pipe(S.standardSchemaV1),
     },
   )
   .get(
@@ -1154,7 +1071,9 @@ const apiRoutes = new Elysia({ prefix: "/api" })
 
           if (!commit) return status(404, { error: "Commit not found" });
 
-          const currentData = (commit.data as { files: Array<{ path: string; content: string }> }) || {
+          const currentData = (commit.data as {
+            files: Array<{ path: string; content: string }>;
+          }) || {
             files: [],
           };
           const currentFiles = currentData.files;
@@ -1174,29 +1093,24 @@ const apiRoutes = new Elysia({ prefix: "/api" })
             .where("id", "=", commit.parent_id)
             .executeTakeFirst();
 
-          if (!parentCommit)
-            return status(404, { error: "Parent commit not found" });
+          if (!parentCommit) return status(404, { error: "Parent commit not found" });
 
-          const parentData = (parentCommit.data as { files: Array<{ path: string; content: string }> }) || {
+          const parentData = (parentCommit.data as {
+            files: Array<{ path: string; content: string }>;
+          }) || {
             files: [],
           };
           const parentFiles = parentData.files;
 
-          const currentFileMap = new Map(
-            currentFiles.map((f) => [f.path, f.content]),
-          );
-          const parentFileMap = new Map(
-            parentFiles.map((f) => [f.path, f.content]),
-          );
+          const currentFileMap = new Map(currentFiles.map((f) => [f.path, f.content]));
+          const parentFileMap = new Map(parentFiles.map((f) => [f.path, f.content]));
 
           const added = currentFiles.filter((f) => !parentFileMap.has(f.path));
           const modified = currentFiles.filter((f) => {
             const parentContent = parentFileMap.get(f.path);
             return parentContent !== undefined && parentContent !== f.content;
           });
-          const deleted = parentFiles.filter(
-            (f) => !currentFileMap.has(f.path),
-          );
+          const deleted = parentFiles.filter((f) => !currentFileMap.has(f.path));
 
           return { isRootCommit: false, added, modified, deleted };
         });
@@ -1321,7 +1235,11 @@ const authRoutes = new Elysia()
           span.setStatus({ code: SpanStatusCode.ERROR });
           if (e instanceof pg.DatabaseError && e.code === "23505") {
             span.setAttribute("auth.result", "duplicate_user");
-            authAttempts.add(1, { method: "password", action: "register", result: "duplicate_user" });
+            authAttempts.add(1, {
+              method: "password",
+              action: "register",
+              result: "duplicate_user",
+            });
             span.end();
             return status(409, { error: "Username or email already exists" });
           }
@@ -1356,7 +1274,11 @@ const authRoutes = new Elysia()
 
           if (!user?.id) {
             span.setAttribute("auth.result", "invalid_credentials");
-            authAttempts.add(1, { method: "password", action: "login", result: "invalid_credentials" });
+            authAttempts.add(1, {
+              method: "password",
+              action: "login",
+              result: "invalid_credentials",
+            });
             span.end();
             return status(401, { error: "Invalid credentials" });
           }
@@ -1420,9 +1342,7 @@ const authRoutes = new Elysia()
   });
 
 if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
-  console.info(
-    "GitHub OAuth is not configured: https://github.com/settings/developers",
-  );
+  console.info("GitHub OAuth is not configured: https://github.com/settings/developers");
 } else {
   const provider = new arctic.GitHub(
     env.GITHUB_CLIENT_ID,
@@ -1458,12 +1378,9 @@ if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
       // If email is not public, fetch from /user/emails endpoint
       let email = userInformation.email;
       if (!email) {
-        const emailsResponse = await fetch(
-          "https://api.github.com/user/emails",
-          {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          },
-        );
+        const emailsResponse = await fetch("https://api.github.com/user/emails", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
         const emails = S.decodeUnknownSync(
           S.Array(
             S.Struct({
@@ -1545,11 +1462,18 @@ if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
           break;
         case sponsorInfo.user.isSponsoringViewer:
           role = "sponsor";
-          logInfo("GitHub user role resolved", { username: userInformation.login, role: "sponsor" });
+          logInfo("GitHub user role resolved", {
+            username: userInformation.login,
+            role: "sponsor",
+          });
           break;
         case sponsorInfo.repository.collaborators.totalCount > 0:
           role = "sponsor";
-          logInfo("GitHub user role resolved", { username: userInformation.login, role: "sponsor", reason: "collaborator" });
+          logInfo("GitHub user role resolved", {
+            username: userInformation.login,
+            role: "sponsor",
+            reason: "collaborator",
+          });
           break;
       }
       return {
@@ -1605,14 +1529,7 @@ function installOauthProvider({
 
   authRoutes.get(
     `/auth/${serviceName}/callback`,
-    async ({
-      cookie,
-      session,
-      user: currentUser,
-      status,
-      query: { code, state },
-      set,
-    }) => {
+    async ({ cookie, session, user: currentUser, status, query: { code, state }, set }) => {
       const storedState = cookie[cookieName]?.value as string | undefined;
       if (!storedState || state !== storedState)
         return status(400, { error: "Invalid state parameter" });
@@ -1791,12 +1708,13 @@ function installOauthProvider({
       } catch (err) {
         oauthSpan.recordException(err instanceof Error ? err : new Error(String(err)));
         oauthSpan.setStatus({ code: SpanStatusCode.ERROR });
-        if (
-          err instanceof arctic.OAuth2RequestError &&
-          err.message === "bad_verification_code"
-        ) {
+        if (err instanceof arctic.OAuth2RequestError && err.message === "bad_verification_code") {
           oauthSpan.setAttribute("auth.result", "bad_verification_code");
-          authAttempts.add(1, { method: serviceName, action: "oauth", result: "bad_verification_code" });
+          authAttempts.add(1, {
+            method: serviceName,
+            action: "oauth",
+            result: "bad_verification_code",
+          });
           oauthSpan.end();
           return status(400, { error: "Bad verification code" });
         }
@@ -1830,7 +1748,11 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
       const secret = env.GITHUB_WEBHOOK_SECRET;
       if (!secret) {
         span.setAttribute("webhook.verified", false);
-        webhookReceived.add(1, { provider: "github", event: event ?? "unknown", verified: "false" });
+        webhookReceived.add(1, {
+          provider: "github",
+          event: event ?? "unknown",
+          verified: "false",
+        });
         span.end();
         return status(503, { error: "Webhook not configured" });
       }
@@ -1844,7 +1766,11 @@ const webhookRoutes = new Elysia({ prefix: "/webhooks" }).post(
       if (!signature || !(await webhooks.verify(body, signature))) {
         span.setAttribute("webhook.verified", false);
         span.setStatus({ code: SpanStatusCode.ERROR, message: "Invalid signature" });
-        webhookReceived.add(1, { provider: "github", event: event ?? "unknown", verified: "false" });
+        webhookReceived.add(1, {
+          provider: "github",
+          event: event ?? "unknown",
+          verified: "false",
+        });
         span.end();
         return status(401, { error: "Invalid signature" });
       }
@@ -1888,12 +1814,12 @@ export const app = new Elysia()
       ],
       spanProcessors: env.OTEL_EXPORTER_OTLP_ENDPOINT
         ? [
-          new BatchSpanProcessor(
-            new OTLPTraceExporter({
-              url: `${env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
-            }),
-          ),
-        ]
+            new BatchSpanProcessor(
+              new OTLPTraceExporter({
+                url: `${env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+              }),
+            ),
+          ]
         : [],
     }),
   )

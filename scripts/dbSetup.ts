@@ -20,17 +20,20 @@ const RECONNECT_BASE_DELAY = 100;
 const RECONNECT_MAX_DELAY = 30000;
 
 // Tagged errors using Schema.TaggedError
-class DatabaseConnectionError extends Schema.TaggedError<DatabaseConnectionError>()("DatabaseConnectionError", {
-  message: Schema.String,
-}) { }
+class DatabaseConnectionError extends Schema.TaggedError<DatabaseConnectionError>()(
+  "DatabaseConnectionError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 class DatabaseAuthError extends Schema.TaggedError<DatabaseAuthError>()("DatabaseAuthError", {
   message: Schema.String,
-}) { }
+}) {}
 
 class DatabaseSetupError extends Schema.TaggedError<DatabaseSetupError>()("DatabaseSetupError", {
   error: Schema.Defect,
-}) { }
+}) {}
 
 // Create a retry schedule with exponential backoff and max attempts
 const retrySchedule = pipe(
@@ -77,7 +80,7 @@ const waitForDatabase = (pool: pg.Pool) =>
       Effect.die(new Error(`Database authentication failed: ${error.message}`)),
     ),
     Effect.catchTag("DatabaseConnectionError", () =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         yield* Effect.logError("Database never came up, aborting :(");
         yield* Effect.sync(() => process.exit(1));
       }),
@@ -98,7 +101,7 @@ const acquireConnection = (pool: pg.Pool) =>
   );
 
 // Prompt user for confirmation
-const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.gen(function*() {
+const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.gen(function* () {
   if (process.env.NOCONFIRM) {
     return true;
   }
@@ -106,9 +109,7 @@ const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.g
   const result = yield* Prompt.confirm({
     message: "press y to continue:",
     initial: true,
-  }).pipe(
-    Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))),
-  );
+  }).pipe(Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))));
 
   if (!result) {
     yield* Effect.sync(() => process.exit(0));
@@ -119,22 +120,13 @@ const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.g
 
 // Execute all database setup queries
 const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     // Drop existing databases and roles
     yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}`);
-    yield* executeQuery(
-      rootPgPool,
-      `drop database if exists ${DATABASE_NAME}_shadow`,
-    );
-    yield* executeQuery(
-      rootPgPool,
-      `drop database if exists ${DATABASE_NAME}_test`,
-    );
+    yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_shadow`);
+    yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_test`);
     yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_VISITOR}`);
-    yield* executeQuery(
-      rootPgPool,
-      `drop role if exists ${DATABASE_AUTHENTICATOR}`,
-    );
+    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_AUTHENTICATOR}`);
     yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_OWNER}`);
     yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_NAME}_shadow`);
 
@@ -182,10 +174,7 @@ const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
     yield* Effect.log(`CREATE ROLE ${DATABASE_VISITOR}`);
 
     // Grant visitor to authenticator
-    yield* executeQuery(
-      rootPgPool,
-      `grant ${DATABASE_VISITOR} to ${DATABASE_AUTHENTICATOR}`,
-    );
+    yield* executeQuery(rootPgPool, `grant ${DATABASE_VISITOR} to ${DATABASE_AUTHENTICATOR}`);
     yield* Effect.log(`GRANT ${DATABASE_VISITOR} TO ${DATABASE_AUTHENTICATOR}`);
 
     // Create shadow role for graphile-migrate
@@ -197,12 +186,12 @@ const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
   });
 
 // Main program
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const pgPool = new pg.Pool({ connectionString: ROOT_DATABASE_URL });
 
   // Use ensuring to guarantee pool cleanup
   yield* pipe(
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       // Wait for database to be ready
       yield* waitForDatabase(pgPool);
 
@@ -222,16 +211,14 @@ const program = Effect.gen(function*() {
           acquireConnection(pgPool),
           Effect.andThen((rootPgPool) => executeDatabaseSetup(rootPgPool)),
           Effect.catchAll((error) =>
-            Effect.gen(function*() {
+            Effect.gen(function* () {
               yield* Effect.logError(`Database setup error: ${String(error)}`);
             }),
           ),
         ),
       );
     }),
-    Effect.ensuring(
-      Effect.promise(() => pgPool.end()),
-    ),
+    Effect.ensuring(Effect.promise(() => pgPool.end())),
   );
 });
 

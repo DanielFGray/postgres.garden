@@ -6,7 +6,6 @@ export function randomNumber(min: number, max?: number): number {
   return Math.floor(min + Math.random() * (max - min));
 }
 
-
 /**
  * silly hack to enable syntax highlighting
  */
@@ -15,9 +14,7 @@ export const templateHack = (strings: TemplateStringsArray, ...exprs: unknown[])
     (acc, str, i) =>
       acc.concat(
         str,
-        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""),  // oxlint-disable-line typescript/no-base-to-string
+        typeof exprs[i] === "string" ? exprs[i] : String(exprs[i] ?? ""), // oxlint-disable-line typescript/no-base-to-string
       ),
     "",
   );
-
-

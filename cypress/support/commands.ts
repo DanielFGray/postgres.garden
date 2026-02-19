@@ -70,7 +70,7 @@ function serverCommand(
   payload: {
     username?: string;
     email?: string;
-    verified?: 'true' | 'false';
+    verified?: "true" | "false";
     name?: string;
     password?: string;
     next?: string;
@@ -126,9 +126,9 @@ function serverCommand(
 // The actual implementation of the 'serverCommand' function.
 // oxlint-disable-next-line typescript/no-explicit-any
 function serverCommand(command: string, payload?: Record<string, string>): Chainable<any> {
-  const endpoint = `/api/testingCommand/${command}`
+  const endpoint = `/api/testingCommand/${command}`;
   const params = payload ? new URLSearchParams(Object.entries(payload)).toString() : "";
-  const url = params ? [endpoint, params].join('?') : endpoint;
+  const url = params ? [endpoint, params].join("?") : endpoint;
   // oxlint-disable-next-line typescript/no-unsafe-return
   return cy.request("GET", url).its("body");
 }
@@ -156,9 +156,7 @@ function login(payload?: {
   if (payload?.orgs) params.set("orgs", JSON.stringify(payload.orgs));
 
   const queryString = params.toString();
-  return cy.visit(
-    `/api/testingCommand/login${queryString ? `?${queryString}` : ""}`,
-  );
+  return cy.visit(`/api/testingCommand/login${queryString ? `?${queryString}` : ""}`);
 }
 
 // ============================================
@@ -175,12 +173,13 @@ function login(payload?: {
  */
 function waitForWorkbench() {
   // oxlint-disable-next-line cypress/unsafe-to-chain-command
-  return cy.get('#workbench-container', { timeout: 30000 })
-    .should('exist')
+  return cy
+    .get("#workbench-container", { timeout: 30000 })
+    .should("exist")
     .within(() => {
-      cy.get('footer.statusbar', { timeout: 30000 }).should('exist');
+      cy.get("footer.statusbar", { timeout: 30000 }).should("exist");
     })
-    .then(() => cy.get('#workbench-container'));
+    .then(() => cy.get("#workbench-container"));
 }
 
 /**
@@ -195,7 +194,7 @@ function waitForWorkbench() {
  */
 function waitForNotification(
   message: string | RegExp,
-  options?: Partial<Cypress.Loggable & Cypress.Timeoutable>
+  options?: Partial<Cypress.Loggable & Cypress.Timeoutable>,
   // oxlint-disable-next-line typescript/no-explicit-any
 ): Chainable<any> {
   return cy.contains(message, options);
@@ -210,7 +209,7 @@ Cypress.Commands.add("login", login);
 Cypress.Commands.add("waitForWorkbench", waitForWorkbench);
 Cypress.Commands.add("waitForNotification", waitForNotification);
 
-export { }; // Make this a module so we can `declare global`
+export {}; // Make this a module so we can `declare global`
 
 declare global {
   // oxlint-disable-next-line typescript/no-namespace

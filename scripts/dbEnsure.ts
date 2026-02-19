@@ -4,21 +4,15 @@ import "dotenv/config";
 import { Effect, Schedule, pipe, Duration, Schema } from "effect";
 
 // Define custom error types for better error handling using Schema.TaggedError
-class DatabaseError extends Schema.TaggedError<DatabaseError>()(
-  "DatabaseError",
-  {
-    message: Schema.String,
-    code: Schema.optional(Schema.String),
-    attempts: Schema.optional(Schema.Number),
-  },
-) {}
+class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
+  message: Schema.String,
+  code: Schema.optional(Schema.String),
+  attempts: Schema.optional(Schema.Number),
+}) {}
 
-class ConfigurationError extends Schema.TaggedError<ConfigurationError>()(
-  "ConfigurationError",
-  {
-    message: Schema.String,
-  },
-) {}
+class ConfigurationError extends Schema.TaggedError<ConfigurationError>()("ConfigurationError", {
+  message: Schema.String,
+}) {}
 
 interface DbTestOptions {
   minDelay?: number;
@@ -34,12 +28,7 @@ export function dbTest(
   url: string,
   options: DbTestOptions = {},
 ): Effect.Effect<boolean, DatabaseError | ConfigurationError> {
-  const {
-    minDelay = 50,
-    maxTries = Infinity,
-    maxDelay = 30000,
-    verbose = true,
-  } = options;
+  const { minDelay = 50, maxTries = Infinity, maxDelay = 30000, verbose = true } = options;
 
   // Acquire and release the pool using Effect.acquireRelease
   const makePool = Effect.acquireRelease(
@@ -50,8 +39,7 @@ export function dbTest(
           connectionTimeoutMillis: 3000,
         }),
     ),
-    (pool) =>
-      Effect.promise(() => pool.end()),
+    (pool) => Effect.promise(() => pool.end()),
   );
 
   // Scoped effect that performs the database test

@@ -32,10 +32,7 @@ export class SQLNotebookExecutionController {
     if (text.trim().length < 1) return;
     execution.executionOrder = ++this.#executionOrder;
     execution.start(Date.now());
-    const results = await vscode.commands.executeCommand<ExtendedResults[]>(
-      PGLITE_EXECUTE,
-      text,
-    );
+    const results = await vscode.commands.executeCommand<ExtendedResults[]>(PGLITE_EXECUTE, text);
     execution.replaceOutput(
       results.map((result) => {
         if ("error" in result) {
@@ -54,10 +51,7 @@ export class SQLNotebookExecutionController {
               { ...result, query: text },
               "application/vnd.pg-playground.sql-result+json",
             ),
-            vscode.NotebookCellOutputItem.text(
-              renderRowsAsTable(result),
-              "text/html",
-            ),
+            vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
           ]);
         }
         // Show success message for statements that don't return rows
@@ -67,10 +61,7 @@ export class SQLNotebookExecutionController {
             ? ` (${result.affectedRows} rows affected)`
             : "";
         return new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text(
-            `✓ ${message}${affectedInfo}`,
-            "text/markdown",
-          ),
+          vscode.NotebookCellOutputItem.text(`✓ ${message}${affectedInfo}`, "text/markdown"),
         ]);
       }),
     );
@@ -84,23 +75,24 @@ function renderRowsAsTable(result: ExtendedResults): string {
   }
 
   const { rows, fields, statement } = result;
-  return `<table>${fields.length < 1
+  return `<table>${
+    fields.length < 1
       ? null
       : `<thead><tr>${fields.map((col) => `<th>${col.name}</th>`).join("")}</tr></thead>`
-    }<tbody>${fields.length < 1
+  }<tbody>${
+    fields.length < 1
       ? `<tr><td>${statement || "No results"}</td></tr>`
       : rows.length < 1
         ? `<tr><td colspan=${fields.length}>No results</td></tr>`
         : rows
-          .map(
-            (row) =>
-              `<tr>${fields
-                .map(
-                  (col) =>
-                    `<td>${row[col.name] === null ? "<i>null</i>" : row[col.name]}</td>`,
-                )
-                .join("")}</tr>`,
-          )
-          .join("")
-    }</tbody></table>`;
+            .map(
+              (row) =>
+                `<tr>${fields
+                  .map(
+                    (col) => `<td>${row[col.name] === null ? "<i>null</i>" : row[col.name]}</td>`,
+                  )
+                  .join("")}</tr>`,
+            )
+            .join("")
+  }</tbody></table>`;
 }

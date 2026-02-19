@@ -42,7 +42,9 @@ export class AccountSettingsPanelProvider {
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => { void this._handleMessage(message); },
+      (message: WebviewMessage) => {
+        void this._handleMessage(message);
+      },
       null,
       this._disposables,
     );

@@ -5,44 +5,48 @@
 ## Data Types - Use instead of null/undefined!
 
 **Option** - Represents optional values: `Some(value)` or `None`
-  - `Option.some(value)` / `Option.none()` - constructors
-  - `Option.isSome/isNone` - guards
-  - `Option.match(opt, { onNone, onSome })` - pattern matching
-  - `Option.map/flatMap/filter` - transformations
-  - `Option.getOrElse(opt, () => default)` - extract with fallback
-  - `Option.fromNullable(value)` - convert from null/undefined
-  - Use in generator: `const value = yield* option` (short-circuits on None)
-  
+
+- `Option.some(value)` / `Option.none()` - constructors
+- `Option.isSome/isNone` - guards
+- `Option.match(opt, { onNone, onSome })` - pattern matching
+- `Option.map/flatMap/filter` - transformations
+- `Option.getOrElse(opt, () => default)` - extract with fallback
+- `Option.fromNullable(value)` - convert from null/undefined
+- Use in generator: `const value = yield* option` (short-circuits on None)
+
 **Either** - Represents success (Right) or failure (Left)
-  - `Either.right(value)` / `Either.left(error)` - constructors
-  - `Either.isLeft/isRight` - guards
-  - `Either.match(either, { onLeft, onRight })` - pattern matching
-  - `Either.map/mapLeft/mapBoth` - transformations
-  - `Either.getOrElse(either, () => default)` - extract with fallback
-  - Works as subtype of Effect: `Left<E>` → `Effect<never, E>`, `Right<A>` → `Effect<A>`
-  - Use in generator: `const value = yield* either` (short-circuits on Left)
+
+- `Either.right(value)` / `Either.left(error)` - constructors
+- `Either.isLeft/isRight` - guards
+- `Either.match(either, { onLeft, onRight })` - pattern matching
+- `Either.map/mapLeft/mapBoth` - transformations
+- `Either.getOrElse(either, () => default)` - extract with fallback
+- Works as subtype of Effect: `Left<E>` → `Effect<never, E>`, `Right<A>` → `Effect<A>`
+- Use in generator: `const value = yield* either` (short-circuits on Left)
 
 ## State & Services
 
 **Atom** (@effect-atom/atom) - `Atom.make/get/set/update` - reactive state with auto-subscriptions (NOT Ref!)
 **Ref** - ONLY for internal non-reactive runtime state (e.g. DOM nodes, cache)
-  - `Ref.make(initial)` - create mutable reference
-  - `Ref.get/set/update/modify` - operations (all return Effect)
-**Effect.Service** - Define services with `class X extends Effect.Service<X>()("X", { scoped: ... })`
-  - Use `scoped` option for lifecycle management
-  - Use `accessors: true` for convenience methods
-  - Services accessed via `yield* ServiceName` in generators
-**Effect.provide(layer)** - Provide service implementation to effect
-**Effect.provideService(tag, impl)** - Provide single service inline
+
+- `Ref.make(initial)` - create mutable reference
+- `Ref.get/set/update/modify` - operations (all return Effect)
+  **Effect.Service** - Define services with `class X extends Effect.Service<X>()("X", { scoped: ... })`
+- Use `scoped` option for lifecycle management
+- Use `accessors: true` for convenience methods
+- Services accessed via `yield* ServiceName` in generators
+  **Effect.provide(layer)** - Provide service implementation to effect
+  **Effect.provideService(tag, impl)** - Provide single service inline
 
 ## Collections & Data
 
 **HashMap** - Immutable map: `HashMap.empty/make/get/set/has/remove/keys/values/entries`
-  - Use for props, component IDs, caching (NOT `Map` or `{}`)
-  - Returns `Option` for `get` operations
-**Chunk** - Immutable array: returned by `Queue.takeAll`, `Stream` operations
-  - `Chunk.toReadonlyArray` if you need array operations
-  - More efficient than arrays for Effect operations
+
+- Use for props, component IDs, caching (NOT `Map` or `{}`)
+- Returns `Option` for `get` operations
+  **Chunk** - Immutable array: returned by `Queue.takeAll`, `Stream` operations
+- `Chunk.toReadonlyArray` if you need array operations
+- More efficient than arrays for Effect operations
 
 ## Control Flow
 
@@ -54,15 +58,16 @@
 ## Async Coordination
 
 **Queue** - Type-safe async queue (NOT custom promise/callback systems)
-  - `Queue.bounded(n)` - backpressure when full
-  - `Queue.unbounded()` - no limit (use for render work queue)
-  - `Queue.offer/take/takeAll/poll/offerAll/takeUpTo/takeN` - operations
-  - NEVER manually poll in a loop - use `Queue.takeAll`
-**Stream** - Pull-based reactive streams (NOT RxJS, NOT manual event emitters)
-  - `Stream.runForEach(stream, fn)` - consume stream
-  - `Stream.fromQueue` - convert queue to stream
-  - `Stream.map/filter/flatMap` - transformations
-  - Supports backpressure, error handling, resource safety
+
+- `Queue.bounded(n)` - backpressure when full
+- `Queue.unbounded()` - no limit (use for render work queue)
+- `Queue.offer/take/takeAll/poll/offerAll/takeUpTo/takeN` - operations
+- NEVER manually poll in a loop - use `Queue.takeAll`
+  **Stream** - Pull-based reactive streams (NOT RxJS, NOT manual event emitters)
+- `Stream.runForEach(stream, fn)` - consume stream
+- `Stream.fromQueue` - convert queue to stream
+- `Stream.map/filter/flatMap` - transformations
+- Supports backpressure, error handling, resource safety
 
 ## Concurrency & Fibers
 
@@ -73,8 +78,9 @@
 **Fiber.interrupt(fiber)** - Cancel fiber
 **Fiber.await(fiber)** - Wait and get `Exit` result
 **FiberSet** - Manage fiber collections (NOT `Promise.all`)
-  - `FiberSet.makeRuntime` - create runtime backed by FiberSet
-  - All fibers cleaned up when scope closes
+
+- `FiberSet.makeRuntime` - create runtime backed by FiberSet
+- All fibers cleaned up when scope closes
 
 ## Interruption Control
 
@@ -91,27 +97,29 @@
 **Effect.acquireUseRelease(acquire, use, release)** - Full resource lifecycle
 **Effect.ensuring(finalizer)** - Run finalizer after effect (like finally)
 **Scope.fork(scope)** - Create child scope
-  - Finalizers run in REVERSE order (stack unwinding)
-  - Guaranteed to run on success, failure, or interruption
+
+- Finalizers run in REVERSE order (stack unwinding)
+- Guaranteed to run on success, failure, or interruption
 
 ## Iteration - NEVER use manual for/while with effects!
 
 **Effect.forEach(items, fn, opts)** - Replace `for` loops
-  - `{ concurrency: "unbounded" | number }` - parallel execution
-  - `{ discard: true }` - don't collect results (memory efficient)
-**Effect.all(effects, opts)** - Run multiple effects (arrays/tuples/structs/records)
-  - `{ concurrency: "unbounded" | number }` - control parallelism
-  - `{ mode: "default" | "either" | "validate" }` - error handling mode
-  - Preserves structure of input (tuple → tuple, struct → struct)
-**Effect.iterate(initial, { while, body })** - Replace while loops
-**Effect.loop(initial, { while, step, body })** - For loops with accumulation
-**Effect.reduce(items, init, fn)** - Sequential fold
-**Effect.filter(items, predicate)** - Filter with effectful predicate
-**Effect.partition(items, fn)** - Split into [failures, successes]
-**Effect.every(items, predicate)** - Check if all match
-**Effect.exists(items, predicate)** - Check if any match
-**Effect.findFirst(items, predicate)** - Find first match (returns `Option`)
-**Queue.takeAll(queue)** - Atomic drain, returns Chunk (NOT while + poll loop)
+
+- `{ concurrency: "unbounded" | number }` - parallel execution
+- `{ discard: true }` - don't collect results (memory efficient)
+  **Effect.all(effects, opts)** - Run multiple effects (arrays/tuples/structs/records)
+- `{ concurrency: "unbounded" | number }` - control parallelism
+- `{ mode: "default" | "either" | "validate" }` - error handling mode
+- Preserves structure of input (tuple → tuple, struct → struct)
+  **Effect.iterate(initial, { while, body })** - Replace while loops
+  **Effect.loop(initial, { while, step, body })** - For loops with accumulation
+  **Effect.reduce(items, init, fn)** - Sequential fold
+  **Effect.filter(items, predicate)** - Filter with effectful predicate
+  **Effect.partition(items, fn)** - Split into [failures, successes]
+  **Effect.every(items, predicate)** - Check if all match
+  **Effect.exists(items, predicate)** - Check if any match
+  **Effect.findFirst(items, predicate)** - Find first match (returns `Option`)
+  **Queue.takeAll(queue)** - Atomic drain, returns Chunk (NOT while + poll loop)
 
 ## Defects & Exits
 
@@ -154,7 +162,7 @@
 **Effect.promise(() => promise)** - Wrap promise (cannot fail)
 **Effect.tryPromise(() => promise)** - Wrap promise (can fail)
 **Effect.async(register)** - Create from callback
-**Effect.gen(function*)** - Generator-based do-notation
+**Effect.gen(function\*)** - Generator-based do-notation
 
 ## Pipeable Transformations
 
@@ -204,7 +212,8 @@
 
 **Effect.zip(other)** - Combine into tuple `[a, b]`
 **Effect.zipWith(other, fn)** - Combine with custom function
-  - Use `{ concurrent: true }` for parallel execution
+
+- Use `{ concurrent: true }` for parallel execution
 
 ## Common Anti-Patterns
 
@@ -220,7 +229,6 @@
 ❌ null/undefined for optional → ✅ Option.some/none
 ❌ throw/try-catch → ✅ Effect.fail/catchAll
 ❌ Manual if-else with effects → ✅ Effect.if/when/unless
-❌ Nested callbacks → ✅ Effect.gen with yield*
+❌ Nested callbacks → ✅ Effect.gen with yield\*
 ❌ Manual fiber management → ✅ FiberSet or Effect.forkIn with Scope
 ❌ Imaginary methods like `Effect.unit` → ✅ Effect.void (the actual API)
-

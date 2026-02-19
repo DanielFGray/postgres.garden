@@ -1,20 +1,14 @@
 import { initialize as initializeMonacoService } from "@codingame/monaco-vscode-api";
 import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-service-override";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
-import {
-  commonServices,
-  constructOptions,
-  envOptions,
-} from "./setup.common";
+import { commonServices, constructOptions, envOptions } from "./setup.common";
 
 // Guard against double initialization
 let initialized = false;
 
 export async function setupWorkbench(): Promise<void> {
   if (initialized) {
-    console.warn(
-      "Workbench already initialized, skipping duplicate initialization",
-    );
+    console.warn("Workbench already initialized, skipping duplicate initialization");
     return;
   }
 

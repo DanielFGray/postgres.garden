@@ -4,7 +4,9 @@ import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { live } from "@electric-sql/pglite/live";
 
 declare global {
-  interface Window { db?: PGliteWorker }
+  interface Window {
+    db?: PGliteWorker;
+  }
 }
 
 /**
@@ -58,15 +60,11 @@ export class PGliteService {
       window.db = worker;
 
       // Log leader status
-      console.log(
-        `[PGlite #${this.instanceId}] PGlite initialized - Leader: ${worker.isLeader}`,
-      );
+      console.log(`[PGlite #${this.instanceId}] PGlite initialized - Leader: ${worker.isLeader}`);
 
       // Subscribe to leader changes - this can cause the DB connection to close/reopen
       worker.onLeaderChange(() => {
-        console.log(
-          `[PGlite #${this.instanceId}] Leader changed - Now leader: ${worker.isLeader}`,
-        );
+        console.log(`[PGlite #${this.instanceId}] Leader changed - Now leader: ${worker.isLeader}`);
         // When leadership changes, the IndexedDB connection may be closed
         // We don't need to do anything here - our retry logic will handle it
       });

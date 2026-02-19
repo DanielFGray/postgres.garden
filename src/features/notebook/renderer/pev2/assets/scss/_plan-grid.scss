@@ -49,9 +49,7 @@ $grid-progress-margin: 1px;
     height: initial;
     $progress-gutter: 2px;
     left: calc($grid-progress-padding-x - $progress-gutter);
-    top: calc(
-      $grid-progress-margin * -1 + $grid-progress-padding-y - $progress-gutter
-    );
+    top: calc($grid-progress-margin * -1 + $grid-progress-padding-y - $progress-gutter);
     height: calc(1em + $progress-gutter * 2);
     width: calc(100% - $grid-progress-padding-x * 2 + $progress-gutter * 2);
     z-index: 0;

@@ -127,9 +127,7 @@ function Cell({ value, typeId }: CellProps) {
 
   return (
     <td>
-      <div class="cell-content">
-        {formatted}
-      </div>
+      <div class="cell-content">{formatted}</div>
     </td>
   );
 }
@@ -168,13 +166,12 @@ export function TableView({ data }: { data: SQLResult }) {
       });
     }
 
-    const handleMouseDown =
-      (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
-        e.preventDefault();
-        registry.set(resizingColumnAtom, fieldName);
-        startX = e.pageX;
-        startWidth = currentWidth;
-      };
+    const handleMouseDown = (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
+      e.preventDefault();
+      registry.set(resizingColumnAtom, fieldName);
+      startX = e.pageX;
+      startWidth = currentWidth;
+    };
 
     return (
       <div class="table-container">
@@ -184,10 +181,7 @@ export function TableView({ data }: { data: SQLResult }) {
               {data.fields.map((field) => {
                 const width = columnWidths[field.name];
                 return (
-                  <th
-                    key={field.name}
-                    style={{ width: width ? `${String(width)}px` : undefined }}
-                  >
+                  <th key={field.name} style={{ width: width ? `${String(width)}px` : undefined }}>
                     {field.name}
                     <div
                       class={`resize-handle ${resizingColumn === field.name ? "resizing" : ""}`}
@@ -209,11 +203,7 @@ export function TableView({ data }: { data: SQLResult }) {
               data.rows.map((row, i) => (
                 <tr key={i}>
                   {data.fields.map((field) => (
-                    <Cell
-                      key={field.name}
-                      value={row[field.name]}
-                      typeId={field.dataTypeID}
-                    />
+                    <Cell key={field.name} value={row[field.name]} typeId={field.dataTypeID} />
                   ))}
                 </tr>
               ))

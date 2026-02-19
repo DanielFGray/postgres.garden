@@ -1,7 +1,4 @@
-import {
-  ExtensionHostKind,
-  registerExtension,
-} from "@codingame/monaco-vscode-api/extensions";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import type * as vscode from "vscode";
 
 const ext = registerExtension(
@@ -32,10 +29,7 @@ const ext = registerExtension(
   ExtensionHostKind.LocalProcess,
 );
 
-ext.registerFileUrl(
-  "./extension.js",
-  "data:text/javascript;base64," + window.btoa("// nothing"),
-);
+ext.registerFileUrl("./extension.js", "data:text/javascript;base64," + window.btoa("// nothing"));
 
 void ext.getApi().then((debuggerVscodeApi) => {
   class WebsocketDebugAdapter implements vscode.DebugAdapter {
@@ -47,8 +41,7 @@ void ext.getApi().then((debuggerVscodeApi) => {
       };
     }
 
-    _onDidSendMessage =
-      new debuggerVscodeApi.EventEmitter<vscode.DebugProtocolMessage>();
+    _onDidSendMessage = new debuggerVscodeApi.EventEmitter<vscode.DebugProtocolMessage>();
     onDidSendMessage = this._onDidSendMessage.event;
 
     handleMessage(message: vscode.DebugProtocolMessage): void {
@@ -78,9 +71,7 @@ void ext.getApi().then((debuggerVscodeApi) => {
         websocket.onopen = resolve;
         websocket.onerror = () =>
           reject(
-            new Error(
-              "Unable to connect to debugger server. Run `npm run start:debugServer`",
-            ),
+            new Error("Unable to connect to debugger server. Run `npm run start:debugServer`"),
           );
       });
 

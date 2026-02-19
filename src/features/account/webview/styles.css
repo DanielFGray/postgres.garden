@@ -173,12 +173,30 @@ body {
   font-weight: 500;
 }
 
-.badge-user { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-.badge-sponsor { background: var(--vscode-charts-purple); color: #fff; }
-.badge-pro { background: var(--vscode-charts-blue); color: #fff; }
-.badge-admin { background: var(--vscode-charts-red); color: #fff; }
-.badge-verified { background: var(--vscode-charts-green); color: #fff; }
-.badge-unverified { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.badge-user {
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+.badge-sponsor {
+  background: var(--vscode-charts-purple);
+  color: #fff;
+}
+.badge-pro {
+  background: var(--vscode-charts-blue);
+  color: #fff;
+}
+.badge-admin {
+  background: var(--vscode-charts-red);
+  color: #fff;
+}
+.badge-verified {
+  background: var(--vscode-charts-green);
+  color: #fff;
+}
+.badge-unverified {
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
 
 /* Placeholder sections */
 .placeholder-section .section-description {
@@ -234,7 +252,10 @@ body {
 }
 
 /* Emails section */
-.badge-primary { background: var(--vscode-charts-blue); color: #fff; }
+.badge-primary {
+  background: var(--vscode-charts-blue);
+  color: #fff;
+}
 
 .email-list {
   display: flex;

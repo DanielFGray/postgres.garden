@@ -1,11 +1,11 @@
 <script lang="ts" setup>
-import type { Node } from "@/interfaces"
-import { NodeProp } from "@/enums"
-import { duration } from "@/filters"
+import type { Node } from "@/interfaces";
+import { NodeProp } from "@/enums";
+import { duration } from "@/filters";
 interface Props {
-  node: Node
+  node: Node;
 }
-defineProps<Props>()
+defineProps<Props>();
 </script>
 
 <template>

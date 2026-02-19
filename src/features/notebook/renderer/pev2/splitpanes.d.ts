@@ -1,17 +1,17 @@
 declare module "splitpanes" {
-  import { DefineComponent } from "vue"
+  import { DefineComponent } from "vue";
   export interface PaneProps {
-    size?: number | string
-    minSize?: number | string
-    maxSize?: number | string
+    size?: number | string;
+    minSize?: number | string;
+    maxSize?: number | string;
   }
 
   export interface SplitpanesProps {
-    horizontal?: boolean
-    pushOtherPanes?: boolean
-    dblClickSplitter?: boolean
-    rtl?: boolean
-    firstSplitter?: boolean
+    horizontal?: boolean;
+    pushOtherPanes?: boolean;
+    dblClickSplitter?: boolean;
+    rtl?: boolean;
+    firstSplitter?: boolean;
   }
 
   export interface SplitpanesEmits {
@@ -25,13 +25,9 @@ declare module "splitpanes" {
         | "pane-add"
         | "pane-remove"
         | "splitter-click",
-    ): void
+    ): void;
   }
 
-  export const Splitpanes: DefineComponent<
-    SplitpanesProps,
-    object,
-    SplitpanesEmits
-  >
-  export const Pane: DefineComponent<PaneProps>
+  export const Splitpanes: DefineComponent<SplitpanesProps, object, SplitpanesEmits>;
+  export const Pane: DefineComponent<PaneProps>;
 }

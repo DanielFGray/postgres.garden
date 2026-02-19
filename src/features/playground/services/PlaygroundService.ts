@@ -11,9 +11,11 @@ import type {
 } from "../types";
 
 export class PlaygroundService {
-  async listPlaygrounds(
-    options?: { sort?: string; offset?: number; limit?: number },
-  ): Promise<PlaygroundListItem[]> {
+  async listPlaygrounds(options?: {
+    sort?: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<PlaygroundListItem[]> {
     const { data, error } = await api("/api/playgrounds", {
       method: "GET",
       query: {
@@ -24,9 +26,7 @@ export class PlaygroundService {
     });
 
     if (error) {
-      throw new Error(
-        `Failed to list playgrounds: ${error.status} ${JSON.stringify(error.value)}`,
-      );
+      throw new Error(`Failed to list playgrounds: ${error.status} ${JSON.stringify(error.value)}`);
     }
 
     if (!data) {
@@ -44,9 +44,7 @@ export class PlaygroundService {
     });
 
     if (error) {
-      throw new Error(
-        `Failed to get playground: ${error.status} ${JSON.stringify(error.value)}`,
-      );
+      throw new Error(`Failed to get playground: ${error.status} ${JSON.stringify(error.value)}`);
     }
 
     if (!data) {
@@ -81,10 +79,7 @@ export class PlaygroundService {
     return result as unknown as Playground;
   }
 
-  async updatePlayground(
-    hash: string,
-    data: UpdatePlaygroundRequest,
-  ): Promise<Playground> {
+  async updatePlayground(hash: string, data: UpdatePlaygroundRequest): Promise<Playground> {
     const { data: result, error } = await api("/api/playgrounds/:hash", {
       method: "PUT",
       params: { hash },
@@ -129,9 +124,7 @@ export class PlaygroundService {
     });
 
     if (error) {
-      throw new Error(
-        `Failed to fork playground: ${error.status} ${JSON.stringify(error.value)}`,
-      );
+      throw new Error(`Failed to fork playground: ${error.status} ${JSON.stringify(error.value)}`);
     }
 
     if (!data) {

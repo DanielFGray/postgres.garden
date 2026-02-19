@@ -10,11 +10,7 @@ export class SQLSerializer implements vscode.NotebookSerializer {
 
     const cells = blocks.map((query) => {
       if (/^(---+|\/\*+\*\/)$/.test(query)) {
-        return new vscode.NotebookCellData(
-          vscode.NotebookCellKind.Markup,
-          "***",
-          "markdown",
-        );
+        return new vscode.NotebookCellData(vscode.NotebookCellKind.Markup, "***", "markdown");
       }
       if (query.startsWith("/*") && query.endsWith("*/")) {
         return new vscode.NotebookCellData(
@@ -24,11 +20,7 @@ export class SQLSerializer implements vscode.NotebookSerializer {
         );
       }
 
-      return new vscode.NotebookCellData(
-        vscode.NotebookCellKind.Code,
-        query,
-        "sql",
-      );
+      return new vscode.NotebookCellData(vscode.NotebookCellKind.Code, query, "sql");
     });
     return new vscode.NotebookData(cells);
   }
@@ -41,9 +33,7 @@ export class SQLSerializer implements vscode.NotebookSerializer {
           if (value === "***") return "---";
           const lines = value.split("\n");
           if (lines[0]?.trim().length === 0) return "";
-          const withCommentChars = lines
-            .map((line) => (!line ? " *" : " * " + line))
-            .join("\n");
+          const withCommentChars = lines.map((line) => (!line ? " *" : " * " + line)).join("\n");
           return `/*\n${withCommentChars}\n */`;
         })
         .join(DELIMITER),

@@ -1,28 +1,28 @@
 <script lang="ts" setup>
-import { inject, reactive } from "vue"
-import _ from "lodash"
-import type { Node, ViewOptions } from "@/interfaces"
-import { NodeProp, WorkerProp } from "@/enums"
-import { ViewOptionsKey } from "@/symbols"
-import { HelpService } from "@/services/help-service"
-import useNode from "@/node"
-import { formatNodeProp } from "@/filters"
-import { directive as vTippy } from "vue-tippy"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faExclamationTriangle } from "@fortawesome/free-solid-svg-icons"
-import { store } from "@/store"
+import { inject, reactive } from "vue";
+import _ from "lodash";
+import type { Node, ViewOptions } from "@/interfaces";
+import { NodeProp, WorkerProp } from "@/enums";
+import { ViewOptionsKey } from "@/symbols";
+import { HelpService } from "@/services/help-service";
+import useNode from "@/node";
+import { formatNodeProp } from "@/filters";
+import { directive as vTippy } from "vue-tippy";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
+import { faExclamationTriangle } from "@fortawesome/free-solid-svg-icons";
+import { store } from "@/store";
 
 interface Props {
-  node: Node
+  node: Node;
 }
-const props = defineProps<Props>()
-const node = reactive<Node>(props.node)
-const viewOptions = inject(ViewOptionsKey) as ViewOptions
+const props = defineProps<Props>();
+const node = reactive<Node>(props.node);
+const viewOptions = inject(ViewOptionsKey) as ViewOptions;
 
-const helpService = new HelpService()
-const getHelpMessage = helpService.getHelpMessage
+const helpService = new HelpService();
+const getHelpMessage = helpService.getHelpMessage;
 
-const { workersLaunchedCount, workersPlannedCount } = useNode(node, viewOptions)
+const { workersLaunchedCount, workersPlannedCount } = useNode(node, viewOptions);
 </script>
 <template>
   <!-- workers tab -->
@@ -80,10 +80,7 @@ const { workersLaunchedCount, workersPlannedCount } = useNode(node, viewOptions)
               <div class="col-6">
                 {{ key }}
               </div>
-              <div
-                class="col-6"
-                v-html="formatNodeProp(key as string, value)"
-              ></div>
+              <div class="col-6" v-html="formatNodeProp(key as string, value)"></div>
             </li>
           </template>
         </ul>

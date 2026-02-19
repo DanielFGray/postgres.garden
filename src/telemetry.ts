@@ -15,9 +15,7 @@ if (collectorUrl) {
       "service.name": "postgres-garden-web",
     }),
     spanProcessors: [
-      new BatchSpanProcessor(
-        new OTLPTraceExporter({ url: `${collectorUrl}/v1/traces` }),
-      ),
+      new BatchSpanProcessor(new OTLPTraceExporter({ url: `${collectorUrl}/v1/traces` })),
     ],
   });
 

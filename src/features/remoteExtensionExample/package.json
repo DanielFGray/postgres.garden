@@ -1,16 +1,10 @@
 {
   "name": "remote_extension_example",
-  "publisher": "codingame",
   "version": "1.0.0",
-  "activationEvents": [
-    "*"
-  ],
-  "engines": {
-    "vscode": "^1.77.0"
-  },
-  "l10n": "./l10n",
+  "publisher": "codingame",
   "main": "./main.js",
   "browser": "./main.js",
+  "l10n": "./l10n",
   "contributes": {
     "commands": [
       {
@@ -19,5 +13,11 @@
         "category": "Custom"
       }
     ]
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "engines": {
+    "vscode": "^1.77.0"
   }
 }

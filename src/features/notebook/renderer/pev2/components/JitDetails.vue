@@ -1,9 +1,9 @@
 <script lang="ts" setup>
-import type { JIT } from "@/interfaces"
+import type { JIT } from "@/interfaces";
 interface Props {
-  jit: JIT
+  jit: JIT;
 }
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 </script>
 
 <template>

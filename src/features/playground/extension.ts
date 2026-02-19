@@ -3,10 +3,7 @@
  */
 
 import * as vscode from "vscode";
-import {
-  registerExtension,
-  ExtensionHostKind,
-} from "@codingame/monaco-vscode-api/extensions";
+import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
 import { PlaygroundPanelProvider } from "./providers/PlaygroundPanelProvider";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundService } from "./services/PlaygroundService";
@@ -96,17 +93,12 @@ class PlaygroundMetadataItem extends vscode.TreeItem {
 }
 
 // TreeDataProvider for the metadata view
-class PlaygroundMetadataProvider
-  implements vscode.TreeDataProvider<PlaygroundMetadataItem>
-{
+class PlaygroundMetadataProvider implements vscode.TreeDataProvider<PlaygroundMetadataItem> {
   private _onDidChangeTreeData: vscode.EventEmitter<
     PlaygroundMetadataItem | undefined | null | void
-  > = new vscode.EventEmitter<
-    PlaygroundMetadataItem | undefined | null | void
-  >();
-  readonly onDidChangeTreeData: vscode.Event<
-    PlaygroundMetadataItem | undefined | null | void
-  > = this._onDidChangeTreeData.event;
+  > = new vscode.EventEmitter<PlaygroundMetadataItem | undefined | null | void>();
+  readonly onDidChangeTreeData: vscode.Event<PlaygroundMetadataItem | undefined | null | void> =
+    this._onDidChangeTreeData.event;
 
   constructor(private service: PlaygroundService) {}
 
@@ -118,9 +110,7 @@ class PlaygroundMetadataProvider
     return element;
   }
 
-  async getChildren(
-    element?: PlaygroundMetadataItem,
-  ): Promise<PlaygroundMetadataItem[]> {
+  async getChildren(element?: PlaygroundMetadataItem): Promise<PlaygroundMetadataItem[]> {
     if (element) {
       return [];
     }
@@ -141,17 +131,10 @@ class PlaygroundMetadataProvider
         new PlaygroundMetadataItem("Name", playground.name || "Untitled"),
         new PlaygroundMetadataItem(
           "Privacy",
-          playground.privacy.charAt(0).toUpperCase() +
-            playground.privacy.slice(1),
+          playground.privacy.charAt(0).toUpperCase() + playground.privacy.slice(1),
         ),
-        new PlaygroundMetadataItem(
-          "Description",
-          playground.description || undefined,
-        ),
-        new PlaygroundMetadataItem(
-          "Created",
-          new Date(playground.created_at).toLocaleDateString(),
-        ),
+        new PlaygroundMetadataItem("Description", playground.description || undefined),
+        new PlaygroundMetadataItem("Created", new Date(playground.created_at).toLocaleDateString()),
       ];
     } catch (error) {
       console.error("Failed to load playground metadata:", error);

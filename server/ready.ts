@@ -3,15 +3,13 @@ import type * as pg from "pg";
 import { rootPg, authPg } from "./db.js";
 import { valkey } from "./valkey.js";
 
-class PostgresNotReady extends Schema.TaggedError<PostgresNotReady>()(
-  "PostgresNotReady",
-  { message: Schema.String },
-) {}
+class PostgresNotReady extends Schema.TaggedError<PostgresNotReady>()("PostgresNotReady", {
+  message: Schema.String,
+}) {}
 
-class ValkeyNotReady extends Schema.TaggedError<ValkeyNotReady>()(
-  "ValkeyNotReady",
-  { message: Schema.String },
-) {}
+class ValkeyNotReady extends Schema.TaggedError<ValkeyNotReady>()("ValkeyNotReady", {
+  message: Schema.String,
+}) {}
 
 const retrySchedule = pipe(
   Schedule.exponential(Duration.millis(100)),
@@ -66,7 +64,6 @@ const waitForValkey = pipe(
   ),
 );
 
-export const waitForDependencies = Effect.all(
-  [waitForPostgres, waitForValkey],
-  { concurrency: "unbounded" },
-);
+export const waitForDependencies = Effect.all([waitForPostgres, waitForValkey], {
+  concurrency: "unbounded",
+});

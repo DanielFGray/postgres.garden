@@ -1,6 +1,6 @@
 /* tippy-bootstrap.css — VS Code theme-aware tooltips */
 
-.tippy-box[data-theme~='bootstrap'] {
+.tippy-box[data-theme~="bootstrap"] {
   background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
   border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
@@ -9,6 +9,6 @@
   font-size: var(--vscode-font-size);
 }
 
-.tippy-box[data-theme~='bootstrap'] > .tippy-arrow::before {
+.tippy-box[data-theme~="bootstrap"] > .tippy-arrow::before {
   color: var(--vscode-editorWidget-background, var(--vscode-editor-background));
 }

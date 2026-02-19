@@ -203,9 +203,7 @@ export class Router {
         return `/playgrounds/${params.playgroundId}`;
       case "commit":
         if (!params.playgroundId || !params.commitId) {
-          throw new Error(
-            "playgroundId and commitId are required for commit route",
-          );
+          throw new Error("playgroundId and commitId are required for commit route");
         }
         return `/playgrounds/${params.playgroundId}/commits/${params.commitId}`;
       default:

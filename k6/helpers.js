@@ -20,27 +20,21 @@ export function registerUser(i) {
 
   // Extract session cookie from Set-Cookie header
   const cookies = res.cookies;
-  const sessionCookie = cookies["session"]
-    ? cookies["session"][0].value
-    : null;
+  const sessionCookie = cookies["session"] ? cookies["session"][0].value : null;
 
   return { username, sessionCookie };
 }
 
 // Login and return the session cookie
 export function loginUser(id, password) {
-  const res = http.post(
-    `${BASE_URL}/login`,
-    JSON.stringify({ id, password }),
-    { headers: { "Content-Type": "application/json" } },
-  );
+  const res = http.post(`${BASE_URL}/login`, JSON.stringify({ id, password }), {
+    headers: { "Content-Type": "application/json" },
+  });
 
   check(res, { "login 200": (r) => r.status === 200 });
 
   const cookies = res.cookies;
-  const sessionCookie = cookies["session"]
-    ? cookies["session"][0].value
-    : null;
+  const sessionCookie = cookies["session"] ? cookies["session"][0].value : null;
 
   return sessionCookie;
 }

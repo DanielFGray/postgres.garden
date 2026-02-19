@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Production-only server entry point for standalone builds
- * 
+ *
  * This entry point is used when building with `bun build --compile`
  * It only imports production dependencies and avoids dev-only code like Vite
  */

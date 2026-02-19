@@ -1,88 +1,88 @@
-import { defineConfig } from 'vite'
-import { VitePWA } from 'vite-plugin-pwa'
-import importMetaUrlPlugin from '@codingame/esbuild-import-meta-url-plugin'
-import * as fs from 'fs'
-import path from 'path'
+import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
+import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
+import * as fs from "fs";
+import path from "path";
 
 export default defineConfig({
   server: {
     port: 3000,
-    host: '0.0.0.0',
+    host: "0.0.0.0",
     fs: {
-      allow: ['../'] // allow to load codicon.ttf from monaco-editor in the parent folder
-    }
+      allow: ["../"], // allow to load codicon.ttf from monaco-editor in the parent folder
+    },
   },
   build: {
-    target: 'esnext',
+    target: "esnext",
     emptyOutDir: false,
-    manifest: 'manifest.json', // Generate manifest.json in outDir root for production asset resolution
+    manifest: "manifest.json", // Generate manifest.json in outDir root for production asset resolution
   },
   worker: {
-    format: 'es'
+    format: "es",
   },
   plugins: [
     {
-      name: 'load-vscode-css-as-string',
-      enforce: 'pre',
+      name: "load-vscode-css-as-string",
+      enforce: "pre",
       async resolveId(source, importer, options) {
-        const resolved = await this.resolve(source, importer, options)
+        const resolved = await this.resolve(source, importer, options);
         if (
           resolved &&
           resolved.id.match(
-            /node_modules\/(@codingame\/monaco-vscode|vscode|monaco-editor).*\.css$/
+            /node_modules\/(@codingame\/monaco-vscode|vscode|monaco-editor).*\.css$/,
           )
         ) {
           return {
             ...resolved,
-            id: resolved.id + '?inline'
-          }
+            id: resolved.id + "?inline",
+          };
         }
-        return undefined
-      }
+        return undefined;
+      },
     },
     {
       // For the *-language-features extensions which use SharedArrayBuffer
-      name: 'configure-response-headers',
-      apply: 'serve',
+      name: "configure-response-headers",
+      apply: "serve",
       configureServer: (server) => {
         server.middlewares.use((_req, res, next) => {
-          res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
-          res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-          next()
-        })
-      }
+          res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+          res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+          res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+          next();
+        });
+      },
     },
     {
-      name: 'force-prevent-transform-assets',
-      apply: 'serve',
+      name: "force-prevent-transform-assets",
+      apply: "serve",
       configureServer(server) {
         return () => {
           server.middlewares.use(async (req, res, next) => {
             if (req.originalUrl != null) {
-              const pathname = new URL(req.originalUrl, import.meta.url).pathname
-              if (pathname.endsWith('.html')) {
-                res.setHeader('Content-Type', 'text/html')
-                res.writeHead(200)
-                res.write(fs.readFileSync(path.join(__dirname, pathname)))
-                res.end()
+              const pathname = new URL(req.originalUrl, import.meta.url).pathname;
+              if (pathname.endsWith(".html")) {
+                res.setHeader("Content-Type", "text/html");
+                res.writeHead(200);
+                res.write(fs.readFileSync(path.join(__dirname, pathname)));
+                res.end();
               }
             }
 
-            next()
-          })
-        }
-      }
+            next();
+          });
+        };
+      },
     },
     VitePWA({
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       injectRegister: false,
       manifest: false,
       injectManifest: {
         // Precache app shell only — JS is runtime-cached (CacheFirst) since it's content-hashed
-        globPatterns: ['**/*.{css,html,ico,svg,woff,woff2}'],
+        globPatterns: ["**/*.{css,html,ico,svg,woff,woff2}"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
       devOptions: {
@@ -91,7 +91,7 @@ export default defineConfig({
     }),
   ],
   esbuild: {
-    minifySyntax: false
+    minifySyntax: false,
   },
   optimizeDeps: {
     // This is require because vite excludes local dependencies from being optimized
@@ -111,14 +111,14 @@ export default defineConfig({
     ],
     exclude: ["@electric-sql/pglite", "@postgres-language-server/wasm"],
     esbuildOptions: {
-      tsconfig: './tsconfig.json',
-      plugins: [importMetaUrlPlugin]
-    }
+      tsconfig: "./tsconfig.json",
+      plugins: [importMetaUrlPlugin],
+    },
   },
   define: {
-    rootDirectory: JSON.stringify(__dirname)
+    rootDirectory: JSON.stringify(__dirname),
   },
   resolve: {
-    dedupe: ['vscode']
-  }
-})
+    dedupe: ["vscode"],
+  },
+});

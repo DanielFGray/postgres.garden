@@ -6,15 +6,15 @@ type BuildOptions = esbuild.BuildOptions;
 // Error types using Schema.TaggedError
 class BuildError extends Schema.TaggedError<BuildError>()("BuildError", {
   message: Schema.String,
-}) { }
+}) {}
 
 class ContextError extends Schema.TaggedError<ContextError>()("ContextError", {
   message: Schema.String,
-}) { }
+}) {}
 
 class WatchError extends Schema.TaggedError<WatchError>()("WatchError", {
   message: Schema.String,
-}) { }
+}) {}
 
 // For production builds, we need to explicitly define NODE_ENV
 // because esbuild inlines process.env.NODE_ENV at build time
@@ -29,9 +29,7 @@ const config: BuildOptions = {
   entryPoints: ["./server/prod-entry.ts"],
   sourcemap: true,
   // Define NODE_ENV for production builds to ensure isDev is correctly set
-  define: isProductionBuild
-    ? { "process.env.NODE_ENV": '"production"' }
-    : undefined,
+  define: isProductionBuild ? { "process.env.NODE_ENV": '"production"' } : undefined,
   plugins: [
     // {
     //   name: "rebuild-notify",
@@ -47,7 +45,7 @@ const config: BuildOptions = {
   ],
 };
 
-const runBuild = Effect.gen(function*() {
+const runBuild = Effect.gen(function* () {
   yield* Effect.log("Starting build...");
 
   const result = yield* Effect.tryPromise({
@@ -62,7 +60,7 @@ const runBuild = Effect.gen(function*() {
   return result;
 });
 
-const runWatch = Effect.gen(function*() {
+const runWatch = Effect.gen(function* () {
   yield* Effect.log("Starting watch mode...");
 
   const ctx = yield* Effect.tryPromise({
@@ -87,7 +85,7 @@ const runWatch = Effect.gen(function*() {
   yield* Effect.never;
 });
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const shouldWatch = process.argv.includes("--watch");
 
   yield* Effect.if(shouldWatch, {
@@ -100,23 +98,23 @@ const program = Effect.gen(function*() {
 program.pipe(
   Effect.catchTags({
     BuildError: (error) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         yield* Effect.logError(`Build failed: ${error.message}`);
         yield* Effect.fail(error);
       }),
     ContextError: (error) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         yield* Effect.logError(`Context creation failed: ${error.message}`);
         yield* Effect.fail(error);
       }),
     WatchError: (error) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         yield* Effect.logError(`Watch mode failed: ${error.message}`);
         yield* Effect.fail(error);
       }),
   }),
   Effect.catchAll((error) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       yield* Effect.logError("Unexpected error:");
       yield* Effect.logError(String(error));
       yield* Effect.fail(error);

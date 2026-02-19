@@ -4,13 +4,8 @@
     "target": "ESNext",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": [
-      "ESNext",
-      "DOM"
-    ],
-    "types": [
-      "node"
-    ],
+    "lib": ["ESNext", "DOM"],
+    "types": ["node"],
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "jsxImportSource": "fibrae",
@@ -42,16 +37,6 @@
       }
     ]
   },
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/features/notebook/renderer/pev2",
-    "src/sw.ts"
-  ],
-  "include": [
-    "src",
-    "server",
-    "lib",
-    "scripts"
-  ]
+  "exclude": ["node_modules", "dist", "src/features/notebook/renderer/pev2", "src/sw.ts"],
+  "include": ["src", "server", "lib", "scripts"]
 }

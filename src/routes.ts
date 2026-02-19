@@ -37,8 +37,7 @@ const patterns = {
  * Parse a URL and return route information
  */
 export function parseRoute(url: string | URL): Route | null {
-  const urlObj =
-    typeof url === "string" ? new URL(url, window.location.origin) : url;
+  const urlObj = typeof url === "string" ? new URL(url, window.location.origin) : url;
 
   // Try most specific routes first
   const commitMatch = patterns.commit.exec(urlObj);
@@ -106,9 +105,7 @@ export function buildPath(type: RouteType, params: RouteParams): string {
       return `/playgrounds/${params.playgroundId}`;
     case "commit":
       if (!params.playgroundId || !params.commitId) {
-        throw new Error(
-          "playgroundId and commitId are required for commit route",
-        );
+        throw new Error("playgroundId and commitId are required for commit route");
       }
       return `/playgrounds/${params.playgroundId}/commits/${params.commitId}`;
     default:

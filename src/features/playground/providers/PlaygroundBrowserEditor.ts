@@ -16,12 +16,8 @@ export class PlaygroundBrowserPanel {
   private _disposables: vscode.Disposable[] = [];
   private service: PlaygroundService;
 
-  public static createOrShow(
-    extensionUri: vscode.Uri,
-    service?: PlaygroundService,
-  ) {
-    const column =
-      vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
+  public static createOrShow(extensionUri: vscode.Uri, service?: PlaygroundService) {
+    const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
     // If we already have a panel, show it
     if (PlaygroundBrowserPanel.currentPanel) {
@@ -41,11 +37,7 @@ export class PlaygroundBrowserPanel {
       },
     );
 
-    PlaygroundBrowserPanel.currentPanel = new PlaygroundBrowserPanel(
-      panel,
-      extensionUri,
-      service,
-    );
+    PlaygroundBrowserPanel.currentPanel = new PlaygroundBrowserPanel(panel, extensionUri, service);
   }
 
   private constructor(
@@ -225,8 +217,7 @@ export class PlaygroundBrowserPanel {
 
 function getNonce() {
   let text = "";
-  const possible =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   for (let i = 0; i < 32; i++) {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }

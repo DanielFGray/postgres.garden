@@ -56,16 +56,16 @@ export const AccountSettings = () =>
             <button
               key={section.id}
               class={`nav-item ${activeSection === section.id ? "nav-item-active" : ""}`}
-              onClick={() => { registry.set(activeSectionAtom, section.id); }}
+              onClick={() => {
+                registry.set(activeSectionAtom, section.id);
+              }}
             >
               <i class={`codicon ${section.icon}`} />
               <span>{section.label}</span>
             </button>
           ))}
         </nav>
-        <main class="settings-content">
-          {renderSection(activeSection)}
-        </main>
+        <main class="settings-content">{renderSection(activeSection)}</main>
       </div>
     );
   });

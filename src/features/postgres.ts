@@ -1,9 +1,6 @@
 import * as vscode from "vscode";
 import { PGliteService } from "./pglite";
-import {
-  ExtensionHostKind,
-  registerExtension,
-} from "@codingame/monaco-vscode-api/extensions";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import { DatabaseExplorerProvider } from "./introspection.js";
 import {
   PGLITE_RESET,
@@ -62,8 +59,7 @@ const ext = registerExtension(
             {
               id: "choose-example",
               title: "Choose Your Starting Example",
-              description:
-                "[Empty Playground](command:pg-playground.createEmpty)",
+              description: "[Empty Playground](command:pg-playground.createEmpty)",
               media: {
                 markdown: "media/examples-overview.md",
               },
@@ -243,18 +239,12 @@ const ext = registerExtension(
 // CSS is inlined into the JS bundle and injected into the Shadow DOM at runtime.
 ext.registerFileUrl(
   "renderer/index",
-  new URL(
-    "./notebook/renderer-dist/sql-renderer.js",
-    import.meta.url,
-  ).toString(),
+  new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
 );
 
 ext.registerFileUrl(
   "renderer/index.js",
-  new URL(
-    "./notebook/renderer-dist/sql-renderer.js",
-    import.meta.url,
-  ).toString(),
+  new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
 );
 
 // PostgreSQL language support (replaces @codingame/monaco-vscode-sql-default-extension)
@@ -269,9 +259,7 @@ ext.registerFileUrl(
 );
 
 void ext.getApi().then(async (vscode) => {
-  console.log(
-    "[TEST READY] VSCode API initialized, setting window.vscode and window.vscodeReady",
-  );
+  console.log("[TEST READY] VSCode API initialized, setting window.vscode and window.vscodeReady");
   window.vscode = vscode;
   window.vscodeReady = Promise.resolve(vscode);
   console.log("[TEST READY] window.vscodeReady is now set");
@@ -290,19 +278,13 @@ void ext.getApi().then(async (vscode) => {
   // Register notebook serializers FIRST - before loading workspace
   // This ensures .md and .sql files can be opened as notebooks
   subscriptions.push(
-    vscode.workspace.registerNotebookSerializer(
-      "markdown-notebook",
-      new MarkdownSerializer(),
-    ),
+    vscode.workspace.registerNotebookSerializer("markdown-notebook", new MarkdownSerializer()),
   );
   const controller1 = new SQLNotebookExecutionController("markdown-notebook");
   subscriptions.push(controller1);
 
   subscriptions.push(
-    vscode.workspace.registerNotebookSerializer(
-      "sql-notebook",
-      new SQLSerializer(),
-    ),
+    vscode.workspace.registerNotebookSerializer("sql-notebook", new SQLSerializer()),
   );
   const controller2 = new SQLNotebookExecutionController("sql-notebook");
   subscriptions.push(controller2);
@@ -340,64 +322,52 @@ void ext.getApi().then(async (vscode) => {
   const queryOpts = {};
 
   subscriptions.push(
-    vscode.commands.registerCommand(
-      DATABASE_MIGRATE,
-      async function migrate(): Promise<void> {
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        if (!folder) return;
-        const uris = (
-          await findFiles(folder.uri, ([f]) => /\/\d+[^/]+\.sql$/.test(f.path))
-        ).sort((a, b) => a.path.localeCompare(b.path));
-        if (!uris.length) {
-          await vscode.window.showInformationMessage(
-            "No migration files detected",
-          );
-          return;
-        }
-        const files = await Promise.all(
-          uris.map(async (f) => {
-            const raw = await vscode.workspace.fs.readFile(f);
-            return new TextDecoder().decode(raw);
-          }),
-        );
-        for (const sql of files) {
-          await vscode.commands.executeCommand(PGLITE_EXECUTE, sql);
-        }
-        vscode.commands.executeCommand(PGLITE_INTROSPECT);
-        vscode.window.showInformationMessage(
-          `finished ${uris.length} migrations`,
-        );
-      },
-    ),
+    vscode.commands.registerCommand(DATABASE_MIGRATE, async function migrate(): Promise<void> {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) return;
+      const uris = (await findFiles(folder.uri, ([f]) => /\/\d+[^/]+\.sql$/.test(f.path))).sort(
+        (a, b) => a.path.localeCompare(b.path),
+      );
+      if (!uris.length) {
+        await vscode.window.showInformationMessage("No migration files detected");
+        return;
+      }
+      const files = await Promise.all(
+        uris.map(async (f) => {
+          const raw = await vscode.workspace.fs.readFile(f);
+          return new TextDecoder().decode(raw);
+        }),
+      );
+      for (const sql of files) {
+        await vscode.commands.executeCommand(PGLITE_EXECUTE, sql);
+      }
+      vscode.commands.executeCommand(PGLITE_INTROSPECT);
+      vscode.window.showInformationMessage(`finished ${uris.length} migrations`);
+    }),
   );
 
   subscriptions.push(
-    vscode.commands.registerCommand(
-      PGLITE_EXECUTE,
-      async function exec(sql: string) {
-        try {
-          const result = await pgliteService.exec(sql, queryOpts);
-          result.forEach((stmt) => {
-            pgliteOutputChannel.appendLine(stmt.statement);
-          });
-          if (
-            result.some((r) =>
-              ["CREATE", "ALTER", "DROP"].some((stmt) =>
-                r.statement.startsWith(stmt),
-              ),
-            )
-          ) {
-            vscode.commands.executeCommand(PGLITE_INTROSPECT);
-          }
-          return result;
-        } catch (error) {
-          pgliteOutputChannel.appendLine(
-            `Error: ${(error as Error)?.message ?? JSON.stringify(error)}`,
-          );
-          return [{ error, statement: sql }];
+    vscode.commands.registerCommand(PGLITE_EXECUTE, async function exec(sql: string) {
+      try {
+        const result = await pgliteService.exec(sql, queryOpts);
+        result.forEach((stmt) => {
+          pgliteOutputChannel.appendLine(stmt.statement);
+        });
+        if (
+          result.some((r) =>
+            ["CREATE", "ALTER", "DROP"].some((stmt) => r.statement.startsWith(stmt)),
+          )
+        ) {
+          vscode.commands.executeCommand(PGLITE_INTROSPECT);
         }
-      },
-    ),
+        return result;
+      } catch (error) {
+        pgliteOutputChannel.appendLine(
+          `Error: ${(error as Error)?.message ?? JSON.stringify(error)}`,
+        );
+        return [{ error, statement: sql }];
+      }
+    }),
   );
 
   subscriptions.push(
@@ -405,12 +375,8 @@ void ext.getApi().then(async (vscode) => {
       pgliteOutputChannel.replace("restarting postgres\n");
       await pgliteService.reset();
       vscode.commands.executeCommand(PGLITE_INTROSPECT);
-      const { rows } = await pgliteService.query<{ version: string }>(
-        "select version()",
-      );
-      pgliteOutputChannel.appendLine(
-        rows[0]?.version ?? "failed fetching version",
-      );
+      const { rows } = await pgliteService.query<{ version: string }>("select version()");
+      pgliteOutputChannel.appendLine(rows[0]?.version ?? "failed fetching version");
     }),
   );
 
@@ -435,46 +401,40 @@ void ext.getApi().then(async (vscode) => {
 
   // Download workspace as zip
   subscriptions.push(
-    vscode.commands.registerCommand(
-      WORKSPACE_DOWNLOAD,
-      async function downloadWorkspace() {
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        if (!folder) return;
+    vscode.commands.registerCommand(WORKSPACE_DOWNLOAD, async function downloadWorkspace() {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) return;
 
-        const uris = await findFiles(folder.uri);
-        if (uris.length === 0) {
-          void vscode.window.showInformationMessage("No files to download.");
-          return;
-        }
+      const uris = await findFiles(folder.uri);
+      if (uris.length === 0) {
+        void vscode.window.showInformationMessage("No files to download.");
+        return;
+      }
 
-        const entries = await Promise.all(
-          uris.map(async (uri) => {
-            const content = await vscode.workspace.fs.readFile(uri);
-            const relativePath = uri.path.replace(/^\/workspace\//, "");
-            return { name: relativePath, input: content };
-          }),
-        );
+      const entries = await Promise.all(
+        uris.map(async (uri) => {
+          const content = await vscode.workspace.fs.readFile(uri);
+          const relativePath = uri.path.replace(/^\/workspace\//, "");
+          return { name: relativePath, input: content };
+        }),
+      );
 
-        const { downloadZip } = await import("client-zip");
-        const blob = await downloadZip(entries).blob();
-        const name = getCurrentPlaygroundId() ?? "workspace";
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${name}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-      },
-    ),
+      const { downloadZip } = await import("client-zip");
+      const blob = await downloadZip(entries).blob();
+      const name = getCurrentPlaygroundId() ?? "workspace";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }),
   );
 
   // ERD panel
   subscriptions.push(
     vscode.commands.registerCommand(ERD_SHOW, () => {
-      ERDPanelProvider.createOrShow(
-        vscode.Uri.parse(window.location.origin),
-        pgliteService,
-      );
+      ERDPanelProvider.createOrShow(vscode.Uri.parse(window.location.origin), pgliteService);
     }),
   );
 });

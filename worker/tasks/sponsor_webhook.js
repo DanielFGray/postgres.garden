@@ -21,9 +21,7 @@ export default async (payload, { withPgClient }) => {
   );
 
   if (rows.length === 0) {
-    console.warn(
-      `sponsor_webhook: no user found for GitHub login "${login}"`,
-    );
+    console.warn(`sponsor_webhook: no user found for GitHub login "${login}"`);
     return;
   }
 
@@ -39,9 +37,7 @@ export default async (payload, { withPgClient }) => {
         [userId],
       ),
     );
-    console.log(
-      `sponsor_webhook: upgraded user ${userId} (${login}) to sponsor`,
-    );
+    console.log(`sponsor_webhook: upgraded user ${userId} (${login}) to sponsor`);
   } else if (action === "cancelled") {
     // Downgrade to user (but don't downgrade admins or pro users)
     await withPgClient((client) =>
@@ -52,8 +48,6 @@ export default async (payload, { withPgClient }) => {
         [userId],
       ),
     );
-    console.log(
-      `sponsor_webhook: downgraded user ${userId} (${login}) to user`,
-    );
+    console.log(`sponsor_webhook: downgraded user ${userId} (${login}) to user`);
   }
 };

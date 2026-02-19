@@ -1,8 +1,5 @@
 import * as vscode from "vscode";
-import {
-  registerExtension,
-  ExtensionHostKind,
-} from "@codingame/monaco-vscode-api/extensions";
+import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
 
 export type NetworkState = "online" | "offline";
 
@@ -10,8 +7,7 @@ let currentState: NetworkState = navigator.onLine ? "online" : "offline";
 
 const emitter = new vscode.EventEmitter<NetworkState>();
 
-export const onDidChangeNetworkState: vscode.Event<NetworkState> =
-  emitter.event;
+export const onDidChangeNetworkState: vscode.Event<NetworkState> = emitter.event;
 
 export function getNetworkState(): NetworkState {
   return currentState;

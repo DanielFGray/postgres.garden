@@ -35,8 +35,7 @@ export function ExplainView({ data }: ExplainViewProps) {
 
         if (data.rows.length > 0) {
           const firstRow = data.rows[0]!;
-          const planField =
-            firstRow["QUERY PLAN"] ?? firstRow["query plan"] ?? firstRow["Plan"];
+          const planField = firstRow["QUERY PLAN"] ?? firstRow["query plan"] ?? firstRow["Plan"];
 
           if (planField !== undefined) {
             if (typeof planField === "object" || Array.isArray(planField)) {
@@ -48,18 +47,13 @@ export function ExplainView({ data }: ExplainViewProps) {
               planSource = planField;
             } else {
               planSource = data.rows
-                .map(
-                  (row) =>
-                    row["QUERY PLAN"] ?? row["query plan"] ?? Object.values(row)[0]
-                )
+                .map((row) => row["QUERY PLAN"] ?? row["query plan"] ?? Object.values(row)[0])
                 .join("\n");
             }
           } else {
             const firstValue = Object.values(firstRow)[0];
             if (typeof firstValue === "string") {
-              planSource = data.rows
-                .map((row) => Object.values(row)[0])
-                .join("\n");
+              planSource = data.rows.map((row) => Object.values(row)[0]).join("\n");
             } else if (typeof firstValue === "object") {
               planSource = JSON.stringify(firstValue, null, 2);
             }

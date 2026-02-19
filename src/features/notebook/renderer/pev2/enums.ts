@@ -21,10 +21,10 @@ export enum BufferType {
 }
 
 export class HighlightType {
-  public static NONE = "none"
-  public static DURATION = "duration"
-  public static ROWS = "rows"
-  public static COST = "cost"
+  public static NONE = "none";
+  public static DURATION = "duration";
+  public static ROWS = "rows";
+  public static COST = "cost";
 }
 
 export enum SortDirection {
@@ -204,111 +204,105 @@ export enum PropType {
   jit,
 }
 
-export const nodePropTypes: { [key: string]: PropType } = {}
+export const nodePropTypes: { [key: string]: PropType } = {};
 
-nodePropTypes[NodeProp.ACTUAL_ROWS] = PropType.rows
-nodePropTypes[NodeProp.ACTUAL_LOOPS] = PropType.loops
-nodePropTypes[NodeProp.PLAN_ROWS] = PropType.rows
-nodePropTypes[NodeProp.PLAN_WIDTH] = PropType.bytes
-nodePropTypes[NodeProp.ACTUAL_ROWS_REVISED] = PropType.rows
-nodePropTypes[NodeProp.ACTUAL_ROWS_FRACTIONAL] = PropType.boolean
-nodePropTypes[NodeProp.PLAN_ROWS_REVISED] = PropType.rows
-nodePropTypes[NodeProp.ACTUAL_TOTAL_TIME] = PropType.duration
-nodePropTypes[NodeProp.ACTUAL_STARTUP_TIME] = PropType.duration
-nodePropTypes[NodeProp.STARTUP_COST] = PropType.cost
-nodePropTypes[NodeProp.TOTAL_COST] = PropType.cost
-nodePropTypes[NodeProp.PARALLEL_AWARE] = PropType.boolean
-nodePropTypes[NodeProp.WORKERS] = PropType.json
-nodePropTypes[NodeProp.SORT_SPACE_USED] = PropType.kilobytes
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_FILTER] = PropType.rows
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER] = PropType.rows
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_FILTER_REVISED] = PropType.rows
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER_REVISED] = PropType.rows
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK] = PropType.rows
-nodePropTypes[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK_REVISED] = PropType.rows
-nodePropTypes[NodeProp.HEAP_FETCHES] = PropType.rows
-nodePropTypes[NodeProp.OUTPUT] = PropType.list
-nodePropTypes[NodeProp.SORT_KEY] = PropType.list
-nodePropTypes[NodeProp.PRESORTED_KEY] = PropType.list
-nodePropTypes[NodeProp.WAL_RECORDS] = PropType.rows
-nodePropTypes[NodeProp.WAL_BYTES] = PropType.bytes
-nodePropTypes[NodeProp.WAL_FPI] = PropType.rows
+nodePropTypes[NodeProp.ACTUAL_ROWS] = PropType.rows;
+nodePropTypes[NodeProp.ACTUAL_LOOPS] = PropType.loops;
+nodePropTypes[NodeProp.PLAN_ROWS] = PropType.rows;
+nodePropTypes[NodeProp.PLAN_WIDTH] = PropType.bytes;
+nodePropTypes[NodeProp.ACTUAL_ROWS_REVISED] = PropType.rows;
+nodePropTypes[NodeProp.ACTUAL_ROWS_FRACTIONAL] = PropType.boolean;
+nodePropTypes[NodeProp.PLAN_ROWS_REVISED] = PropType.rows;
+nodePropTypes[NodeProp.ACTUAL_TOTAL_TIME] = PropType.duration;
+nodePropTypes[NodeProp.ACTUAL_STARTUP_TIME] = PropType.duration;
+nodePropTypes[NodeProp.STARTUP_COST] = PropType.cost;
+nodePropTypes[NodeProp.TOTAL_COST] = PropType.cost;
+nodePropTypes[NodeProp.PARALLEL_AWARE] = PropType.boolean;
+nodePropTypes[NodeProp.WORKERS] = PropType.json;
+nodePropTypes[NodeProp.SORT_SPACE_USED] = PropType.kilobytes;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_FILTER] = PropType.rows;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER] = PropType.rows;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_FILTER_REVISED] = PropType.rows;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_JOIN_FILTER_REVISED] = PropType.rows;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK] = PropType.rows;
+nodePropTypes[NodeProp.ROWS_REMOVED_BY_INDEX_RECHECK_REVISED] = PropType.rows;
+nodePropTypes[NodeProp.HEAP_FETCHES] = PropType.rows;
+nodePropTypes[NodeProp.OUTPUT] = PropType.list;
+nodePropTypes[NodeProp.SORT_KEY] = PropType.list;
+nodePropTypes[NodeProp.PRESORTED_KEY] = PropType.list;
+nodePropTypes[NodeProp.WAL_RECORDS] = PropType.rows;
+nodePropTypes[NodeProp.WAL_BYTES] = PropType.bytes;
+nodePropTypes[NodeProp.WAL_FPI] = PropType.rows;
 
-nodePropTypes[NodeProp.EXCLUSIVE_DURATION] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_COST] = PropType.cost
+nodePropTypes[NodeProp.EXCLUSIVE_DURATION] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_COST] = PropType.cost;
 
-nodePropTypes[NodeProp.PLANNER_ESTIMATE_FACTOR] = PropType.factor
-nodePropTypes[NodeProp.PLANNER_ESTIMATE_DIRECTION] = PropType.estimateDirection
+nodePropTypes[NodeProp.PLANNER_ESTIMATE_FACTOR] = PropType.factor;
+nodePropTypes[NodeProp.PLANNER_ESTIMATE_DIRECTION] = PropType.estimateDirection;
 
-nodePropTypes[NodeProp.IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.SUM_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.SUM_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.AVERAGE_SUM_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.AVERAGE_SUM_IO_WRITE_SPEED] = PropType.transferRate
+nodePropTypes[NodeProp.IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.SUM_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.SUM_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.AVERAGE_SUM_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.AVERAGE_SUM_IO_WRITE_SPEED] = PropType.transferRate;
 
-nodePropTypes[NodeProp.IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.AVERAGE_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.AVERAGE_IO_WRITE_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.SHARED_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.SHARED_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.AVERAGE_SHARED_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.AVERAGE_SHARED_IO_WRITE_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.LOCAL_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.LOCAL_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.AVERAGE_LOCAL_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.AVERAGE_LOCAL_IO_WRITE_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.TEMP_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.TEMP_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.AVERAGE_TEMP_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.AVERAGE_TEMP_IO_WRITE_SPEED] = PropType.transferRate
+nodePropTypes[NodeProp.IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.AVERAGE_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.AVERAGE_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.SHARED_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.SHARED_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.AVERAGE_SHARED_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.AVERAGE_SHARED_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.LOCAL_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.LOCAL_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.AVERAGE_LOCAL_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.AVERAGE_LOCAL_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.TEMP_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.TEMP_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.AVERAGE_TEMP_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.AVERAGE_TEMP_IO_WRITE_SPEED] = PropType.transferRate;
 
-nodePropTypes[NodeProp.EXCLUSIVE_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_IO_READ_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_IO_WRITE_SPEED] = PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_READ_SPEED] =
-  PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_WRITE_SPEED] =
-  PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_READ_SPEED] =
-  PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_WRITE_SPEED] =
-  PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_TEMP_IO_READ_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_TEMP_IO_WRITE_TIME] = PropType.duration
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_READ_SPEED] =
-  PropType.transferRate
-nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_WRITE_SPEED] =
-  PropType.transferRate
+nodePropTypes[NodeProp.EXCLUSIVE_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_SHARED_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_LOCAL_IO_WRITE_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_TEMP_IO_READ_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_TEMP_IO_WRITE_TIME] = PropType.duration;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_READ_SPEED] = PropType.transferRate;
+nodePropTypes[NodeProp.EXCLUSIVE_AVERAGE_TEMP_IO_WRITE_SPEED] = PropType.transferRate;
 
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS] = PropType.blocks
-nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS] = PropType.blocks
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_HIT_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_READ_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_DIRTIED_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_SHARED_WRITTEN_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_TEMP_READ_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_TEMP_WRITTEN_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_HIT_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_READ_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_DIRTIED_BLOCKS] = PropType.blocks;
+nodePropTypes[NodeProp.EXCLUSIVE_LOCAL_WRITTEN_BLOCKS] = PropType.blocks;
 
-nodePropTypes[NodeProp.FULL_SORT_GROUPS] = PropType.sortGroups
-nodePropTypes[NodeProp.PRE_SORTED_GROUPS] = PropType.sortGroups
+nodePropTypes[NodeProp.FULL_SORT_GROUPS] = PropType.sortGroups;
+nodePropTypes[NodeProp.PRE_SORTED_GROUPS] = PropType.sortGroups;
 
-nodePropTypes[NodeProp.JIT] = PropType.jit
+nodePropTypes[NodeProp.JIT] = PropType.jit;
 
 export class WorkerProp {
   // plan property keys
-  public static WORKER_NUMBER = "Worker Number"
+  public static WORKER_NUMBER = "Worker Number";
 }
 
-nodePropTypes[WorkerProp.WORKER_NUMBER] = PropType.increment
+nodePropTypes[WorkerProp.WORKER_NUMBER] = PropType.increment;
 
 export enum SortGroupsProp {
   GROUP_COUNT = "Group Count",

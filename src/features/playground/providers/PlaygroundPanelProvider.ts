@@ -27,8 +27,7 @@ export class PlaygroundPanelProvider {
     playgroundId: string,
     service?: PlaygroundService,
   ) {
-    const column =
-      vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
+    const column = vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
 
     // Check if we already have a panel for this playground
     const existingPanel = PlaygroundPanelProvider.panels.get(playgroundId);
@@ -45,25 +44,13 @@ export class PlaygroundPanelProvider {
       {
         enableScripts: true,
         localResourceRoots: [
-          vscode.Uri.joinPath(
-            extensionUri,
-            "src",
-            "features",
-            "playground",
-            "webview",
-            "panel",
-          ),
+          vscode.Uri.joinPath(extensionUri, "src", "features", "playground", "webview", "panel"),
         ],
         retainContextWhenHidden: true,
       },
     );
 
-    const provider = new PlaygroundPanelProvider(
-      panel,
-      extensionUri,
-      playgroundId,
-      service,
-    );
+    const provider = new PlaygroundPanelProvider(panel, extensionUri, playgroundId, service);
     PlaygroundPanelProvider.panels.set(playgroundId, provider);
   }
 
@@ -134,22 +121,15 @@ export class PlaygroundPanelProvider {
     }
   }
 
-  private async _updateMetadata(data: {
-    name?: string;
-    description?: string;
-    privacy?: string;
-  }) {
+  private async _updateMetadata(data: { name?: string; description?: string; privacy?: string }) {
     if (!this.playground) return;
 
     try {
-      this.playground = await this.service.updatePlayground(
-        this.playground.hash,
-        {
-          name: data.name,
-          description: data.description,
-          privacy: data.privacy as Privacy,
-        },
-      );
+      this.playground = await this.service.updatePlayground(this.playground.hash, {
+        name: data.name,
+        description: data.description,
+        privacy: data.privacy as Privacy,
+      });
 
       this._panel.title = this.playground.name ?? "Untitled";
 
@@ -234,8 +214,7 @@ export class PlaygroundPanelProvider {
 
 function getNonce() {
   let text = "";
-  const possible =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   for (let i = 0; i < 32; i++) {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }

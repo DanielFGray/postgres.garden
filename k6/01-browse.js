@@ -54,12 +54,10 @@ export default function () {
   try {
     const playgrounds = listRes.json();
     if (Array.isArray(playgrounds) && playgrounds.length > 0) {
-      const random =
-        playgrounds[Math.floor(Math.random() * playgrounds.length)];
-      const detailRes = http.get(
-        `${BASE_URL}/api/playgrounds/${random.hash}`,
-        { tags: { name: "GET /api/playgrounds/:hash" } },
-      );
+      const random = playgrounds[Math.floor(Math.random() * playgrounds.length)];
+      const detailRes = http.get(`${BASE_URL}/api/playgrounds/${random.hash}`, {
+        tags: { name: "GET /api/playgrounds/:hash" },
+      });
       detailDuration.add(detailRes.timings.duration);
       const detailOk = check(detailRes, {
         "detail 200": (r) => r.status === 200,
@@ -67,10 +65,9 @@ export default function () {
       if (!detailOk) errors.add(1);
 
       // 3. Fetch commits for that playground
-      const commitsRes = http.get(
-        `${BASE_URL}/api/playgrounds/${random.hash}/commits`,
-        { tags: { name: "GET /api/playgrounds/:hash/commits" } },
-      );
+      const commitsRes = http.get(`${BASE_URL}/api/playgrounds/${random.hash}/commits`, {
+        tags: { name: "GET /api/playgrounds/:hash/commits" },
+      });
       check(commitsRes, {
         "commits 200": (r) => r.status === 200,
       });
@@ -80,9 +77,7 @@ export default function () {
   }
 
   // 3. Also hit the sorted-by-stars variant
-  const starsRes = http.get(
-    `${BASE_URL}/api/playgrounds?sort=stars`,
-  );
+  const starsRes = http.get(`${BASE_URL}/api/playgrounds?sort=stars`);
   check(starsRes, { "stars sort 200": (r) => r.status === 200 });
 
   sleep(Math.random() * 2 + 0.5); // 0.5-2.5s think time

@@ -119,7 +119,9 @@ export const EmailsSection = () =>
         <div class="section-error">
           <i class="codicon codicon-error" />
           <span>{error}</span>
-          <button class="button" onClick={() => loadEmails(registry)}>Retry</button>
+          <button class="button" onClick={() => loadEmails(registry)}>
+            Retry
+          </button>
         </div>
       );
     }
@@ -143,9 +145,7 @@ export const EmailsSection = () =>
               <div class="field-value email-row">
                 <span class="email-address">{email.email}</span>
                 <span class="email-badges">
-                  {email.is_primary && (
-                    <span class="badge badge-primary">Primary</span>
-                  )}
+                  {email.is_primary && <span class="badge badge-primary">Primary</span>}
                   {email.is_verified ? (
                     <span class="badge badge-verified">
                       <i class="codicon codicon-verified-filled" /> Verified
@@ -202,11 +202,7 @@ export const EmailsSection = () =>
                 }}
                 disabled={addingEmail}
               />
-              <button
-                type="submit"
-                class="button"
-                disabled={addingEmail || !newEmail.trim()}
-              >
+              <button type="submit" class="button" disabled={addingEmail || !newEmail.trim()}>
                 Add
               </button>
             </div>

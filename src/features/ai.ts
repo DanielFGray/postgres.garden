@@ -1,7 +1,4 @@
-import {
-  ExtensionHostKind,
-  registerExtension,
-} from "@codingame/monaco-vscode-api/extensions";
+import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 
 const ext = registerExtension(
   {
@@ -34,18 +31,15 @@ void ext.getApi().then((vscode) => {
       modal: true,
     });
   });
-  vscode.ai.registerRelatedInformationProvider(
-    vscode.RelatedInformationType.CommandInformation,
-    {
-      provideRelatedInformation() {
-        return [
-          {
-            type: vscode.RelatedInformationType.CommandInformation,
-            command: "aiSuggestedCommand",
-            weight: 9999,
-          },
-        ];
-      },
+  vscode.ai.registerRelatedInformationProvider(vscode.RelatedInformationType.CommandInformation, {
+    provideRelatedInformation() {
+      return [
+        {
+          type: vscode.RelatedInformationType.CommandInformation,
+          command: "aiSuggestedCommand",
+          weight: 9999,
+        },
+      ];
     },
-  );
+  });
 });

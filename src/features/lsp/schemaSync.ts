@@ -40,7 +40,11 @@ const PglsTable = S.Struct({
 });
 
 const ColumnClassKind = S.Literal(
-  "OrdinaryTable", "View", "MaterializedView", "ForeignTable", "PartitionedTable",
+  "OrdinaryTable",
+  "View",
+  "MaterializedView",
+  "ForeignTable",
+  "PartitionedTable",
 );
 
 const PglsColumn = S.Struct({
@@ -111,43 +115,65 @@ export type SchemaCache = typeof SchemaCache.Type;
 
 // ─── Transform pg-introspection → PGLS SchemaCache ──────────────────────────
 
-const SYSTEM_SCHEMAS = new Set([
-  "pg_catalog", "pg_toast", "information_schema",
-]);
+const SYSTEM_SCHEMAS = new Set(["pg_catalog", "pg_toast", "information_schema"]);
 
-function relkindToTableKind(relkind: string): "Ordinary" | "View" | "MaterializedView" | "Partitioned" {
+function relkindToTableKind(
+  relkind: string,
+): "Ordinary" | "View" | "MaterializedView" | "Partitioned" {
   switch (relkind) {
-    case "v": return "View";
-    case "m": return "MaterializedView";
-    case "p": return "Partitioned";
-    default: return "Ordinary";
+    case "v":
+      return "View";
+    case "m":
+      return "MaterializedView";
+    case "p":
+      return "Partitioned";
+    default:
+      return "Ordinary";
   }
 }
 
-function relkindToClassKind(relkind: string): "OrdinaryTable" | "View" | "MaterializedView" | "ForeignTable" | "PartitionedTable" {
+function relkindToClassKind(
+  relkind: string,
+): "OrdinaryTable" | "View" | "MaterializedView" | "ForeignTable" | "PartitionedTable" {
   switch (relkind) {
-    case "v": return "View";
-    case "m": return "MaterializedView";
-    case "f": return "ForeignTable";
-    case "p": return "PartitionedTable";
-    default: return "OrdinaryTable";
+    case "v":
+      return "View";
+    case "m":
+      return "MaterializedView";
+    case "f":
+      return "ForeignTable";
+    case "p":
+      return "PartitionedTable";
+    default:
+      return "OrdinaryTable";
   }
 }
 
-function prokindToPglsKind(prokind: string | null | undefined): "Function" | "Aggregate" | "Window" | "Procedure" {
+function prokindToPglsKind(
+  prokind: string | null | undefined,
+): "Function" | "Aggregate" | "Window" | "Procedure" {
   switch (prokind) {
-    case "a": return "Aggregate";
-    case "w": return "Window";
-    case "p": return "Procedure";
-    default: return "Function";
+    case "a":
+      return "Aggregate";
+    case "w":
+      return "Window";
+    case "p":
+      return "Procedure";
+    default:
+      return "Function";
   }
 }
 
-function provolatileToBehavior(provolatile: string | null | undefined): "Immutable" | "Stable" | "Volatile" {
+function provolatileToBehavior(
+  provolatile: string | null | undefined,
+): "Immutable" | "Stable" | "Volatile" {
   switch (provolatile) {
-    case "i": return "Immutable";
-    case "s": return "Stable";
-    default: return "Volatile";
+    case "i":
+      return "Immutable";
+    case "s":
+      return "Stable";
+    default:
+      return "Volatile";
   }
 }
 
@@ -157,7 +183,10 @@ function provolatileToBehavior(provolatile: string | null | undefined): "Immutab
  */
 export function toSchemaCache(introspection: Introspection): SchemaCache {
   const userNamespaces = introspection.namespaces.filter(
-    (n) => !SYSTEM_SCHEMAS.has(n.nspname) && !n.nspname.startsWith("pg_temp_") && !n.nspname.startsWith("pg_toast_temp_"),
+    (n) =>
+      !SYSTEM_SCHEMAS.has(n.nspname) &&
+      !n.nspname.startsWith("pg_temp_") &&
+      !n.nspname.startsWith("pg_toast_temp_"),
   );
 
   const nsIdSet = new Set(userNamespaces.map((n) => n._id));
@@ -230,7 +259,9 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
     .filter((attr) => {
       if (attr.attnum < 1 || attr.attisdropped) return false;
       const cls = introspection.classes.find((c) => c._id === attr.attrelid);
-      return cls ? nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind) : false;
+      return cls
+        ? nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind)
+        : false;
     })
     .map((attr) => {
       const cls = introspection.classes.find((c) => c._id === attr.attrelid)!;
@@ -281,7 +312,7 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
         identity_argument_types: null,
         return_type_id: p.prorettype ? Number(p.prorettype) : null,
         return_type: p.prorettype
-          ? introspection.types.find((t) => t._id === p.prorettype)?.typname ?? null
+          ? (introspection.types.find((t) => t._id === p.prorettype)?.typname ?? null)
           : null,
         return_type_relation_id: null,
         is_set_returning_function: p.proretset ?? false,
@@ -326,9 +357,6 @@ export function syncSchema(client: LanguageClient, introspection: Introspection)
       `[PGLS] Schema synced: ${cache.schemas.length} schemas, ${cache.tables.length} tables, ${cache.columns.length} columns, ${cache.functions.length} functions`,
     );
   } catch (err) {
-    console.warn(
-      "[PGLS] Schema sync error:",
-      err instanceof Error ? err.message : String(err),
-    );
+    console.warn("[PGLS] Schema sync error:", err instanceof Error ? err.message : String(err));
   }
 }

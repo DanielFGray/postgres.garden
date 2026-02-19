@@ -126,9 +126,7 @@ export async function getInitialData(
         const hash = route.params.playgroundId!;
 
         // Fetch playground info
-        const { data: playground } = await client.api
-          .playgrounds({ hash })
-          .get(fetchOpts);
+        const { data: playground } = await client.api.playgrounds({ hash }).get(fetchOpts);
         apiCalls++;
 
         if (!playground || "error" in playground) {
@@ -149,9 +147,7 @@ export async function getInitialData(
           commit = data;
         } else if (route.type === "playground") {
           // For playground routes without specific commit, fetch the latest commit
-          const { data: commits } = await client.api
-            .playgrounds({ hash })
-            .commits.get(fetchOpts);
+          const { data: commits } = await client.api.playgrounds({ hash }).commits.get(fetchOpts);
           apiCalls++;
 
           if (Array.isArray(commits) && commits.length > 0) {
@@ -184,5 +180,3 @@ export async function getInitialData(
     }
   });
 }
-
-

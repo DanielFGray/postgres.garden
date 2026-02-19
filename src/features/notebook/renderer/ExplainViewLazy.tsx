@@ -7,7 +7,9 @@ interface Props {
   data: SQLResult;
 }
 
-type ExplainViewComponent = (props: Props) => Effect.Effect<VElement, never, AtomRegistry.AtomRegistry>;
+type ExplainViewComponent = (
+  props: Props,
+) => Effect.Effect<VElement, never, AtomRegistry.AtomRegistry>;
 
 const componentAtom = Atom.make<ExplainViewComponent | null>(null);
 const loadingAtom = Atom.make(true);

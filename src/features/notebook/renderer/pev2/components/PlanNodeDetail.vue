@@ -1,17 +1,17 @@
 <script lang="ts" setup>
-import { computed, inject, onBeforeMount, reactive, ref, watch } from "vue"
-import { directive as vTippy } from "vue-tippy"
-import type { Node, ViewOptions } from "@/interfaces"
-import { HelpService } from "@/services/help-service"
-import { EstimateDirection, NodeProp } from "@/enums"
-import useNode from "@/node"
-import { store } from "@/store"
-import IoTooltip from "@/components/tooltip/IoTooltip.vue"
-import WorkersDetail from "@/components/WorkersDetail.vue"
-import MiscDetail from "@/components/MiscDetail.vue"
-import { ViewOptionsKey } from "@/symbols"
-import _ from "lodash"
-import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { computed, inject, onBeforeMount, reactive, ref, watch } from "vue";
+import { directive as vTippy } from "vue-tippy";
+import type { Node, ViewOptions } from "@/interfaces";
+import { HelpService } from "@/services/help-service";
+import { EstimateDirection, NodeProp } from "@/enums";
+import useNode from "@/node";
+import { store } from "@/store";
+import IoTooltip from "@/components/tooltip/IoTooltip.vue";
+import WorkersDetail from "@/components/WorkersDetail.vue";
+import MiscDetail from "@/components/MiscDetail.vue";
+import { ViewOptionsKey } from "@/symbols";
+import _ from "lodash";
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome";
 import {
   faAlignJustify,
   faArrowDown,
@@ -22,30 +22,30 @@ import {
   faFilter,
   faInfoCircle,
   faUndo,
-} from "@fortawesome/free-solid-svg-icons"
+} from "@fortawesome/free-solid-svg-icons";
 
-const viewOptions = inject(ViewOptionsKey) as ViewOptions
+const viewOptions = inject(ViewOptionsKey) as ViewOptions;
 
 interface Props {
-  node: Node
+  node: Node;
 }
-const props = defineProps<Props>()
+const props = defineProps<Props>();
 
-const updateSize = inject<(node: Node) => null>("updateSize")
+const updateSize = inject<(node: Node) => null>("updateSize");
 
-const node = reactive<Node>(props.node)
+const node = reactive<Node>(props.node);
 const nodeProps = ref<
   {
-    key: keyof typeof NodeProp
-    value: unknown
+    key: keyof typeof NodeProp;
+    value: unknown;
   }[]
->()
+>();
 
 // UI flags
-const activeTab = ref<string>("general")
+const activeTab = ref<string>("general");
 
-const helpService = new HelpService()
-const getNodeTypeDescription = helpService.getNodeTypeDescription
+const helpService = new HelpService();
+const getNodeTypeDescription = helpService.getNodeTypeDescription;
 
 const {
   costClass,
@@ -63,19 +63,19 @@ const {
   rowsRemovedPercentString,
   rowsRemovedProp,
   tilde,
-} = useNode(node, viewOptions)
+} = useNode(node, viewOptions);
 
 onBeforeMount(() => {
-  calculateProps()
-})
+  calculateProps();
+});
 
 const shouldShowPlannerEstimate = computed(() => {
   return (
     estimationClass.value &&
     plannerRowEstimateDirection.value !== EstimateDirection.none &&
     plannerRowEstimateValue.value
-  )
-})
+  );
+});
 
 // create an array of node propeties so that they can be displayed in the view
 function calculateProps() {
@@ -83,9 +83,9 @@ function calculateProps() {
     .omit(NodeProp.PLANS)
     .omit(NodeProp.WORKERS)
     .map((value, key) => {
-      return { key: key as keyof typeof NodeProp, value }
+      return { key: key as keyof typeof NodeProp, value };
     })
-    .value()
+    .value();
 }
 
 const shouldShowIoBuffers = computed((): boolean => {
@@ -102,26 +102,23 @@ const shouldShowIoBuffers = computed((): boolean => {
     "EXCLUSIVE_LOCAL_WRITTEN_BLOCKS",
     "EXCLUSIVE_IO_READ_TIME",
     "EXCLUSIVE_IO_WRITE_TIME",
-  ]
+  ];
   const values = _.map(properties, (property) => {
-    const value = node[NodeProp[property]]
-    return _.isNaN(value) ? 0 : value
-  })
-  const sum = _.sum(values)
-  return sum > 0
-})
+    const value = node[NodeProp[property]];
+    return _.isNaN(value) ? 0 : value;
+  });
+  const sum = _.sum(values);
+  return sum > 0;
+});
 
 watch(activeTab, () => {
-  window.setTimeout(() => updateSize && updateSize(node), 1)
-})
+  window.setTimeout(() => updateSize && updateSize(node), 1);
+});
 </script>
 
 <template>
   <div class="card-header border-top">
-    <div
-      v-if="getNodeTypeDescription(node[NodeProp.NODE_TYPE])"
-      class="node-description"
-    >
+    <div v-if="getNodeTypeDescription(node[NodeProp.NODE_TYPE])" class="node-description">
       <span class="node-type">{{ node[NodeProp.NODE_TYPE] }} Node</span>
       <span v-html="getNodeTypeDescription(node[NodeProp.NODE_TYPE])"></span>
     </div>
@@ -164,10 +161,7 @@ watch(activeTab, () => {
           class="nav-link"
           :class="{
             active: activeTab === 'workers',
-            disabled: !(
-              node[NodeProp.WORKERS_PLANNED] ||
-              node[NodeProp.WORKERS_PLANNED_BY_GATHER]
-            ),
+            disabled: !(node[NodeProp.WORKERS_PLANNED] || node[NodeProp.WORKERS_PLANNED_BY_GATHER]),
           }"
           @click.prevent.stop="activeTab = 'workers'"
           href=""
@@ -189,20 +183,14 @@ watch(activeTab, () => {
     <div class="tab-pane" :class="{ 'show active': activeTab === 'general' }">
       <!-- general -->
       <div v-if="store.plan?.isAnalyze">
-        <FontAwesomeIcon
-          fixed-width
-          :icon="faClock"
-          class="text-body-tertiary"
-        ></FontAwesomeIcon>
+        <FontAwesomeIcon fixed-width :icon="faClock" class="text-body-tertiary"></FontAwesomeIcon>
         <b>Timing:</b>
         <span
           class="p-0 px-1 rounded alert"
           :class="durationClass"
           v-html="formattedProp('EXCLUSIVE_DURATION')"
         ></span>
-        <template
-          v-if="executionTimePercent && executionTimePercent !== Infinity"
-        >
+        <template v-if="executionTimePercent && executionTimePercent !== Infinity">
           |
           <strong>{{ executionTimePercent }}</strong
           ><span class="text-body-tertiary">%</span>
@@ -215,17 +203,12 @@ watch(activeTab, () => {
           class="text-body-tertiary"
         ></FontAwesomeIcon>
         <b>Rows:</b>
-        <span class="px-1">{{
-          tilde + formattedProp("ACTUAL_ROWS_REVISED")
-        }}</span>
+        <span class="px-1">{{ tilde + formattedProp("ACTUAL_ROWS_REVISED") }}</span>
         <span class="text-body-tertiary" v-if="node[NodeProp.PLAN_ROWS]"
           >(Planned: {{ tilde + formattedProp("PLAN_ROWS_REVISED") }})</span
         >
         <span
-          v-if="
-            plannerRowEstimateDirection !== EstimateDirection.none &&
-            shouldShowPlannerEstimate
-          "
+          v-if="plannerRowEstimateDirection !== EstimateDirection.none && shouldShowPlannerEstimate"
         >
           |
           <span v-if="plannerRowEstimateDirection === EstimateDirection.over"
@@ -246,11 +229,7 @@ watch(activeTab, () => {
         </span>
       </div>
       <div v-if="rowsRemoved">
-        <FontAwesomeIcon
-          fixed-width
-          :icon="faFilter"
-          class="text-body-tertiary"
-        ></FontAwesomeIcon>
+        <FontAwesomeIcon fixed-width :icon="faFilter" class="text-body-tertiary"></FontAwesomeIcon>
         <b> {{ NodeProp[rowsRemovedProp] }}: </b>
         <span>
           <span class="px-1">{{ tilde + formattedProp(rowsRemovedProp) }}</span
@@ -308,16 +287,10 @@ watch(activeTab, () => {
         <span class="p-0 px-1 me-1 alert" :class="costClass">{{
           formattedProp("EXCLUSIVE_COST")
         }}</span>
-        <span class="text-body-tertiary"
-          >(Total: {{ formattedProp("TOTAL_COST") }})</span
-        >
+        <span class="text-body-tertiary">(Total: {{ formattedProp("TOTAL_COST") }})</span>
       </div>
       <div v-if="node[NodeProp.ACTUAL_LOOPS] > 1">
-        <FontAwesomeIcon
-          fixed-width
-          :icon="faUndo"
-          class="text-body-tertiary"
-        ></FontAwesomeIcon>
+        <FontAwesomeIcon fixed-width :icon="faUndo" class="text-body-tertiary"></FontAwesomeIcon>
         <b>Loops:</b>
         <span class="px-1">{{ formattedProp("ACTUAL_LOOPS") }} </span>
       </div>
@@ -339,14 +312,8 @@ watch(activeTab, () => {
         <tbody>
           <tr>
             <td>Shared</td>
-            <td
-              class="text-end"
-              v-html="formattedProp('EXCLUSIVE_SHARED_HIT_BLOCKS') || '-'"
-            ></td>
-            <td
-              class="text-end"
-              v-html="formattedProp('EXCLUSIVE_SHARED_READ_BLOCKS') || '-'"
-            ></td>
+            <td class="text-end" v-html="formattedProp('EXCLUSIVE_SHARED_HIT_BLOCKS') || '-'"></td>
+            <td class="text-end" v-html="formattedProp('EXCLUSIVE_SHARED_READ_BLOCKS') || '-'"></td>
             <td
               class="text-end"
               v-html="formattedProp('EXCLUSIVE_SHARED_DIRTIED_BLOCKS') || '-'"
@@ -359,10 +326,7 @@ watch(activeTab, () => {
           <tr>
             <td>Temp</td>
             <td class="text-end bg-hatched"></td>
-            <td
-              class="text-end"
-              v-html="formattedProp('EXCLUSIVE_TEMP_READ_BLOCKS') || '-'"
-            ></td>
+            <td class="text-end" v-html="formattedProp('EXCLUSIVE_TEMP_READ_BLOCKS') || '-'"></td>
             <td class="text-end bg-hatched"></td>
             <td
               class="text-end"
@@ -371,14 +335,8 @@ watch(activeTab, () => {
           </tr>
           <tr>
             <td>Local</td>
-            <td
-              class="text-end"
-              v-html="formattedProp('EXCLUSIVE_LOCAL_HIT_BLOCKS') || '-'"
-            ></td>
-            <td
-              class="text-end"
-              v-html="formattedProp('EXCLUSIVE_LOCAL_READ_BLOCKS') || '-'"
-            ></td>
+            <td class="text-end" v-html="formattedProp('EXCLUSIVE_LOCAL_HIT_BLOCKS') || '-'"></td>
+            <td class="text-end" v-html="formattedProp('EXCLUSIVE_LOCAL_READ_BLOCKS') || '-'"></td>
             <td
               class="text-end"
               v-html="formattedProp('EXCLUSIVE_LOCAL_DIRTIED_BLOCKS') || '-'"
@@ -390,13 +348,8 @@ watch(activeTab, () => {
           </tr>
         </tbody>
       </table>
-      <div
-        v-if="node[NodeProp.WAL_RECORDS] || node[NodeProp.WAL_BYTES]"
-        class="mb-2"
-      >
-        <b>
-          <span class="more-info" v-tippy="'Write-Ahead Logging'">WAL</span>:
-        </b>
+      <div v-if="node[NodeProp.WAL_RECORDS] || node[NodeProp.WAL_BYTES]" class="mb-2">
+        <b> <span class="more-info" v-tippy="'Write-Ahead Logging'">WAL</span>: </b>
         {{ formattedProp("WAL_RECORDS") }} records
         <small>({{ formattedProp("WAL_BYTES") }})</small>
         <span v-if="node[NodeProp.WAL_FPI]">
@@ -417,10 +370,7 @@ watch(activeTab, () => {
     <div
       class="tab-pane"
       :class="{ 'show active': activeTab === 'workers' }"
-      v-if="
-        node[NodeProp.WORKERS_PLANNED] ||
-        node[NodeProp.WORKERS_PLANNED_BY_GATHER]
-      "
+      v-if="node[NodeProp.WORKERS_PLANNED] || node[NodeProp.WORKERS_PLANNED_BY_GATHER]"
     >
       <!-- workers tab -->
       <WorkersDetail :node="node" />

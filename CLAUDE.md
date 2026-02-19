@@ -59,6 +59,7 @@ This project uses **prog** for cross-session task management. **Do NOT use inter
 Run `prog prime` for workflow context, or configure hooks for auto-injection.
 
 **Quick reference:**
+
 ```
 prog ready                      # Find unblocked work
 prog add "Title" -p pg.garden   # Create task

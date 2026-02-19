@@ -151,13 +151,13 @@ describe("My Test Suite", () => {
   it("should create and read a file", () => {
     // Create a file
     cy.createVSCodeFile("/example.txt", "Test content");
-    
+
     // Verify it was created
     cy.readVSCodeFile("/example.txt").should("equal", "Test content");
-    
+
     // Execute a command
     cy.executeVSCodeCommand("server-sync.commit");
-    
+
     // Wait for notification
     cy.waitForNotification("Workspace synced");
   });
@@ -197,7 +197,7 @@ describe("My Test Suite", () => {
 ```typescript
 // ❌ Wrong
 cy.visit("/");
-cy.window().then(win => win.vscode); // May be undefined
+cy.window().then((win) => win.vscode); // May be undefined
 
 // ✅ Right
 cy.visit("/");

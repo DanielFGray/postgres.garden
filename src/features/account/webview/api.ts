@@ -10,7 +10,12 @@ const pending = new Map<string, PendingRequest>();
 let requestId = 0;
 
 window.addEventListener("message", (event) => {
-  const msg = event.data as { type: string; id?: string; data?: unknown; error?: { code: string; message: string } };
+  const msg = event.data as {
+    type: string;
+    id?: string;
+    data?: unknown;
+    error?: { code: string; message: string };
+  };
 
   if (msg.type === "data" && msg.id) {
     const req = pending.get(msg.id);

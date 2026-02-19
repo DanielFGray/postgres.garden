@@ -114,9 +114,7 @@ function processMessage(event: MessageEvent) {
         self.postMessage({
           jsonrpc: "2.0",
           id: msg.id,
-          result: hover
-            ? { contents: { kind: "markdown", value: hover } }
-            : null,
+          result: hover ? { contents: { kind: "markdown", value: hover } } : null,
         });
         return;
       }
@@ -154,12 +152,18 @@ function positionToOffset(content: string, line: number, character: number): num
 /** Map PGLS completion kind string to LSP CompletionItemKind number. */
 function completionKindToLsp(kind: string): number {
   switch (kind) {
-    case "table": return 7;     // Class
-    case "column": return 5;    // Field
-    case "function": return 3;  // Function
-    case "schema": return 9;    // Module
-    case "keyword": return 14;  // Keyword
-    default: return 1;          // Text
+    case "table":
+      return 7; // Class
+    case "column":
+      return 5; // Field
+    case "function":
+      return 3; // Function
+    case "schema":
+      return 9; // Module
+    case "keyword":
+      return 14; // Keyword
+    default:
+      return 1; // Text
   }
 }
 

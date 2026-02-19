@@ -1,11 +1,8 @@
 {
   "name": "postgres-garden",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "projectName": "Postgres Garden",
-  "fromEmail": "noreply@postgres.garden",
-  "legalText": "Postgres Garden - Open Source PostgreSQL Development Environment",
   "scripts": {
     "dev:client": "vite dev",
     "dev": "mprocs 'bun dev:server' 'bun db:watch' 'bun worker' 'bun test:watch' 'bun typecheck:watch' 'bun cypress:browser' 'bun build:renderer --watch' 'bun build:webviews --watch'",
@@ -313,5 +310,8 @@
   "overrides": {
     "dotenv": "^16.6.1",
     "esbuild": "^0.24.0"
-  }
+  },
+  "fromEmail": "noreply@postgres.garden",
+  "legalText": "Postgres Garden - Open Source PostgreSQL Development Environment",
+  "projectName": "Postgres Garden"
 }

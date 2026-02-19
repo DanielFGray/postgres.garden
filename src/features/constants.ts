@@ -40,9 +40,7 @@ export const PLAYGROUND_CREATE = "playground.create";
 // VSCode Built-in Commands (used in our code)
 export const VSCODE_OPEN = "vscode.open";
 export const VSCODE_DIFF = "vscode.diff";
-export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS =
-  "workbench.action.closeAllEditors";
-
+export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS = "workbench.action.closeAllEditors";
 
 // Account Commands
 export const ACCOUNT_SETTINGS_OPEN = "account.openSettings";

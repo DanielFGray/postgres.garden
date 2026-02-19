@@ -1,22 +1,22 @@
-import _ from "lodash"
-import type { IPlan, Node } from "@/interfaces"
-import { NodeProp } from "@/enums"
-import { nodePropTypes, PropType } from "@/enums"
+import _ from "lodash";
+import type { IPlan, Node } from "@/interfaces";
+import { NodeProp } from "@/enums";
+import { nodePropTypes, PropType } from "@/enums";
 
 export class HelpService {
-  public nodeId = 0
+  public nodeId = 0;
 
   public getNodeTypeDescription(nodeType: string) {
-    return NODE_DESCRIPTIONS[nodeType.toUpperCase()]
+    return NODE_DESCRIPTIONS[nodeType.toUpperCase()];
   }
 
   public getHelpMessage(helpMessage: string) {
-    return HELP_MESSAGES[helpMessage.toUpperCase()]
+    return HELP_MESSAGES[helpMessage.toUpperCase()];
   }
 }
 
 interface INodeDescription {
-  [key: string]: string
+  [key: string]: string;
 }
 
 export const NODE_DESCRIPTIONS: INodeDescription = {
@@ -49,10 +49,10 @@ export const NODE_DESCRIPTIONS: INodeDescription = {
   MEMOIZE: `is used to cache the results of the inner side of a nested loop. It avoids executing underlying nodes when the results for the current parameters are already in the cache.`,
   GATHER: `reads the results of the parallel workers, in an undefined order.`,
   "GATHER MERGE": `reads the results of the parallel workers, preserving any ordering.`,
-}
+};
 
 interface IHelpMessage {
-  [key: string]: string
+  [key: string]: string;
 }
 
 export const HELP_MESSAGES: IHelpMessage = {
@@ -65,13 +65,13 @@ Consider modifying max_parallel_workers or max_parallel_workers_per_gather.`,
   "FUZZY NEEDS VERBOSE": `Information may not be accurate. Use EXPLAIN VERBOSE mode.`,
   "HINT TRACK_IO_TIMING": `HINT: activate <em><b>track_io_timing</b></em> to have details on time spent outside the PG cache.`,
   "IO TIMINGS PARALLEL": "Distributed among parallel workers",
-}
+};
 
 interface EaseInOutQuadOptions {
-  currentTime: number
-  start: number
-  change: number
-  duration: number
+  currentTime: number;
+  start: number;
+  change: number;
+  duration: number;
 }
 
 export function scrollChildIntoParentView(
@@ -81,24 +81,24 @@ export function scrollChildIntoParentView(
   done?: () => void,
 ) {
   if (!child) {
-    return
+    return;
   }
   // Where is the parent on page
-  const parentRect = parent.getBoundingClientRect()
+  const parentRect = parent.getBoundingClientRect();
   // Where is the child
-  const childRect = child.getBoundingClientRect()
+  const childRect = child.getBoundingClientRect();
 
-  let scrollLeft = parent.scrollLeft // don't move
+  let scrollLeft = parent.scrollLeft; // don't move
   const isChildViewableX =
     childRect.left >= parentRect.left &&
     childRect.left <= parentRect.right &&
-    childRect.right <= parentRect.right
+    childRect.right <= parentRect.right;
 
-  let scrollTop = parent.scrollTop
+  let scrollTop = parent.scrollTop;
   const isChildViewableY =
     childRect.top >= parentRect.top &&
     childRect.top <= parentRect.bottom &&
-    childRect.bottom <= parentRect.bottom
+    childRect.bottom <= parentRect.bottom;
 
   if (shouldCenter || !isChildViewableX || !isChildViewableY) {
     // scroll by offset relative to parent
@@ -108,90 +108,80 @@ export function scrollChildIntoParentView(
       parent.scrollLeft -
       parentRect.left -
       parentRect.width / 2 +
-      childRect.width / 2
+      childRect.width / 2;
     scrollTop =
       childRect.top +
       parent.scrollTop -
       parentRect.top -
       parentRect.height / 2 +
-      childRect.height / 2
+      childRect.height / 2;
     smoothScroll({
       element: parent,
       to: { scrollTop, scrollLeft },
       duration: 400,
       done,
-    })
+    });
   } else if (done) {
-    done()
+    done();
   }
 }
 
-const easeInOutQuad = ({
-  currentTime,
-  start,
-  change,
-  duration,
-}: EaseInOutQuadOptions) => {
-  let newCurrentTime = currentTime
-  newCurrentTime /= duration / 2
+const easeInOutQuad = ({ currentTime, start, change, duration }: EaseInOutQuadOptions) => {
+  let newCurrentTime = currentTime;
+  newCurrentTime /= duration / 2;
 
   if (newCurrentTime < 1) {
-    return (change / 2) * newCurrentTime * newCurrentTime + start
+    return (change / 2) * newCurrentTime * newCurrentTime + start;
   }
 
-  newCurrentTime -= 1
-  return (-change / 2) * (newCurrentTime * (newCurrentTime - 2) - 1) + start
-}
+  newCurrentTime -= 1;
+  return (-change / 2) * (newCurrentTime * (newCurrentTime - 2) - 1) + start;
+};
 
 interface SmoothScrollOptions {
-  duration: number
-  element: Element
+  duration: number;
+  element: Element;
   to: {
-    scrollTop: number
-    scrollLeft: number
-  }
-  done?: () => void
+    scrollTop: number;
+    scrollLeft: number;
+  };
+  done?: () => void;
 }
 
-export function smoothScroll({
-  duration,
-  element,
-  to,
-  done,
-}: SmoothScrollOptions) {
-  const startX = element.scrollTop
-  const startY = element.scrollLeft
-  const changeX = to.scrollTop - startX
-  const changeY = to.scrollLeft - startY
-  const startDate = new Date().getTime()
+export function smoothScroll({ duration, element, to, done }: SmoothScrollOptions) {
+  const startX = element.scrollTop;
+  const startY = element.scrollLeft;
+  const changeX = to.scrollTop - startX;
+  const changeY = to.scrollLeft - startY;
+  const startDate = new Date().getTime();
 
   const animateScroll = () => {
-    const currentDate = new Date().getTime()
-    const currentTime = currentDate - startDate
+    const currentDate = new Date().getTime();
+    const currentTime = currentDate - startDate;
     element.scrollTop = easeInOutQuad({
       currentTime,
       start: startX,
       change: changeX,
       duration,
-    })
+    });
     element.scrollLeft = easeInOutQuad({
       currentTime,
       start: startY,
       change: changeY,
       duration,
-    })
+    });
 
     if (currentTime < duration) {
-      requestAnimationFrame(animateScroll)
+      requestAnimationFrame(animateScroll);
     } else {
-      element.scrollTop = to.scrollTop
-      element.scrollLeft = to.scrollLeft
+      element.scrollTop = to.scrollTop;
+      element.scrollLeft = to.scrollLeft;
       if (done) {
-        done()
+        done();
       }
     }
-  }
-  animateScroll()
+  };
+  animateScroll();
 }
 
 /*
@@ -204,95 +194,92 @@ export function splitBalanced(input: string, split: string) {
     .replace("o", "[\\(\\{\\[]")
     .replace("c", "[\\)\\}\\]]")
     .replace("t", "['\"]")
-    .replace("e", "[\\\\]")
-  const r = new RegExp(pattern, "gi")
-  const stack: string[] = []
-  let buffer: string[] = []
-  const results: string[] = []
+    .replace("e", "[\\\\]");
+  const r = new RegExp(pattern, "gi");
+  const stack: string[] = [];
+  let buffer: string[] = [];
+  const results: string[] = [];
   input.replace(r, ($0, $1, $e, $o, $c, $t, $s) => {
     if ($e) {
       // Escape
-      buffer.push($1, $s || $o || $c || $t)
-      return ""
+      buffer.push($1, $s || $o || $c || $t);
+      return "";
     } else if ($o) {
       // Open
-      stack.push($o)
+      stack.push($o);
     } else if ($c) {
       // Close
-      stack.pop()
+      stack.pop();
     } else if ($t) {
       // Toggle
       if (stack[stack.length - 1] !== $t) {
-        stack.push($t)
+        stack.push($t);
       } else {
-        stack.pop()
+        stack.pop();
       }
     } else {
       // Split (if no stack) or EOF
       if ($s ? !stack.length : !$1) {
-        buffer.push($1)
-        results.push(buffer.join(""))
-        buffer = []
-        return ""
+        buffer.push($1);
+        results.push(buffer.join(""));
+        buffer = [];
+        return "";
       }
     }
-    buffer.push($0)
-    return ""
-  })
-  return results
+    buffer.push($0);
+    return "";
+  });
+  return results;
 }
 
 export function findNodeById(plan: IPlan, id: number): Node | undefined {
-  let o: Node | undefined = undefined
-  const root = plan.content.Plan
+  let o: Node | undefined = undefined;
+  const root = plan.content.Plan;
   if (root.nodeId == id) {
-    return root
+    return root;
   }
   if (root && root.Plans) {
     root.Plans.some(function iter(child: Node): boolean | undefined {
       if (child.nodeId === id) {
-        o = child
-        return true
+        o = child;
+        return true;
       }
-      return child.Plans && child.Plans.some(iter)
-    })
+      return child.Plans && child.Plans.some(iter);
+    });
     if (!o && plan.ctes) {
       _.each(plan.ctes, (cte) => {
         if (cte.nodeId == id) {
-          o = cte
-          return false
+          o = cte;
+          return false;
         } else if (cte.Plans) {
           cte.Plans.some(function iter(child: Node): boolean | undefined {
             if (child.nodeId === id) {
-              o = child
-              return true
+              o = child;
+              return true;
             }
-            return child.Plans && child.Plans.some(iter)
-          })
+            return child.Plans && child.Plans.some(iter);
+          });
           if (o) {
-            return false
+            return false;
           }
         }
-      })
+      });
     }
   }
-  return o
+  return o;
 }
 
-export function findNodeBySubplanName(
-  plan: IPlan,
-  subplanName: string,
-): Node | undefined {
-  let o: Node | undefined = undefined
+export function findNodeBySubplanName(plan: IPlan, subplanName: string): Node | undefined {
+  let o: Node | undefined = undefined;
   if (plan.ctes) {
     _.each(plan.ctes, (cte) => {
       if (cte[NodeProp.SUBPLAN_NAME] == "CTE " + subplanName) {
-        o = cte
-        return false
+        o = cte;
+        return false;
       }
-    })
+    });
   }
-  return o
+  return o;
 }
 
 // Returns the list of properties that have already been displayed either in
@@ -405,13 +392,11 @@ const notMiscProperties: string[] = [
   NodeProp.PARTIAL_MODE,
   NodeProp.SCAN_DIRECTION,
   NodeProp.ACTUAL_ROWS_FRACTIONAL,
-]
+];
 
 export function shouldShowProp(key: string, value: unknown): boolean {
   return (
-    (!!value ||
-      nodePropTypes[key] === PropType.increment ||
-      key === NodeProp.ACTUAL_ROWS) &&
+    (!!value || nodePropTypes[key] === PropType.increment || key === NodeProp.ACTUAL_ROWS) &&
     notMiscProperties.indexOf(key) === -1
-  )
+  );
 }

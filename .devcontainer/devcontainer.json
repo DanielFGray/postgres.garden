@@ -1,28 +1,25 @@
 {
-    "image": "mcr.microsoft.com/vscode/devcontainers/base",
-    "features": {
-      "ghcr.io/audacioustux/devcontainers/bun:1": {},
-      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-      "ghcr.io/devcontainers/features/python:1": {}
+  "image": "mcr.microsoft.com/vscode/devcontainers/base",
+  "features": {
+    "ghcr.io/audacioustux/devcontainers/bun:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/python:1": {}
+  },
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "3000": {
+      "label": "Elysia"
     },
-    "forwardPorts": [5173],
-    "portsAttributes": {
-      "3000": {
-        "label": "Elysia"
-      },
-      "5173": {
-        "label": "Vite"
-      },
-      "5432": {
-        "label": "Postgres"
-      }
+    "5173": {
+      "label": "Vite"
     },
-    "customizations": {
-      "vscode": {
-        "extensions": [
-            "oven.bun-vscode",
-            "ms-azuretools.vscode-docker"
-        ]
-      }
+    "5432": {
+      "label": "Postgres"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["oven.bun-vscode", "ms-azuretools.vscode-docker"]
     }
   }
+}

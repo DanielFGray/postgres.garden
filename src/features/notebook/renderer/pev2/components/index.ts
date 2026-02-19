@@ -1,3 +1,3 @@
-import Plan from "./Plan.vue"
+import Plan from "./Plan.vue";
 
-export { Plan }
+export { Plan };

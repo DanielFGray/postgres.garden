@@ -1,11 +1,7 @@
 import * as S from "effect/Schema";
 
 export const envSchema = S.Struct({
-  NODE_ENV: S.Union(
-    S.Literal("development"),
-    S.Literal("production"),
-    S.Literal("test"),
-  ),
+  NODE_ENV: S.Union(S.Literal("development"), S.Literal("production"), S.Literal("test")),
   ROOT_DATABASE_USER: S.String,
   ROOT_DATABASE_PASSWORD: S.String,
   ROOT_DATABASE_URL: S.String,
@@ -34,4 +30,3 @@ export const envSchema = S.Struct({
 });
 
 export type Env = typeof envSchema.Type;
-
