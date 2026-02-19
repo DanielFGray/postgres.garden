@@ -19,20 +19,35 @@ export async function createSession(userId: string) {
     .where("id", "=", userId)
     .executeTakeFirstOrThrow();
 
+  // Two independent secrets:
+  //   id + secret → Valkey/cookie layer (HTTP session)
+  //   sessionUuid → Postgres layer (RLS via current_user_id())
   const id = generateSecureRandomString();
   const secret = generateSecureRandomString();
   const secretHash = hashSecret(secret).toString("hex");
+  const sessionUuid = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
   const key = sessionKey(id);
   await valkey.hset(key, {
     secret_hash: secretHash,
+    session_uuid: sessionUuid,
     user_id: user.id,
     username: user.username,
     role: user.role,
     is_verified: user.is_verified ? "1" : "0",
   });
   await valkey.expire(key, SESSION_TTL_SECONDS);
+
+  // Write to app_private.sessions so current_user_id() works for RLS
+  await rootDb
+    .insertInto("app_private.sessions")
+    .values({
+      id: sessionUuid,
+      user_id: user.id,
+      expires_at: expiresAt,
+    })
+    .execute();
 
   return { token: `${id}.${secret}`, id, expiresAt };
 }
@@ -90,7 +105,8 @@ export async function validateSessionToken(token?: string) {
     is_verified: data.is_verified === "1",
   };
   const session = {
-    id,
+    id: data.session_uuid ?? "",  // Postgres UUID for withAuthContext/RLS
+    cookie_id: id,                // Valkey key for deletion
     user_id: data.user_id ?? "",
     expires_at: new Date(), // TTL is managed by Valkey
   };
@@ -108,6 +124,15 @@ export function buildSessionCookie(token: string, expiresAt: Date) {
   };
 }
 
-export async function deleteSession(id: string) {
-  await valkey.del(sessionKey(id));
+export async function deleteSession(cookieId: string) {
+  const key = sessionKey(cookieId);
+  // Read the Postgres session UUID before deleting from Valkey
+  const sessionUuid = await valkey.hget(key, "session_uuid");
+  await valkey.del(key);
+  if (sessionUuid) {
+    await rootDb
+      .deleteFrom("app_private.sessions")
+      .where("id", "=", sessionUuid)
+      .execute();
+  }
 }

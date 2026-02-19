@@ -74,7 +74,7 @@ const apiRoutes = new Elysia({ prefix: "/api" })
   .post("/logout", async ({ status, cookie, session }) => {
     try {
       if (session) {
-        await deleteSession(session.id);
+        await deleteSession(session.cookie_id);
       }
       // Clear the session cookie
       cookie[sessionCookieName]?.set({
@@ -131,6 +131,201 @@ const apiRoutes = new Elysia({ prefix: "/api" })
       }).pipe(S.standardSchemaV1),
     },
   )
+
+  .patch(
+    "/me",
+    ({ body, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return withAuthContext(session.id, async (tx) => {
+        try {
+          let query = tx
+            .updateTable("app_public.users")
+            .where("id", "=", sql<string>`app_public.current_user_id()`);
+
+          if (body.name !== undefined) {
+            query = query.set("name", body.name);
+          }
+          if (body.bio !== undefined) {
+            query = query.set("bio", body.bio);
+          }
+          if (body.avatar_url !== undefined) {
+            query = query.set("avatar_url", body.avatar_url);
+          }
+
+          const result = await query.returningAll().executeTakeFirst();
+          if (!result) return status(404, { error: "User not found" });
+          return result;
+        } catch (e) {
+          const { code, error } = handleDbError(e, "Failed to update profile");
+          return status(code, { error });
+        }
+      });
+    },
+    {
+      body: S.Struct({
+        name: S.UndefinedOr(S.NullOr(S.String)),
+        bio: S.UndefinedOr(S.String),
+        avatar_url: S.UndefinedOr(S.NullOr(S.String)),
+      }).pipe(S.standardSchemaV1),
+    },
+  )
+
+  .get("/me/emails", ({ session, status }) => {
+    if (!session) return status(401, { error: "Unauthorized" });
+
+    return withAuthContext(session.id, async (tx) => {
+      try {
+        const emails = await tx
+          .selectFrom("app_public.user_emails")
+          .selectAll()
+          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+          .orderBy("is_primary", "desc")
+          .orderBy("created_at", "asc")
+          .execute();
+        return emails;
+      } catch (e) {
+        const { code, error } = handleDbError(e, "Failed to fetch emails");
+        return status(code, { error });
+      }
+    });
+  })
+
+  .post(
+    "/me/emails",
+    ({ body, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return withAuthContext(session.id, async (tx) => {
+        try {
+          const result = await tx
+            .insertInto("app_public.user_emails")
+            .values({ email: body.email })
+            .returningAll()
+            .executeTakeFirstOrThrow();
+          return result;
+        } catch (e) {
+          if (e instanceof pg.DatabaseError && e.code === "23505") {
+            return status(409, { error: "Email already in use" });
+          }
+          const { code, error } = handleDbError(e, "Failed to add email");
+          return status(code, { error });
+        }
+      });
+    },
+    {
+      body: S.Struct({
+        email: S.String,
+      }).pipe(S.standardSchemaV1),
+    },
+  )
+
+  .delete(
+    "/me/emails/:id",
+    ({ params, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return withAuthContext(session.id, async (tx) => {
+        try {
+          const result = await tx
+            .deleteFrom("app_public.user_emails")
+            .where("id", "=", params.id)
+            .returningAll()
+            .executeTakeFirst();
+          if (!result) return status(404, { error: "Email not found" });
+          return result;
+        } catch (e) {
+          if (
+            e instanceof pg.DatabaseError &&
+            e.message.includes("prevent_delete_last_email")
+          ) {
+            return status(400, {
+              error: "Cannot delete your last email address",
+            });
+          }
+          const { code, error } = handleDbError(e, "Failed to delete email");
+          return status(code, { error });
+        }
+      });
+    },
+    {
+      params: S.Struct({ id: S.UUID }).pipe(S.standardSchemaV1),
+    },
+  )
+
+  .get("/me/authentications", ({ session, status }) => {
+    if (!session) return status(401, { error: "Unauthorized" });
+
+    return withAuthContext(session.id, async (tx) => {
+      try {
+        const auths = await tx
+          .selectFrom("app_public.user_authentications")
+          .select(["id", "service", "identifier", "created_at"])
+          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+          .orderBy("created_at", "asc")
+          .execute();
+        return auths;
+      } catch (e) {
+        const { code, error } = handleDbError(
+          e,
+          "Failed to fetch authentications",
+        );
+        return status(code, { error });
+      }
+    });
+  })
+
+  .delete(
+    "/me/authentications/:id",
+    ({ params, session, status }) => {
+      if (!session) return status(401, { error: "Unauthorized" });
+
+      return withAuthContext(session.id, async (tx) => {
+        try {
+          const result = await tx
+            .deleteFrom("app_public.user_authentications")
+            .where("id", "=", params.id)
+            .returningAll()
+            .executeTakeFirst();
+          if (!result)
+            return status(404, { error: "Authentication not found" });
+          return { id: result.id };
+        } catch (e) {
+          const { code, error } = handleDbError(
+            e,
+            "Failed to unlink authentication",
+          );
+          return status(code, { error });
+        }
+      });
+    },
+    {
+      params: S.Struct({ id: S.UUID }).pipe(S.standardSchemaV1),
+    },
+  )
+
+  .get("/me/has-password", ({ session, status }) => {
+    if (!session) return status(401, { error: "Unauthorized" });
+
+    return withAuthContext(session.id, async (tx) => {
+      try {
+        const result = await sql<{ has_password: boolean }>`
+          SELECT app_public.users_has_password(u.*) as has_password
+          FROM app_public.users u
+          WHERE u.id = app_public.current_user_id()
+        `.execute(tx);
+        const row = result.rows[0];
+        if (!row) return status(404, { error: "User not found" });
+        return { has_password: row.has_password };
+      } catch (e) {
+        const { code, error } = handleDbError(
+          e,
+          "Failed to check password status",
+        );
+        return status(code, { error });
+      }
+    });
+  })
 
   .post(
     "/forgotPassword",
@@ -1201,7 +1396,7 @@ const authRoutes = new Elysia()
     return tracer.startActiveSpan("auth.logout", async (span) => {
       try {
         if (session) {
-          await deleteSession(session.id);
+          await deleteSession(session.cookie_id);
           authActiveSessions.add(-1);
         }
         cookie[sessionCookieName]?.set({
