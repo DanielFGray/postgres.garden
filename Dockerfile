@@ -6,6 +6,11 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY . .
+
+# Vite inlines VITE_* env vars at build time; .env is dockerignored so pass via build arg
+ARG VITE_OTEL_COLLECTOR_URL
+ENV VITE_OTEL_COLLECTOR_URL=$VITE_OTEL_COLLECTOR_URL
+
 RUN bun run build
 
 # Stage 2: Production runtime

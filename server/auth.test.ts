@@ -1,446 +1,511 @@
 /**
- * Authentication Tests
- * Tests for session validation, registration, login, and testing command endpoints
+ * Authentication integration tests.
+ *
+ * Uses @effect/vitest to run each test as an Effect, with a shared layer
+ * providing an in-process web handler (no TCP listener) and direct DB access
+ * for setup/cleanup.
+ *
+ * Run: bun vitest run server/auth.test.ts
  */
 
-import { describe, it, expect } from "bun:test";
-import { treaty } from "@elysiajs/eden";
-import { app as baseApp } from "./app";
-import { testingServer } from "./testing";
-import { rootDb } from "./db";
-import { valkey } from "./valkey";
+import { describe, expect, layer } from "@effect/vitest";
+import { Context, Effect, Layer, pipe } from "effect";
+import { HttpApiBuilder, HttpServer } from "@effect/platform";
+import { PgRootDB } from "./db.js";
+import { HttpApiLive } from "./httpapi/server.js";
+import { valkey } from "./valkey.js";
+import { testingServer } from "./testing.js";
 
-// Mount testing commands on the app
-const app = baseApp.use(testingServer);
+// ---------------------------------------------------------------------------
+// Test infrastructure
+// ---------------------------------------------------------------------------
 
-// Create type-safe client
-const client = treaty(app);
+/** In-process web handler backed by our Effect HttpApi. */
+class WebHandler extends Context.Tag("test/WebHandler")<
+  WebHandler,
+  { readonly fetch: (request: Request) => Promise<Response> }
+>() {
+  static Live = Layer.scoped(
+    WebHandler,
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        HttpApiBuilder.toWebHandler(
+          Layer.mergeAll(HttpApiLive, HttpServer.layerContext),
+        ),
+      ),
+      ({ dispose }) => Effect.promise(() => dispose()),
+    ).pipe(Effect.map(({ handler }) => ({ fetch: handler }))),
+  );
+}
 
-// Helper to get headers from Eden treaty responses (typed as HeadersInit but is Headers at runtime)
-const getHeader = (headers: HeadersInit | undefined, name: string) =>
-  new Headers(headers).get(name);
+/** In-process web handler for testing helper endpoints. */
+class TestingWebHandler extends Context.Tag("test/TestingWebHandler")<
+  TestingWebHandler,
+  { readonly fetch: (request: Request) => Promise<Response> }
+>() {
+  static Live = Layer.succeed(TestingWebHandler, {
+    fetch: (request: Request) => testingServer.handle(request),
+  });
+}
 
-// Helper to generate random strings for testing
-const generateStr = (length: number) =>
-  Math.random()
-    .toString(36)
-    .substring(2, 2 + length);
+/** Shared layer: in-process HTTP + direct DB for cleanup. */
+const TestLayer = Layer.mergeAll(WebHandler.Live, TestingWebHandler.Live, PgRootDB.Live);
 
-// Helper to clean up a specific user
-const cleanupUser = async (username: string) => {
-  await rootDb.deleteFrom("app_public.users").where("username", "=", username).execute();
-};
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
 
-describe("Session Validation", () => {
-  it("can register and create session", async () => {
-    const username = `test_${generateStr(8)}`;
-    const email = `${username}@test.com`;
-    const password = "TestPassword123!";
+const randomSuffix = () => Math.random().toString(36).substring(2, 10);
 
-    try {
-      const { data, status, headers } = await client.register.post({
-        username,
-        email,
-        password,
-      });
+const parseCookie = (headers: Headers): string =>
+  headers.get("set-cookie")?.split(";")[0] ?? "";
 
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("id");
-      expect(data).toHaveProperty("username", username);
+const sessionIdFromCookie = (cookie: string): string =>
+  decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
 
-      // Check session cookie was set
-      const setCookie = getHeader(headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-      expect(setCookie).toContain("session=");
-    } finally {
-      await cleanupUser(username);
-    }
+// ---------------------------------------------------------------------------
+// Effectful helpers (all yieldable — no floating promises)
+// ---------------------------------------------------------------------------
+
+/** Send an HTTP request through the in-process handler. */
+const http = (
+  method: string,
+  path: string,
+  opts?: { body?: unknown; cookie?: string },
+) =>
+  Effect.gen(function*() {
+    const { fetch } = yield* WebHandler;
+    const headers: Record<string, string> = {};
+    if (opts?.body) headers["Content-Type"] = "application/json";
+    if (opts?.cookie) headers["Cookie"] = opts.cookie;
+
+    const response = yield* Effect.tryPromise(() =>
+      fetch(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers,
+          body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        }),
+      ),
+    );
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      json: <T = unknown>() =>
+        Effect.tryPromise(() => response.json() as Promise<T>),
+    } as const;
   });
 
-  it("can validate session cookie on /me endpoint", async () => {
-    const username = `test_${generateStr(8)}`;
-    const email = `${username}@test.com`;
-    const password = "TestPassword123!";
+/** Delete a user by username. Errors are swallowed (cleanup must not fail tests). */
+const deleteUser = (username: string) =>
+  pipe(
+    PgRootDB,
+    Effect.flatMap((db) =>
+      db
+        .deleteFrom("app_public.users")
+        .where("username", "=", username),
+    ),
+    Effect.ignore,
+  );
 
-    try {
-      // Register to get a session
-      const registerRes = await client.register.post({
-        username,
-        email,
-        password,
-      });
+/** Run an effect with guaranteed user cleanup afterward. */
+const withCleanup = <A, E, R>(
+  username: string,
+  effect: Effect.Effect<A, E, R>,
+) => Effect.ensuring(effect, deleteUser(username));
 
-      const setCookie = getHeader(registerRes.headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-      const sessionCookie = setCookie!.split(";")[0]!;
-
-      // Use session to access /me
-      const { data, status } = await client.me.get({
-        fetch: { headers: { Cookie: sessionCookie } },
-      });
-
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("username", username);
-    } finally {
-      await cleanupUser(username);
-    }
+/** Register a user via the HTTP API. */
+const register = (username: string) =>
+  http("POST", "/register", {
+    body: {
+      username,
+      email: `${username}@test.com`,
+      password: "TestPassword123!",
+    },
   });
 
-  it("rejects invalid session token", async () => {
-    const { status, data } = await client.me.get({
-      fetch: { headers: { Cookie: "session=invalid.token.here" } },
+/** Register, then return the session cookie string. */
+const registerAndGetCookie = (username: string) =>
+  pipe(
+    register(username),
+    Effect.map((res) => parseCookie(res.headers)),
+  );
+
+/** Send request to /api/testingCommand endpoints through in-process testing server. */
+const testingHttp = (
+  method: string,
+  path: string,
+  opts?: {
+    query?: Record<string, string>;
+    body?: unknown;
+    cookie?: string;
+    redirect?: RequestRedirect;
+  },
+) =>
+  Effect.gen(function* () {
+    const { fetch } = yield* TestingWebHandler;
+    const headers: Record<string, string> = {};
+    if (opts?.body) headers["Content-Type"] = "application/json";
+    if (opts?.cookie) headers["Cookie"] = opts.cookie;
+    const query = opts?.query ? `?${new URLSearchParams(opts.query).toString()}` : "";
+    const response = yield* Effect.tryPromise(() =>
+      fetch(
+        new Request(`http://localhost/api/testingCommand${path}${query}`, {
+          method,
+          headers,
+          redirect: opts?.redirect,
+          body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        }),
+      ),
+    );
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      json: <T = unknown>() =>
+        Effect.tryPromise(() => response.json() as Promise<T>),
+    } as const;
+  });
+
+const createTestUser = (username: string, options?: { verified?: "true" | "false"; password?: string }) =>
+  testingHttp("GET", "/createUser", {
+    query: {
+      username,
+      email: `${username}@example.com`,
+      verified: options?.verified ?? "true",
+      password: options?.password ?? "TestPassword123!",
+    },
+  });
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
+  // -- Registration -------------------------------------------------------
+
+  describe("Registration", () => {
+    it.effect("creates user and sets session cookie", () => {
+      const username = `test_reg_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function*() {
+          const res = yield* register(username);
+          const body = yield* res.json<{ id: string; username: string }>();
+
+          expect(res.status).toBe(200);
+          expect(body.id).toBeDefined();
+          expect(body.username).toBe(username);
+
+          const setCookie = res.headers.get("set-cookie");
+          expect(setCookie).toBeTruthy();
+          expect(setCookie).toContain("session=");
+        }),
+      );
     });
 
-    expect(status).toBe(200);
-    // When no valid session, response body is empty
-    expect(data).toBeFalsy();
-  });
-
-  it("rejects expired session", async () => {
-    const username = `test_${generateStr(8)}`;
-    const email = `${username}@test.com`;
-    const password = "TestPassword123!";
-
-    try {
-      // Register to get a session
-      const registerRes = await client.register.post({
+    it.effect("rejects duplicate username", () => {
+      const username = `test_dup_${randomSuffix()}`;
+      return withCleanup(
         username,
-        email,
-        password,
-      });
-
-      const setCookie = getHeader(registerRes.headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-      const sessionCookie = setCookie!.split(";")[0]!;
-      const sessionId = sessionCookie.split("=")[1]!.split(".")[0]!;
-
-      // Delete the session from Valkey to simulate expiration
-      await valkey.del(`session:${sessionId}`);
-
-      // Try to use the expired session
-      const { status, data } = await client.me.get({
-        fetch: { headers: { Cookie: sessionCookie } },
-      });
-
-      expect(status).toBe(200);
-      // Session should be rejected, empty response
-      expect(data).toBeFalsy();
-    } finally {
-      await cleanupUser(username);
-    }
-  });
-
-  it("can login with email and create new session", async () => {
-    const username = `test_${generateStr(8)}`;
-    const email = `${username}@test.com`;
-    const password = "TestPassword123!";
-
-    try {
-      // First register
-      await client.register.post({ username, email, password });
-
-      // Then login
-      const { data, status, headers } = await client.login.post({
-        id: email,
-        password,
-      });
-
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("username", username);
-
-      // Should have new session cookie
-      const setCookie = getHeader(headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-      expect(setCookie).toContain("session=");
-    } finally {
-      await cleanupUser(username);
-    }
-  });
-
-  it("can logout and invalidate session", async () => {
-    const username = `test_${generateStr(8)}`;
-    const email = `${username}@test.com`;
-    const password = "TestPassword123!";
-
-    try {
-      // Register
-      await client.register.post({ username, email, password });
-
-      // Login to get a fresh session
-      const loginRes = await client.login.post({
-        id: username,
-        password,
-      });
-
-      const setCookie = getHeader(loginRes.headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-      const sessionCookie = setCookie!.split(";")[0]!;
-
-      // Logout
-      const logoutRes = await client.logout.post(
-        {},
-        { fetch: { headers: { Cookie: sessionCookie } } },
+        Effect.gen(function*() {
+          yield* register(username);
+          const res = yield* register(username);
+          expect(res.status).toBe(409);
+        }),
       );
-      expect(logoutRes.status).toBe(200);
-
-      // Try to use the old session
-      const meRes = await client.me.get({
-        fetch: { headers: { Cookie: sessionCookie } },
-      });
-
-      // Session should be invalid after logout
-      expect(meRes.data).toBeFalsy();
-    } finally {
-      await cleanupUser(username);
-    }
+    });
   });
-});
 
-describe("Testing Command Endpoints", () => {
-  it("should clear test users successfully", async () => {
-    const username = `test_cleartest_${generateStr(6)}`;
+  // -- Session validation -------------------------------------------------
 
-    // Clean up first in case of previous failed run
-    await cleanupUser(username);
-
-    // Create a test user with the test% prefix
-    await rootDb
-      .insertInto("app_public.users")
-      .values({
+  describe("Session Validation", () => {
+    it.effect("/me returns user for valid session", () => {
+      const username = `test_me_${randomSuffix()}`;
+      return withCleanup(
         username,
-        is_verified: true,
-      })
-      .execute();
+        Effect.gen(function*() {
+          const cookie = yield* registerAndGetCookie(username);
 
-    const { data, status } = await client.api.testingCommand.clearTestUsers.get();
+          const res = yield* http("GET", "/me", { cookie });
+          const body = yield* res.json<{ username: string }>();
 
-    expect(status).toBe(200);
-    expect(data).toHaveProperty("success", true);
+          expect(res.status).toBe(200);
+          expect(body.username).toBe(username);
+        }),
+      );
+    });
 
-    // Verify user was deleted
-    const user = await rootDb
-      .selectFrom("app_public.users")
-      .where("username", "=", username)
-      .selectAll()
-      .executeTakeFirst();
+    it.effect("/me returns null for invalid session token", () =>
+      Effect.gen(function*() {
+        const res = yield* http("GET", "/me", {
+          cookie: "session=invalid.token",
+        });
+        const body = yield* res.json();
 
-    expect(user).toBeUndefined();
+        expect(res.status).toBe(200);
+        expect(body).toBeFalsy();
+      }),
+    );
+
+    it.effect("/me returns null after session evicted from Valkey", () => {
+      const username = `test_evict_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function*() {
+          const cookie = yield* registerAndGetCookie(username);
+          const id = sessionIdFromCookie(cookie);
+
+          // Simulate expiration by deleting the Valkey key
+          yield* Effect.tryPromise(() => valkey.del(`session:${id}`));
+
+          const res = yield* http("GET", "/me", { cookie });
+          const body = yield* res.json();
+
+          expect(res.status).toBe(200);
+          expect(body).toBeFalsy();
+        }),
+      );
+    });
   });
 
-  it("should create a test user", async () => {
-    const username = `testuser_${generateStr(6)}`;
-    const email = `${username}@example.com`;
+  // -- Login --------------------------------------------------------------
 
-    try {
-      const { data, status } = await client.api.testingCommand.createUser.get({
-        query: {
-          username,
-          email,
-          verified: "true",
-          password: "TestPassword123",
-        },
-      });
+  describe("Login", () => {
+    it.effect("logs in with email and returns session cookie", () => {
+      const username = `test_login_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function*() {
+          yield* register(username);
 
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("user");
-      expect(data).toHaveProperty("user.username", username);
-      expect(data).toHaveProperty("user.is_verified", true);
-      expect(data).toHaveProperty("userEmailId");
-    } finally {
-      await cleanupUser(username);
-    }
+          const res = yield* http("POST", "/login", {
+            body: {
+              id: `${username}@test.com`,
+              password: "TestPassword123!",
+            },
+          });
+          const body = yield* res.json<{ username: string }>();
+
+          expect(res.status).toBe(200);
+          expect(body.username).toBe(username);
+          expect(res.headers.get("set-cookie")).toContain("session=");
+        }),
+      );
+    });
+
+    it.effect("logs in with username", () => {
+      const username = `test_loginusr_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function*() {
+          yield* register(username);
+
+          const res = yield* http("POST", "/login", {
+            body: { id: username, password: "TestPassword123!" },
+          });
+
+          expect(res.status).toBe(200);
+          expect(res.headers.get("set-cookie")).toContain("session=");
+        }),
+      );
+    });
   });
 
-  it("should get user secrets", async () => {
-    const username = `testuser_${generateStr(6)}`;
+  // -- Logout -------------------------------------------------------------
 
-    try {
-      // First create a user
-      await client.api.testingCommand.createUser.get({
-        query: { username, password: "TestPassword456" },
-      });
+  describe("Logout", () => {
+    it.effect("invalidates session after logout", () => {
+      const username = `test_logout_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function*() {
+          yield* register(username);
 
-      // Then get their secrets
-      const { data, status } = await client.api.testingCommand.getUserSecrets.get({
-        query: { username },
-      });
+          // Login for a fresh session
+          const loginRes = yield* http("POST", "/login", {
+            body: { id: username, password: "TestPassword123!" },
+          });
+          const cookie = parseCookie(loginRes.headers);
 
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("user_id");
-      expect(data).toHaveProperty("password_hash");
-    } finally {
-      await cleanupUser(username);
-    }
+          // Logout
+          const logoutRes = yield* http("POST", "/logout", { cookie });
+          expect(logoutRes.status).toBe(200);
+
+          // Old session should be dead
+          const meRes = yield* http("GET", "/me", { cookie });
+          const meBody = yield* meRes.json();
+          expect(meBody).toBeFalsy();
+        }),
+      );
+    });
   });
 
-  it("should verify a user", async () => {
-    const username = `testuser_${generateStr(6)}`;
+  // -- App flows using testing setup -------------------------------------
 
-    try {
-      // Create unverified user
-      await client.api.testingCommand.createUser.get({
-        query: { username, verified: "false" },
-      });
+  describe("App flows with testing helpers", () => {
+    it.effect("testing login session can access app /me", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          const login = yield* testingHttp("GET", "/login", {
+            query: { username, verified: "true", redirectTo: "/" },
+            redirect: "manual",
+          });
+          const cookie = parseCookie(login.headers);
+          const me = yield* http("GET", "/me", { cookie });
+          const meBody = yield* me.json<{ username: string }>();
 
-      // Verify the user
-      const { data, status } = await client.api.testingCommand.verifyUser.get({
-        query: { username },
-      });
-
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("success", true);
-
-      // Verify it worked in DB
-      const user = await rootDb
-        .selectFrom("app_public.users")
-        .where("username", "=", username)
-        .select("is_verified")
-        .executeTakeFirst();
-
-      expect(user?.is_verified).toBe(true);
-    } finally {
-      await cleanupUser(username);
-    }
-  });
-
-  it("should login and set session cookie via testing endpoint", async () => {
-    const username = `testlogin_${generateStr(6)}`;
-
-    try {
-      const { status, headers } = await client.api.testingCommand.login.get({
-        query: { username, verified: "true", redirectTo: "/" },
-        fetch: { redirect: "manual" },
-      });
-
-      expect(status).toBe(302);
-      expect(getHeader(headers, "location")).toBe("/");
-      expect(getHeader(headers, "set-cookie")).toContain("session=");
-    } finally {
-      await cleanupUser(username);
-    }
-  });
-
-  it("should register a new user via testing API", async () => {
-    const username = `testuser_${generateStr(8)}`;
-    const email = `${username}@example.com`;
-
-    try {
-      const { status, headers } = await client.api.testingCommand.register.post(
-        {
-          username,
-          email,
-          password: "TestPassword123!",
-        },
-        { fetch: { redirect: "manual" } },
+          expect(login.status).toBe(302);
+          expect(cookie).toContain("session=");
+          expect(me.status).toBe(200);
+          expect(meBody.username).toBe(username);
+        }),
       );
+    });
 
-      expect(status).toBe(302);
-      expect(getHeader(headers, "location")).toBe("/");
-      expect(getHeader(headers, "set-cookie")).toContain("session=");
-    } finally {
-      await cleanupUser(username);
-    }
-  });
+    it.effect("testing login session can be logged out via app /logout", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          const login = yield* testingHttp("GET", "/login", {
+            query: { username, verified: "true", redirectTo: "/" },
+            redirect: "manual",
+          });
+          const cookie = parseCookie(login.headers);
 
-  it("should login via testing API and get session cookie", async () => {
-    const username = `logintest_${generateStr(8)}`;
-    const email = `${username}@example.com`;
-    const password = "TestPassword123!";
+          const logout = yield* http("POST", "/logout", { cookie });
+          const meAfter = yield* http("GET", "/me", { cookie });
+          const meBody = yield* meAfter.json();
 
-    try {
-      // First register
-      await client.api.testingCommand.register.post(
-        { username, email, password },
-        { fetch: { redirect: "manual" } },
+          expect(logout.status).toBe(200);
+          expect(meAfter.status).toBe(200);
+          expect(meBody).toBeFalsy();
+        }),
       );
+    });
 
-      // Then login
-      const { status, headers } = await client.api.testingCommand.loginPost.post(
-        { id: username, password },
-        { fetch: { redirect: "manual" } },
+    it.effect("testing loginPost session can access app /me", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          yield* testingHttp("POST", "/register", {
+            body: {
+              username,
+              email: `${username}@example.com`,
+              password: "TestPassword123!",
+            },
+            redirect: "manual",
+          });
+
+          const login = yield* testingHttp("POST", "/loginPost", {
+            body: { id: username, password: "TestPassword123!" },
+            redirect: "manual",
+          });
+          const cookie = parseCookie(login.headers);
+
+          const me = yield* http("GET", "/me", { cookie });
+          const meBody = yield* me.json<{ username: string }>();
+
+          expect(login.status).toBe(302);
+          expect(me.status).toBe(200);
+          expect(meBody.username).toBe(username);
+        }),
       );
+    });
 
-      expect(status).toBe(302);
-      expect(getHeader(headers, "location")).toBe("/");
-      expect(getHeader(headers, "set-cookie")).toContain("session=");
-    } finally {
-      await cleanupUser(username);
-    }
-  });
+    it.effect("testing loginPost session can be logged out via app /logout", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          yield* testingHttp("POST", "/register", {
+            body: {
+              username,
+              email: `${username}@example.com`,
+              password: "TestPassword123!",
+            },
+            redirect: "manual",
+          });
 
-  it("should access /me endpoint with valid session from testing login", async () => {
-    const username = `metest_${generateStr(8)}`;
-    const email = `${username}@example.com`;
-    const password = "TestPassword123!";
+          const login = yield* testingHttp("POST", "/loginPost", {
+            body: { id: username, password: "TestPassword123!" },
+            redirect: "manual",
+          });
+          const cookie = parseCookie(login.headers);
 
-    try {
-      // Register and login via testing endpoints
-      await client.api.testingCommand.register.post(
-        { username, email, password },
-        { fetch: { redirect: "manual" } },
+          const logout = yield* http("POST", "/logout", { cookie });
+          const meAfter = yield* http("GET", "/me", { cookie });
+          const meBody = yield* meAfter.json();
+
+          expect(logout.status).toBe(200);
+          expect(meBody).toBeFalsy();
+        }),
       );
+    });
 
-      const loginRes = await client.api.testingCommand.loginPost.post(
-        { id: username, password },
-        { fetch: { redirect: "manual" } },
+    it.effect("app /login succeeds for testing-created user by email", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
+
+          const login = yield* http("POST", "/login", {
+            body: {
+              id: `${username}@example.com`,
+              password: "StrongPass123!",
+            },
+          });
+          const body = yield* login.json<{ username: string }>();
+
+          expect(login.status).toBe(200);
+          expect(body.username).toBe(username);
+        }),
       );
+    });
 
-      const setCookie = getHeader(loginRes.headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
+    it.effect("app /login rejects wrong password for testing-created user", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
 
-      const sessionCookie = setCookie!.split(";")[0]!;
+          const login = yield* http("POST", "/login", {
+            body: {
+              id: username,
+              password: "WrongPassword999!",
+            },
+          });
 
-      // Access /me with the session cookie
-      const { data, status } = await client.me.get({
-        fetch: { headers: { Cookie: sessionCookie } },
-      });
-
-      expect(status).toBe(200);
-      expect(data).toHaveProperty("username", username);
-    } finally {
-      await cleanupUser(username);
-    }
-  });
-
-  it("should logout and clear session from testing login", async () => {
-    const username = `logouttest_${generateStr(8)}`;
-    const email = `${username}@example.com`;
-    const password = "TestPassword123!";
-
-    try {
-      // Register and login via testing endpoints
-      await client.api.testingCommand.register.post(
-        { username, email, password },
-        { fetch: { redirect: "manual" } },
+          expect(login.status).toBe(401);
+        }),
       );
+    });
 
-      const loginRes = await client.api.testingCommand.loginPost.post(
-        { id: username, password },
-        { fetch: { redirect: "manual" } },
+    it.effect("app /register rejects duplicate username from testing-created user", () => {
+      const username = `testuser_${randomSuffix()}`;
+      return withCleanup(
+        username,
+        Effect.gen(function* () {
+          yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
+
+          const reg = yield* http("POST", "/register", {
+            body: {
+              username,
+              email: `${username}@duplicate.test`,
+              password: "AnotherPass123!",
+            },
+          });
+
+          expect(reg.status).toBe(409);
+        }),
       );
-
-      const setCookie = getHeader(loginRes.headers, "set-cookie");
-      expect(setCookie).toBeTruthy();
-
-      const sessionCookie = setCookie!.split(";")[0]!;
-
-      // Logout
-      const logoutRes = await client.logout.post(
-        {},
-        { fetch: { headers: { Cookie: sessionCookie } } },
-      );
-      expect(logoutRes.status).toBe(200);
-
-      // Try to access /me with old session (should fail)
-      const meRes = await client.me.get({
-        fetch: { headers: { Cookie: sessionCookie } },
-      });
-
-      // When no user is authenticated, /me returns empty body
-      expect(meRes.status).toBe(200);
-      expect(meRes.data).toBeFalsy();
-    } finally {
-      await cleanupUser(username);
-    }
+    });
   });
 });

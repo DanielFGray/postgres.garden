@@ -46,6 +46,12 @@ body {
   outline-offset: -1px;
 }
 
+.search-hint {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+}
+
 .playground-list {
   overflow-y: auto;
   height: calc(100vh - 100px);
@@ -72,6 +78,12 @@ body {
 .playground-name {
   font-weight: 500;
   font-size: 13px;
+}
+
+.playground-owner {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 400;
 }
 
 .privacy-badge {

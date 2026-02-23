@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
+import { Effect, Layer } from "effect";
+import { VSCodeService } from "../vscode/service";
 
 export type NetworkState = "online" | "offline";
 
@@ -19,20 +20,21 @@ function setState(next: NetworkState) {
   emitter.fire(next);
 }
 
-// --- Extension registration ---
+export const NetworkFeatureLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    yield* VSCodeService;
 
-const ext = registerExtension(
-  {
-    name: "network-status",
-    publisher: "postgres.garden",
-    description: "Network status detection",
-    version: "1.0.0",
-    engines: { vscode: "*" },
-  },
-  ExtensionHostKind.LocalProcess,
+    const onOnline = () => setState("online");
+    const onOffline = () => setState("offline");
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        window.removeEventListener("online", onOnline);
+        window.removeEventListener("offline", onOffline);
+      }),
+    );
+  }).pipe(Effect.withSpan("feature.network")),
 );
-
-void ext.getApi().then(() => {
-  window.addEventListener("online", () => setState("online"));
-  window.addEventListener("offline", () => setState("offline"));
-});

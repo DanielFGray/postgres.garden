@@ -1,3 +1,5 @@
+import type { RequestTelemetryContext } from "../webview/requestTelemetry";
+
 /** Webview → Extension host messages */
 export type AuthWebviewMessage =
   | { type: "initialized" }
@@ -7,6 +9,7 @@ export type AuthWebviewMessage =
       endpoint: string;
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
       body?: unknown;
+      telemetry?: RequestTelemetryContext;
     }
   | { type: "github-signin" }
   | { type: "auth-complete"; username: string };

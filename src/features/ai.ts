@@ -1,30 +1,7 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+import { Effect, Layer } from "effect";
+import { VSCodeService } from "../vscode/service";
 
-const ext = registerExtension(
-  {
-    name: "postgres-garden-ai",
-    publisher: "postgres-garden",
-    version: "1.0.0",
-    engines: {
-      vscode: "*",
-    },
-    contributes: {
-      commands: [
-        {
-          command: "aiSuggestedCommand",
-          title: "This is a command suggested by the AI",
-        },
-      ],
-    },
-    enabledApiProposals: ["aiRelatedInformation"],
-  },
-  ExtensionHostKind.LocalProcess,
-  {
-    system: true, // to be able to use api proposals
-  },
-);
-
-void ext.getApi().then((vscode) => {
+const activateAiFeature = (vscode: typeof import("vscode")) => {
   vscode.commands.registerCommand("aiSuggestedCommand", () => {
     vscode.window.showInformationMessage("Hello", {
       detail: "You just run the AI suggested command",
@@ -42,4 +19,13 @@ void ext.getApi().then((vscode) => {
       ];
     },
   });
-});
+};
+
+export const AiFeatureLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    const vscodeService = yield* VSCodeService;
+    yield* Effect.sync(() => {
+      activateAiFeature(vscodeService.api);
+    });
+  }),
+);

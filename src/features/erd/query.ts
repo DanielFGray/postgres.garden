@@ -1,9 +1,13 @@
 import { templateHack } from "../../../lib/index.js";
-import type { PGliteService } from "../pglite.js";
+import type { QueryOptions } from "@electric-sql/pglite";
 
 const sql = templateHack;
 
-export async function getMermaidERD(service: PGliteService) {
+export interface ERDQueryClient {
+  query<T>(sql: string, params?: unknown[], opts?: QueryOptions): Promise<{ rows: readonly T[] }>;
+}
+
+export async function getMermaidERD(service: ERDQueryClient) {
   const result = await service.query<{ erd: string }>(sql`
     select 'erDiagram' as erd
 

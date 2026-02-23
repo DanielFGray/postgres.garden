@@ -37,8 +37,9 @@ import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override";
 import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override";
 import getStorageServiceOverride, {
-  type IStorageProvider,
+  StorageScope,
 } from "@codingame/monaco-vscode-storage-service-override";
+import { InMemoryStorageDatabase } from "@codingame/monaco-vscode-api/vscode/vs/base/parts/storage/common/storage";
 import getExtensionServiceOverride from "@codingame/monaco-vscode-extensions-service-override";
 import getRemoteAgentServiceOverride from "@codingame/monaco-vscode-remote-agent-service-override";
 import getEnvironmentServiceOverride from "@codingame/monaco-vscode-environment-service-override";
@@ -78,6 +79,7 @@ import getMcpServiceOverride from "@codingame/monaco-vscode-mcp-service-override
 // import getImageResizeServiceOverride from "@codingame/monaco-vscode-image-resize-service-override";
 // import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
 import { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
+import { Effect } from "effect";
 import { Worker } from "./tools/fakeWorker";
 import defaultKeybindings from "./user/keybindings.json?raw";
 import defaultConfiguration from "./user/configuration.json?raw";
@@ -98,10 +100,7 @@ import { fileSystemProvider } from "./filesystemProvider";
 
 // window.history.replaceState({}, document.title, url.href)
 
-await createIndexedDBProviders();
 export const workspaceFile = monaco.Uri.file("/workspace.code-workspace");
-
-registerFileSystemOverlay(1, fileSystemProvider);
 
 // Workers
 const workers: Partial<Record<string, Worker>> = {
@@ -146,22 +145,41 @@ window.MonacoEnvironment = {
   },
 };
 
-// Set configuration before initializing service so it's directly available (especially for the theme, to prevent a flicker)
-await Promise.all([
-  initUserConfiguration(defaultConfiguration),
-  initUserKeybindings(defaultKeybindings),
-]);
+let commonInitialized = false;
 
-// Ephemeral storage provider — prevents VS Code from restoring previous session state.
+export const initializeCommon = Effect.suspend(() =>
+  commonInitialized
+    ? Effect.void
+    : Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () => createIndexedDBProviders(),
+          catch: (error) =>
+            new Error(
+              `Failed to create IndexedDB providers: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+        });
+
+        registerFileSystemOverlay(1, fileSystemProvider);
+
+        yield* Effect.tryPromise({
+          try: () => Promise.all([initUserConfiguration(defaultConfiguration), initUserKeybindings(defaultKeybindings)]),
+          catch: (error) =>
+            new Error(
+              `Failed to initialize user configuration: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+        });
+
+        commonInitialized = true;
+      }),
+);
+
+// Ephemeral storage — prevents VS Code from restoring previous session state.
 // All workbench state (open editors, layout, sidebar) starts fresh on every page load.
 // User configuration and keybindings are still applied via initUserConfiguration above.
-const ephemeralStorageProvider: IStorageProvider = {
-  read() {
-    return undefined;
-  },
-  async write() {
-    // no-op — don't persist state
-  },
+const ephemeralDatabaseFactories = {
+  [StorageScope.APPLICATION]: () => new InMemoryStorageDatabase(),
+  [StorageScope.PROFILE]: () => new InMemoryStorageDatabase(),
+  [StorageScope.WORKSPACE]: () => new InMemoryStorageDatabase(),
 };
 
 export const constructOptions: IWorkbenchConstructionOptions = {
@@ -248,7 +266,7 @@ export const commonServices: IEditorOverrideServices = {
   ...getAccessibilityServiceOverride(),
   ...getLanguageDetectionWorkerServiceOverride(),
   ...getStorageServiceOverride({
-    customProvider: ephemeralStorageProvider,
+    databaseFactories: ephemeralDatabaseFactories,
     fallbackOverride: {
       "workbench.activity.showAccounts": true,
     },

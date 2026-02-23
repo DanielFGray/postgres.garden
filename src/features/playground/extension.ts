@@ -3,248 +3,178 @@
  */
 
 import * as vscode from "vscode";
-import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
-import { PlaygroundPanelProvider } from "./providers/PlaygroundPanelProvider";
+import { Effect, Layer } from "effect";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
+import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
 import { PlaygroundService } from "./services/PlaygroundService";
-import { getCurrentPlaygroundId } from "../../routes";
+import { getCurrentPlaygroundId } from "../../shared/routes";
+import { Workbench } from "../../workbench";
 import {
   PLAYGROUND_SHOW_BROWSER,
   PLAYGROUND_OPEN,
   PLAYGROUND_OPEN_CURRENT,
   PLAYGROUND_REFRESH_METADATA,
   PLAYGROUND_CREATE,
+  PLAYGROUND_TOGGLE_STAR,
   PLAYGROUND_METADATA,
 } from "../constants";
+import { VSCodeService } from "../../vscode/service";
 
-const ext = registerExtension(
-  {
-    name: "postgres-garden-playground",
-    publisher: "postgres-garden",
-    version: "1.0.0",
-    engines: {
-      vscode: "*",
-    },
-    contributes: {
-      views: {
-        scm: [
-          {
-            id: PLAYGROUND_METADATA,
-            name: "Playground Info",
-            when: "true",
-          },
-        ],
-      },
-      commands: [
-        {
-          command: PLAYGROUND_SHOW_BROWSER,
-          title: "Show Playgrounds",
-          icon: "$(database)",
-        },
-        {
-          command: PLAYGROUND_OPEN,
-          title: "Open Playground Metadata",
-        },
-        {
-          command: PLAYGROUND_OPEN_CURRENT,
-          title: "Edit Current Playground Metadata",
-          icon: "$(edit)",
-        },
-        {
-          command: PLAYGROUND_CREATE,
-          title: "Create Playground",
-          icon: "$(add)",
-        },
-        {
-          command: PLAYGROUND_REFRESH_METADATA,
-          title: "Refresh Playground Metadata",
-          icon: "$(refresh)",
-        },
-      ],
-      menus: {
-        "view/title": [
-          {
-            command: PLAYGROUND_OPEN_CURRENT,
-            when: `view == ${PLAYGROUND_METADATA}`,
-            group: "navigation",
-          },
-          {
-            command: PLAYGROUND_REFRESH_METADATA,
-            when: `view == ${PLAYGROUND_METADATA}`,
-            group: "navigation",
-          },
-        ],
-      },
-    },
-  },
-  ExtensionHostKind.LocalProcess,
-);
-
-// Tree item class for metadata view
-class PlaygroundMetadataItem extends vscode.TreeItem {
-  constructor(
-    public readonly label: string,
-    public readonly description?: string,
-    public readonly collapsibleState: vscode.TreeItemCollapsibleState = vscode
-      .TreeItemCollapsibleState.None,
-  ) {
-    super(label, collapsibleState);
-  }
-}
-
-// TreeDataProvider for the metadata view
-class PlaygroundMetadataProvider implements vscode.TreeDataProvider<PlaygroundMetadataItem> {
-  private _onDidChangeTreeData: vscode.EventEmitter<
-    PlaygroundMetadataItem | undefined | null | void
-  > = new vscode.EventEmitter<PlaygroundMetadataItem | undefined | null | void>();
-  readonly onDidChangeTreeData: vscode.Event<PlaygroundMetadataItem | undefined | null | void> =
-    this._onDidChangeTreeData.event;
-
-  constructor(private service: PlaygroundService) {}
-
-  refresh(): void {
-    this._onDidChangeTreeData.fire();
-  }
-
-  getTreeItem(element: PlaygroundMetadataItem): vscode.TreeItem {
-    return element;
-  }
-
-  async getChildren(element?: PlaygroundMetadataItem): Promise<PlaygroundMetadataItem[]> {
-    if (element) {
-      return [];
-    }
-
-    const playgroundId = getCurrentPlaygroundId();
-    if (!playgroundId) {
-      return [
-        new PlaygroundMetadataItem(
-          "No playground loaded",
-          "Open or create a playground to see details",
-        ),
-      ];
-    }
-
-    try {
-      const playground = await this.service.getPlayground(playgroundId);
-      return [
-        new PlaygroundMetadataItem("Name", playground.name || "Untitled"),
-        new PlaygroundMetadataItem(
-          "Privacy",
-          playground.privacy.charAt(0).toUpperCase() + playground.privacy.slice(1),
-        ),
-        new PlaygroundMetadataItem("Description", playground.description || undefined),
-        new PlaygroundMetadataItem("Created", new Date(playground.created_at).toLocaleDateString()),
-      ];
-    } catch (error) {
-      console.error("Failed to load playground metadata:", error);
-      return [new PlaygroundMetadataItem("Error", "Failed to load metadata")];
-    }
-  }
-}
-
-void ext.getApi().then((vscode: typeof import("vscode")) => {
-  console.log("Playground extension activated");
+const activatePlaygroundExtension = Effect.gen(function* () {
+  const vscodeService = yield* VSCodeService;
+  const { runFork } = yield* Workbench;
+  const vscodeApi = vscodeService.api;
 
   const service = new PlaygroundService();
-  const subscriptions = [];
+  const subscriptions: vscode.Disposable[] = [];
+  const extensionUri = vscodeService.extensionUri;
 
-  // Get extension URI - use the current origin in dev mode
-  // In monaco-vscode-api, we use the window origin for webview resources
-  const extensionUri = vscode.Uri.parse(window.location.origin);
-
+  console.log("Playground extension activated");
   console.log("Extension URI:", extensionUri.toString());
 
-  // Create and register the metadata tree view
-  const metadataProvider = new PlaygroundMetadataProvider(service);
-  const metadataTreeView = vscode.window.createTreeView(PLAYGROUND_METADATA, {
-    treeDataProvider: metadataProvider,
+  const metadataProvider = new PlaygroundMetadataViewProvider(extensionUri);
+  subscriptions.push(
+    vscodeApi.window.registerWebviewViewProvider(PLAYGROUND_METADATA, metadataProvider),
+  );
+
+  const refreshMetadata = Effect.sync(() => {
+    const playgroundId = getCurrentPlaygroundId();
+    metadataProvider.refresh(playgroundId);
   });
-  subscriptions.push(metadataTreeView);
 
-  // Register command to show playground browser
-  subscriptions.push(
-    vscode.commands.registerCommand(PLAYGROUND_SHOW_BROWSER, () => {
-      console.log("[Playground] Opening playground browser...");
-      try {
-        PlaygroundBrowserPanel.createOrShow(extensionUri, service);
-        console.log("[Playground] Playground browser opened successfully");
-      } catch (err) {
-        console.error("[Playground] Failed to open playground browser:", err);
-      }
-    }),
-  );
+  runFork(refreshMetadata);
 
-  console.log("Playground browser command registered");
+  yield* vscodeService.registerCommand(PLAYGROUND_SHOW_BROWSER, () => {
+    runFork(
+      Effect.sync(() => {
+        PlaygroundBrowserPanel.createOrShow(extensionUri);
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            console.error("[Playground] Failed to open playground browser:", error);
+          }),
+        ),
+        Effect.catchAll(() => Effect.void),
+      ),
+    );
+  });
 
-  // Register command to open playground in panel
-  subscriptions.push(
-    vscode.commands.registerCommand(PLAYGROUND_OPEN, (playgroundId: string) => {
-      PlaygroundPanelProvider.createOrShow(extensionUri, playgroundId, service);
-    }),
-  );
+  yield* vscodeService.registerCommand(PLAYGROUND_OPEN, (playgroundId) => {
+    if (typeof playgroundId !== "string") {
+      return;
+    }
 
-  // Register command to open metadata panel for currently active playground (based on URL)
-  subscriptions.push(
-    vscode.commands.registerCommand(PLAYGROUND_OPEN_CURRENT, () => {
-      const playgroundId = getCurrentPlaygroundId();
+    metadataProvider.refresh(playgroundId);
+  });
 
-      if (!playgroundId) {
-        vscode.window.showInformationMessage(
-          "No playground is currently loaded. Save your workspace first to create a playground.",
-        );
-        return;
-      }
-
-      // TODO: Fix PlaygroundPanelProvider to use hash instead of numeric ID
-      vscode.window.showInformationMessage(
-        "Please use the edit button in the Playground Info panel (SCM sidebar) to edit playground metadata.",
+  yield* vscodeService.registerCommand(PLAYGROUND_OPEN_CURRENT, () => {
+    const playgroundId = getCurrentPlaygroundId();
+    if (!playgroundId) {
+      void vscodeApi.window.showInformationMessage(
+        "No playground is currently loaded. Save your workspace first to create a playground.",
       );
-    }),
-  );
+      return;
+    }
 
-  // Register command to refresh metadata view
-  subscriptions.push(
-    vscode.commands.registerCommand(PLAYGROUND_REFRESH_METADATA, () => {
-      metadataProvider.refresh();
-    }),
-  );
+    // Trigger save from the sidebar
+    metadataProvider.triggerSave();
+  });
 
-  // Register command to create new playground
-  subscriptions.push(
-    vscode.commands.registerCommand(PLAYGROUND_CREATE, async () => {
-      const name = await vscode.window.showInputBox({
-        prompt: "Enter playground name",
-        placeHolder: "my-playground",
-        validateInput: (value) => {
-          if (!value) return "Name is required";
-          if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-            return "Name can only contain letters, numbers, hyphens, and underscores";
-          }
-          return null;
-        },
-      });
+  yield* vscodeService.registerCommand(PLAYGROUND_REFRESH_METADATA, () => {
+    runFork(refreshMetadata);
+  });
 
-      if (name) {
-        try {
-          const playground = await service.createPlayground({
-            name,
-            privacy: "private",
-          });
+  // Refresh metadata on navigation (route changes update the playground ID)
+  if (window.navigation) {
+    const onNavigateSuccess = () => {
+      runFork(refreshMetadata);
+    };
+    window.navigation.addEventListener("navigatesuccess", onNavigateSuccess);
+    subscriptions.push({
+      dispose: () => window.navigation.removeEventListener("navigatesuccess", onNavigateSuccess),
+    });
+  }
 
-          // Navigate to the new playground
-          const url = `/playgrounds/${playground.hash}`;
-          if (window.navigation) {
-            window.navigation.navigate(url);
-          } else {
-            window.location.href = url;
-          }
-        } catch (error) {
-          vscode.window.showErrorMessage(
-            `Failed to create playground: ${error instanceof Error ? error.message : String(error)}`,
-          );
+  yield* vscodeService.registerCommand(PLAYGROUND_TOGGLE_STAR, () => {
+    runFork(
+      Effect.gen(function* () {
+        const playgroundId = getCurrentPlaygroundId();
+        if (!playgroundId) return;
+
+        yield* service.toggleStar(playgroundId);
+        yield* refreshMetadata;
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            void vscodeApi.window.showErrorMessage(
+              `Failed to toggle star: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }),
+        ),
+        Effect.catchAll(() => Effect.void),
+      ),
+    );
+  });
+
+  yield* vscodeService.registerCommand(PLAYGROUND_CREATE, () => {
+    runFork(
+      Effect.gen(function* () {
+        const name = yield* Effect.tryPromise({
+          try: () =>
+            vscodeApi.window.showInputBox({
+              prompt: "Enter playground name",
+              placeHolder: "my-playground",
+              validateInput: (value) => {
+                if (!value) return "Name is required";
+                if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+                  return "Name can only contain letters, numbers, hyphens, and underscores";
+                }
+                return null;
+              },
+            }),
+          catch: (error) => new Error(error instanceof Error ? error.message : String(error)),
+        });
+
+        if (!name) {
+          return;
         }
-      }
-    }),
+
+        const playground = yield* service.createPlayground({
+          name,
+          privacy: "private",
+        });
+
+        const url = `/playgrounds/${playground.hash}`;
+        if (window.navigation) {
+          window.navigation.navigate(url);
+          return;
+        }
+
+        window.location.href = url;
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            void vscodeApi.window.showErrorMessage(
+              `Failed to create playground: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }),
+        ),
+        Effect.catchAll(() => Effect.void),
+      ),
+    );
+  });
+
+  return yield* Effect.acquireRelease(
+    Effect.succeed(subscriptions),
+    (all) =>
+      Effect.sync(() => {
+        all.forEach((disposable) => {
+          disposable.dispose();
+        });
+      }),
   );
 });
+
+export const PlaygroundExtensionLive = Layer.scopedDiscard(
+  activatePlaygroundExtension.pipe(Effect.withSpan("feature.playground")),
+);

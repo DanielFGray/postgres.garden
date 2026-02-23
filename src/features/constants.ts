@@ -36,6 +36,7 @@ export const PLAYGROUND_OPEN = "playground.open";
 export const PLAYGROUND_OPEN_CURRENT = "playground.openCurrent";
 export const PLAYGROUND_REFRESH_METADATA = "playground.refreshMetadata";
 export const PLAYGROUND_CREATE = "playground.create";
+export const PLAYGROUND_TOGGLE_STAR = "playground.toggleStar";
 
 // VSCode Built-in Commands (used in our code)
 export const VSCODE_OPEN = "vscode.open";

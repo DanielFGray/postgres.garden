@@ -47,9 +47,9 @@ function addCoiHeaders(response: Response): Response {
   if (response.type === "opaque") return response;
 
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(COI_HEADERS)) {
+  Object.entries(COI_HEADERS).forEach(([key, value]) => {
     headers.set(key, value);
-  }
+  });
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -128,11 +128,21 @@ setCatchHandler(async ({ request }) => {
   if (request.destination === "document") {
     const cache = await caches.open("workbox-precache-v2");
     const keys = await cache.keys();
-    for (const key of keys) {
+    const precachedDocument = await keys.reduce<Promise<Response | undefined>>(async (prev, key) => {
+      const resolved = await prev;
+      if (resolved) {
+        return resolved;
+      }
       if (key.url.endsWith("index.html") || key.url === new URL("/", self.location.origin).href) {
         const response = await cache.match(key);
-        if (response) return addCoiHeaders(response);
+        if (response) {
+          return addCoiHeaders(response);
+        }
       }
+      return undefined;
+    }, Promise.resolve(undefined));
+    if (precachedDocument) {
+      return precachedDocument;
     }
     const fallback = await caches.match(new URL("/", self.location.origin).href);
     if (fallback) return addCoiHeaders(fallback);

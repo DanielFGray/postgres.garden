@@ -13,14 +13,14 @@ This project now supports server-side rendering (SSR) of the HTML shell with emb
 
 ### Development Mode
 
-1. `server/dev.ts` creates a Vite dev server with a custom plugin
+1. `server/httpapi/webServer.ts` creates a Vite dev server bridge
 2. The plugin uses Vite's `transformIndexHtml` hook to inject data
 3. Data is fetched via `getInitialData()` and embedded as `<script>window.__INITIAL_DATA__ = {...}</script>`
 4. Vite handles all module transformation, HMR, and serving with correct MIME types
 
 ### Production Mode
 
-1. `server/prod.ts` uses Elysia to serve pre-built assets from `/dist`
+1. `server/httpapi/webServer.ts` serves pre-built assets from `/dist`
 2. For HTML requests, it injects data before serving
 3. Static assets (JS, CSS, images) are served directly
 
@@ -95,8 +95,7 @@ See `src/example-initial-data-usage.ts` for more examples.
 ## Server Files
 
 - `server/index.ts` - Entry point (routes to dev/prod)
-- `server/dev.ts` - Development server with Vite SSR
-- `server/prod.ts` - Production server for built assets
+- `server/httpapi/webServer.ts` - Unified dev/prod web server with SSR injection
 - `server/data.ts` - Data fetching logic (customize this!)
 
 ## Switching to Effect
@@ -105,6 +104,6 @@ To use Effect instead of Elysia:
 
 1. Replace Elysia imports with your Effect HTTP server
 2. Keep the same data injection pattern
-3. Update `server/dev.ts` and `server/prod.ts` accordingly
+3. Update `server/httpapi/webServer.ts` accordingly
 
 The core pattern remains the same - fetch data, inject into HTML.

@@ -4,9 +4,12 @@
  */
 
 import * as vscode from "vscode";
-import { registerExtension, ExtensionHostKind } from "@codingame/monaco-vscode-api/extensions";
 import * as S from "effect/Schema";
-import { api } from "../api-client";
+import { Effect, Layer, Option } from "effect";
+import { HydrationState } from "fibrae";
+import { httpApiLogout } from "../httpapi-client";
+import { hydratePageState } from "../shared/dehydrate";
+import type { User } from "../shared/schemas";
 import {
   GITHUB_SIGNIN,
   GITHUB_ACCOUNT_MENU,
@@ -15,6 +18,8 @@ import {
 } from "./constants";
 import { AccountSettingsPanelProvider } from "./account/AccountSettingsPanelProvider";
 import { AuthPanelProvider } from "./auth-panel/AuthPanelProvider";
+import { VSCodeService } from "../vscode/service";
+import { Workbench } from "../workbench";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
 const AuthMessage = S.Struct({
@@ -61,16 +66,11 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
     return this._onDidChangeSessions.event;
   }
 
-  constructor() {
-    // Initialize with username from SSR data if available
-    // Always trust the server session (__INITIAL_DATA__) as the source of truth
-    const initialData = window.__INITIAL_DATA__;
-    if (initialData?.user?.username) {
-      this.currentUsername = initialData.user.username;
-      // Store in localStorage for persistence
+  constructor(user: Option.Option<User>) {
+    if (Option.isSome(user)) {
+      this.currentUsername = user.value.username;
       localStorage.setItem(AuthProvider.storageKey, this.currentUsername);
     } else {
-      // No server session - clear any stale localStorage
       localStorage.removeItem(AuthProvider.storageKey);
       this.currentUsername = undefined;
     }
@@ -192,7 +192,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 
     // Sync with server to clear session cookie
     try {
-      await api("/api/logout", { method: "POST" });
+      await Effect.runPromise(httpApiLogout);
     } catch (error) {
       console.error("Failed to sync logout with server:", error);
     }
@@ -358,19 +358,6 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 // Export provider instance for use in other modules
 export let authProviderInstance: AuthProvider | undefined;
 
-const ext = registerExtension(
-  {
-    name: "postgres.garden",
-    publisher: "postgres.garden",
-    description: "postgres.garden",
-    version: "1.0.0",
-    engines: {
-      vscode: "*",
-    },
-  },
-  ExtensionHostKind.LocalProcess,
-);
-
 /**
  * Extended QuickPickItem with a value property for menu actions
  */
@@ -378,148 +365,211 @@ interface AccountMenuItem extends vscode.QuickPickItem {
   value: "profile" | "settings" | "signout";
 }
 
-void ext.getApi().then((vsapi) => {
-  // Register the authentication provider
-  const provider = new AuthProvider();
-  authProviderInstance = provider;
+export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | HydrationState | Workbench> =
+  Layer.scopedDiscard(
+    Effect.gen(function* () {
+      const vscodeService = yield* VSCodeService;
+      const { runFork } = yield* Workbench;
+      const { user: initialUser } = hydratePageState(yield* HydrationState);
+      const user = Option.fromNullable(initialUser);
+      const vscodeApi = vscodeService.api;
+      const extensionUri = vscodeService.extensionUri;
 
-  const extensionUri = vscode.Uri.parse(window.location.origin);
-  provider.setExtensionUri(extensionUri);
+      // Register the authentication provider
+      const provider = new AuthProvider(user);
+      authProviderInstance = provider;
+      provider.setExtensionUri(extensionUri);
 
-  vscode.authentication.registerAuthenticationProvider(
-    AuthProvider.id,
-    AuthProvider.label,
-    provider,
-  );
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vscode.authentication.registerAuthenticationProvider(
+            AuthProvider.id,
+            AuthProvider.label,
+            provider,
+          ),
+        ),
+        (disposable) => Effect.sync(() => disposable.dispose()),
+      );
 
-  // === Status Bar Integration ===
-  // Create status bar item (now that provider is registered)
-  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.show();
+      // === Status Bar Integration ===
+      const statusBarItem = yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const item = vscodeApi.window.createStatusBarItem(
+            vscodeApi.StatusBarAlignment.Right,
+            100,
+          );
+          item.show();
+          return item;
+        }),
+        (item) => Effect.sync(() => item.dispose()),
+      );
 
-  // Update status bar based on current auth state
-  const updateStatusBar = async () => {
-    // Use provider directly since vscode.authentication.getSession() may not
-    // surface sessions from our provider without user interaction
-    const sessions = await provider.getSessions();
-    const session = sessions[0];
+      // Update status bar based on current auth state
+      // Kept as plain async closure — fire-and-forget via void updateStatusBar()
+      const updateStatusBar = async () => {
+        // Use provider directly since vscode.authentication.getSession() may not
+        // surface sessions from our provider without user interaction
+        const sessions = await provider.getSessions();
+        const session = sessions[0];
 
-    if (session) {
-      const username = session.account?.label || "User";
-      statusBarItem.text = `$(account) ${username}`;
-      statusBarItem.tooltip = `Signed in as ${username}\nClick for account options`;
-      statusBarItem.command = GITHUB_ACCOUNT_MENU;
-    } else {
-      statusBarItem.text = "$(account) Sign In";
-      statusBarItem.tooltip = "Click to sign in";
-      statusBarItem.command = GITHUB_SIGNIN;
-    }
-  };
+        if (session) {
+          const username = session.account?.label || "User";
+          statusBarItem.text = `$(account) ${username}`;
+          statusBarItem.tooltip = `Signed in as ${username}\nClick for account options`;
+          statusBarItem.command = GITHUB_ACCOUNT_MENU;
+        } else {
+          statusBarItem.text = "$(account) Sign In";
+          statusBarItem.tooltip = "Click to sign in";
+          statusBarItem.command = GITHUB_SIGNIN;
+        }
+      };
 
-  // Register sign in command — opens auth panel directly
-  vsapi.commands.registerCommand(GITHUB_SIGNIN, () => {
-    AuthPanelProvider.createOrShow(extensionUri, {
-      onAuth: (username: string) => {
-        localStorage.setItem("github-username", username);
-        provider.completeAuth(username);
-      },
-      onGitHubSignIn: () => {
-        provider
-          .createSessionWithGitHub()
-          .then((session) => {
-            AuthPanelProvider.notifyGitHubComplete(session.username);
-          })
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            AuthPanelProvider.notifyGitHubError(msg);
-          });
-      },
-      onCancel: () => {
-        // User closed the panel — nothing to do
-      },
-    });
-  });
-
-  // Register sign out command — single source of truth for logout
-  vsapi.commands.registerCommand(GITHUB_SIGNOUT, async () => {
-    const confirmed = await vscode.window.showWarningMessage(
-      "Are you sure you want to sign out?",
-      { modal: true },
-      "Sign Out",
-    );
-    if (confirmed !== "Sign Out") return;
-
-    await provider.removeSession();
-    window.location.reload();
-  });
-
-  // Register account settings command
-  vsapi.commands.registerCommand(ACCOUNT_SETTINGS_OPEN, () => {
-    AccountSettingsPanelProvider.createOrShow(extensionUri);
-  });
-
-  // Register account menu command
-  vsapi.commands.registerCommand(GITHUB_ACCOUNT_MENU, async () => {
-    try {
-      const sessions = await provider.getSessions();
-      if (sessions.length === 0) return;
-
-      const menuItems: AccountMenuItem[] = [
-        { label: "$(account) Account Settings", value: "settings" },
-        { label: "$(sign-out) Sign Out", value: "signout" },
-      ];
-
-      const selected = await vscode.window.showQuickPick(menuItems, {
-        placeHolder: "Account Options",
+      // Register sign in command — opens auth panel directly (sync handler)
+      yield* vscodeService.registerCommand(GITHUB_SIGNIN, () => {
+        AuthPanelProvider.createOrShow(extensionUri, {
+          onAuth: (username: string) => {
+            localStorage.setItem("github-username", username);
+            provider.completeAuth(username);
+          },
+          onGitHubSignIn: () => {
+            provider
+              .createSessionWithGitHub()
+              .then((session) => {
+                AuthPanelProvider.notifyGitHubComplete(session.username);
+              })
+              .catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                AuthPanelProvider.notifyGitHubError(msg);
+              });
+          },
+          onCancel: () => {
+            // User closed the panel — nothing to do
+          },
+        });
       });
 
-      if (!selected) return;
+      // Register sign out command — single source of truth for logout
+      yield* vscodeService.registerCommand(GITHUB_SIGNOUT, () => {
+        runFork(
+          Effect.gen(function* () {
+            const confirmed = yield* Effect.tryPromise({
+              try: () =>
+                vscode.window.showWarningMessage(
+                  "Are you sure you want to sign out?",
+                  { modal: true },
+                  "Sign Out",
+                ),
+              catch: (err) => new Error(err instanceof Error ? err.message : String(err)),
+            });
+            if (confirmed !== "Sign Out") return;
 
-      switch (selected.value) {
-        case "settings":
-          await vsapi.commands.executeCommand(ACCOUNT_SETTINGS_OPEN);
-          break;
-        case "signout":
-          await vsapi.commands.executeCommand(GITHUB_SIGNOUT);
-          break;
-      }
-    } catch (error) {
-      void vscode.window.showErrorMessage(
-        `Account menu failed: ${error instanceof Error ? error.message : String(error)}`,
+            yield* Effect.promise(() => provider.removeSession());
+            window.location.reload();
+          }).pipe(
+            Effect.tapError((error) =>
+              Effect.sync(() => {
+                void vscode.window.showErrorMessage(
+                  `Sign out failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }),
+            ),
+            Effect.catchAll(() => Effect.void),
+          ),
+        );
+      });
+
+      // Register account settings command (sync handler)
+      yield* vscodeService.registerCommand(ACCOUNT_SETTINGS_OPEN, () => {
+        AccountSettingsPanelProvider.createOrShow(extensionUri);
+      });
+
+      // Register account menu command
+      yield* vscodeService.registerCommand(GITHUB_ACCOUNT_MENU, () => {
+        runFork(
+          Effect.gen(function* () {
+            const sessions = yield* Effect.promise(() => provider.getSessions());
+            if (sessions.length === 0) return;
+
+            const menuItems: AccountMenuItem[] = [
+              { label: "$(account) Account Settings", value: "settings" },
+              { label: "$(sign-out) Sign Out", value: "signout" },
+            ];
+
+            const selected = yield* Effect.tryPromise({
+              try: () =>
+                vscode.window.showQuickPick(menuItems, { placeHolder: "Account Options" }),
+              catch: (err) => new Error(err instanceof Error ? err.message : String(err)),
+            });
+
+            if (!selected) return;
+
+            switch (selected.value) {
+              case "settings":
+                yield* Effect.promise(() =>
+                  vscodeApi.commands.executeCommand(ACCOUNT_SETTINGS_OPEN),
+                );
+                break;
+              case "signout":
+                yield* Effect.promise(() =>
+                  vscodeApi.commands.executeCommand(GITHUB_SIGNOUT),
+                );
+                break;
+            }
+          }).pipe(
+            Effect.tapError((error) =>
+              Effect.sync(() => {
+                void vscode.window.showErrorMessage(
+                  `Account menu failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }),
+            ),
+            Effect.catchAll(() => Effect.void),
+          ),
+        );
+      });
+
+      // Listen for authentication changes (scoped event listener)
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vscode.authentication.onDidChangeSessions((e) => {
+            if (e.provider.id === AuthProvider.id) {
+              void updateStatusBar();
+            }
+          }),
+        ),
+        (disposable) => Effect.sync(() => disposable.dispose()),
       );
-    }
-  });
 
-  // Listen for authentication changes
-  vscode.authentication.onDidChangeSessions((e) => {
-    if (e.provider.id === AuthProvider.id) {
+      // Initial status bar update
       void updateStatusBar();
-    }
-  });
 
-  // Initial status bar update
-  void updateStatusBar();
+      // === URL Parameter Detection ===
+      // Check for /verify and /reset URLs from email links
+      const url = new URL(window.location.href);
+      const pathname = url.pathname;
 
-  // === URL Parameter Detection ===
-  // Check for /verify and /reset URLs from email links
-  const url = new URL(window.location.href);
-  const pathname = url.pathname;
-
-  if (pathname === "/reset") {
-    const userId = url.searchParams.get("userId");
-    const token = url.searchParams.get("token");
-    if (userId && token) {
-      AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", { userId, token });
-      // Clean URL
-      window.history.replaceState({}, "", "/");
-    }
-  } else if (pathname === "/verify") {
-    const emailId = url.searchParams.get("id");
-    const token = url.searchParams.get("token");
-    if (emailId && token) {
-      AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", { emailId, token });
-      // Clean URL
-      window.history.replaceState({}, "", "/");
-    }
-  }
-});
+      if (pathname === "/reset") {
+        const userId = url.searchParams.get("userId");
+        const token = url.searchParams.get("token");
+        if (userId && token) {
+          AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", {
+            userId,
+            token,
+          });
+          // Clean URL
+          window.history.replaceState({}, "", "/");
+        }
+      } else if (pathname === "/verify") {
+        const emailId = url.searchParams.get("id");
+        const token = url.searchParams.get("token");
+        if (emailId && token) {
+          AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", {
+            emailId,
+            token,
+          });
+          // Clean URL
+          window.history.replaceState({}, "", "/");
+        }
+      }
+    }).pipe(Effect.withSpan("feature.auth")),
+  );

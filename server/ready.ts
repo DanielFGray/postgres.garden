@@ -1,6 +1,6 @@
 import { Effect, Schedule, pipe, Duration, Schema } from "effect";
-import type * as pg from "pg";
-import { rootPg, authPg } from "./db.js";
+import { sql } from "kysely";
+import { PgRootDB, PgAuthDB, type KyselyDB } from "./db.js";
 import { valkey } from "./valkey.js";
 
 class PostgresNotReady extends Schema.TaggedError<PostgresNotReady>()("PostgresNotReady", {
@@ -17,37 +17,30 @@ const retrySchedule = pipe(
   Schedule.compose(Schedule.recurs(20)),
 );
 
-function testPool(pool: pg.Pool, name: string) {
-  return pipe(
-    Effect.tryPromise({
-      try: async () => {
-        const client = await pool.connect();
-        try {
-          await client.query("SELECT 1 AS ready");
-        } finally {
-          client.release();
-        }
-      },
-      catch: (e) => {
-        const err = e as { message?: string };
-        return new PostgresNotReady({
-          message: `${name}: ${err.message ?? String(e)}`,
-        });
-      },
-    }),
+const testDb = (db: KyselyDB, name: string) =>
+  pipe(
+    db.selectNoFrom([sql.lit(1).as("ready")]),
+    Effect.asVoid,
+    Effect.mapError(
+      (e) =>
+        new PostgresNotReady({
+          message: `${name}: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+    ),
     Effect.retry(retrySchedule),
     Effect.catchTag("PostgresNotReady", (e) =>
       Effect.die(new Error(`Postgres not ready after retries: ${e.message}`)),
     ),
   );
-}
 
-const waitForPostgres = pipe(
-  Effect.all([testPool(rootPg, "rootPg"), testPool(authPg, "authPg")], {
+const waitForPostgres = Effect.gen(function* () {
+  const rootDb = yield* PgRootDB;
+  const authDb = yield* PgAuthDB;
+  yield* Effect.all([testDb(rootDb, "rootDb"), testDb(authDb, "authDb")], {
     concurrency: "unbounded",
-  }),
-  Effect.tap(() => Effect.log("Postgres is ready")),
-);
+  });
+  yield* Effect.log("Postgres is ready");
+});
 
 const waitForValkey = pipe(
   Effect.tryPromise({
@@ -66,4 +59,4 @@ const waitForValkey = pipe(
 
 export const waitForDependencies = Effect.all([waitForPostgres, waitForValkey], {
   concurrency: "unbounded",
-});
+}).pipe(Effect.withSpan("server.waitForDependencies"));

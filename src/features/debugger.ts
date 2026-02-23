@@ -1,37 +1,8 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+import { Effect, Layer } from "effect";
 import type * as vscode from "vscode";
+import { VSCodeService } from "../vscode/service";
 
-const ext = registerExtension(
-  {
-    name: "debugger",
-    publisher: "codingame",
-    version: "1.0.0",
-    engines: {
-      vscode: "*",
-    },
-    // A browser field is mandatory for the extension to be flagged as `web`
-    browser: "extension.js",
-    contributes: {
-      debuggers: [
-        {
-          type: "javascript",
-          label: "Test",
-          languages: ["javascript"],
-        },
-      ],
-      breakpoints: [
-        {
-          language: "javascript",
-        },
-      ],
-    },
-  },
-  ExtensionHostKind.LocalProcess,
-);
-
-ext.registerFileUrl("./extension.js", "data:text/javascript;base64," + window.btoa("// nothing"));
-
-void ext.getApi().then((debuggerVscodeApi) => {
+const activateDebuggerFeature = (debuggerVscodeApi: typeof import("vscode")) => {
   class WebsocketDebugAdapter implements vscode.DebugAdapter {
     constructor(private websocket: WebSocket) {
       websocket.onmessage = (message) => {
@@ -99,4 +70,17 @@ void ext.getApi().then((debuggerVscodeApi) => {
       return new debuggerVscodeApi.DebugAdapterInlineImplementation(adapter);
     },
   });
-});
+};
+
+export const DebuggerFeatureLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    const vscodeService = yield* VSCodeService;
+    yield* vscodeService.registerFileUrl(
+      "./extension.js",
+      `data:text/javascript;base64,${window.btoa("// nothing")}`,
+    );
+    yield* Effect.sync(() => {
+      activateDebuggerFeature(vscodeService.api);
+    });
+  }),
+);

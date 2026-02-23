@@ -1,0 +1,8 @@
+{
+  "dialect": "postgres",
+  "excludePattern": "graphile*.*",
+  "outFile": "./generated/db.ts",
+  "typeMapping": {
+    "int8": "bigint"
+  }
+}

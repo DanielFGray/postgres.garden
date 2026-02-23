@@ -55,16 +55,15 @@ function stripCommentChars(query: string) {
 }
 
 function splitSqlBlocks(raw: string): string[] {
-  const blocks = [];
-  for (const block of raw.split(/\n\n(?!\s+)/)) {
+  return raw.split(/\n\n(?!\s+)/).reduce<string[]>((blocks, block) => {
     if (block.trim().length > 0) {
       blocks.push(block);
-      continue;
+      return blocks;
     }
     if (blocks.length < 1) {
-      continue;
+      return blocks;
     }
     blocks[blocks.length - 1] += "\n\n";
-  }
-  return blocks;
+    return blocks;
+  }, []);
 }

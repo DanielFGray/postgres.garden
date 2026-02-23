@@ -81,12 +81,12 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
   let i = 0;
 
   // Each parse function starts with line i, leaves i on the line after the last line parsed
-  for (; i < lines.length; ) {
+  while (i < lines.length) {
     const leadingWhitespace = i === 0 ? parseWhitespaceLines(true) : "";
     if (i >= lines.length) {
       break;
     }
-    const codeBlockMatch = parseCodeBlockStart(lines[i]!);
+    const codeBlockMatch = parseCodeBlockStart(lines[i] ?? "");
     if (codeBlockMatch) {
       parseCodeBlock(leadingWhitespace, codeBlockMatch);
     } else {
@@ -170,31 +170,26 @@ export function parseMarkdown(content: string): RawNotebookCell[] {
 }
 
 export function writeCellsToMarkdown(cells: ReadonlyArray<vscode.NotebookCellData>): string {
-  let result = "";
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i]!;
+  return cells.reduce((result, cell, i) => {
     const meta = cell.metadata as MarkdownCellMetadata | undefined;
-    if (i === 0) {
-      result += meta?.leadingWhitespace ?? "";
-    }
+    const withLeading = i === 0 ? result + (meta?.leadingWhitespace ?? "") : result;
 
-    if (cell.kind === vscode.NotebookCellKind.Code) {
-      const indentation = meta?.indentation || "";
-      const codePrefix = indentation + "```" + cell.languageId + "\n";
-      const contents = cell.value
-        .split(/\r?\n/g)
-        .map((line) => indentation + line)
-        .join("\n");
-      const codeSuffix = "\n" + indentation + "```";
+    const withCellContent =
+      cell.kind === vscode.NotebookCellKind.Code
+        ? (() => {
+            const indentation = meta?.indentation || "";
+            const codePrefix = indentation + "```" + cell.languageId + "\n";
+            const contents = cell.value
+              .split(/\r?\n/g)
+              .map((line) => indentation + line)
+              .join("\n");
+            const codeSuffix = "\n" + indentation + "```";
+            return withLeading + codePrefix + contents + codeSuffix;
+          })()
+        : withLeading + cell.value;
 
-      result += codePrefix + contents + codeSuffix;
-    } else {
-      result += cell.value;
-    }
-
-    result += getBetweenCellsWhitespace(cells, i);
-  }
-  return result;
+    return withCellContent + getBetweenCellsWhitespace(cells, i);
+  }, "");
 }
 
 function getBetweenCellsWhitespace(

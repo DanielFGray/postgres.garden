@@ -21,9 +21,9 @@ export class SQLNotebookExecutionController {
   }
 
   #execute(cells: vscode.NotebookCell[]): void {
-    for (const cell of cells) {
+    cells.forEach((cell) => {
       void this.#doExecution(cell);
-    }
+    });
   }
 
   async #doExecution(cell: vscode.NotebookCell): Promise<void> {
@@ -32,40 +32,60 @@ export class SQLNotebookExecutionController {
     if (text.trim().length < 1) return;
     execution.executionOrder = ++this.#executionOrder;
     execution.start(Date.now());
-    const results = await vscode.commands.executeCommand<ExtendedResults[]>(PGLITE_EXECUTE, text);
-    execution.replaceOutput(
-      results.map((result) => {
-        if ("error" in result) {
-          return new vscode.NotebookCellOutput([
-            // TODO: find out why text/plain throws renderer error
-            // vscode.NotebookCellOutputItem.error(result.error.message),
-            vscode.NotebookCellOutputItem.text(
-              `<div style="font-weight:550;background:#f009;padding:0.25em;color;white;">${result.error?.message ?? "Unknown error"}</div>`,
-              "text/markdown",
-            ),
-          ]);
-        }
-        if (result.fields.length > 0) {
-          return new vscode.NotebookCellOutput([
-            vscode.NotebookCellOutputItem.json(
-              { ...result, query: text },
-              "application/vnd.pg-playground.sql-result+json",
-            ),
-            vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
-          ]);
-        }
-        // Show success message for statements that don't return rows
-        const message = result.statement || "Query executed successfully";
-        const affectedInfo =
-          result.affectedRows !== undefined && result.affectedRows >= 0
-            ? ` (${result.affectedRows} rows affected)`
-            : "";
-        return new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text(`✓ ${message}${affectedInfo}`, "text/markdown"),
+    try {
+      const results = await vscode.commands.executeCommand<ExtendedResults[]>(PGLITE_EXECUTE, text);
+      if (!results || !Array.isArray(results)) {
+        execution.replaceOutput([
+          new vscode.NotebookCellOutput([
+            vscode.NotebookCellOutputItem.text("No results returned", "text/markdown"),
+          ]),
         ]);
-      }),
-    );
-    execution.end(true, Date.now());
+        execution.end(false, Date.now());
+        return;
+      }
+      const hasError = results.some((r) => "error" in r);
+      execution.replaceOutput(
+        results.map((result) => {
+          if ("error" in result) {
+            return new vscode.NotebookCellOutput([
+              vscode.NotebookCellOutputItem.text(
+                `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${result.error?.message ?? "Unknown error"}</div>`,
+                "text/markdown",
+              ),
+            ]);
+          }
+          if (result.fields.length > 0) {
+            return new vscode.NotebookCellOutput([
+              vscode.NotebookCellOutputItem.json(
+                { ...result, query: text },
+                "application/vnd.pg-playground.sql-result+json",
+              ),
+              vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
+            ]);
+          }
+          // Show success message for statements that don't return rows
+          const message = result.statement || "Query executed successfully";
+          const affectedInfo =
+            result.affectedRows !== undefined && result.affectedRows >= 0
+              ? ` (${result.affectedRows} rows affected)`
+              : "";
+          return new vscode.NotebookCellOutput([
+            vscode.NotebookCellOutputItem.text(`✓ ${message}${affectedInfo}`, "text/markdown"),
+          ]);
+        }),
+      );
+      execution.end(!hasError, Date.now());
+    } catch (err) {
+      execution.replaceOutput([
+        new vscode.NotebookCellOutput([
+          vscode.NotebookCellOutputItem.text(
+            `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${err instanceof Error ? err.message : String(err)}</div>`,
+            "text/markdown",
+          ),
+        ]),
+      ]);
+      execution.end(false, Date.now());
+    }
   }
 }
 

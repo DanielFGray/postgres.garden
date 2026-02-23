@@ -8,16 +8,16 @@ const successAtom = Atom.make(false);
 const autoVerifiedAtom = Atom.make(false);
 
 export function triggerVerification(emailId: string, token: string) {
-  _pendingEmailId = emailId;
-  _pendingToken = token;
+  pendingEmailId = emailId;
+  pendingToken = token;
 }
 
-let _pendingEmailId = "";
-let _pendingToken = "";
-let _autoVerifyAttempted = false;
+let pendingEmailId = "";
+let pendingToken = "";
+let autoVerifyAttempted = false;
 
 export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const registry = yield* AtomRegistry.AtomRegistry;
     const verifying = yield* Atom.get(verifyingAtom);
     const error = yield* Atom.get(errorAtom);
@@ -25,24 +25,35 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
     yield* Atom.get(autoVerifiedAtom);
 
     // Auto-verify if we have params from URL
-    if (!_autoVerifyAttempted && _pendingEmailId && _pendingToken) {
-      _autoVerifyAttempted = true;
+    if (!autoVerifyAttempted && pendingEmailId && pendingToken) {
+      autoVerifyAttempted = true;
       registry.set(verifyingAtom, true);
 
-      void apiRequest("/api/verifyEmail", "POST", {
-        emailId: _pendingEmailId,
-        token: _pendingToken,
-      })
-        .then(() => {
-          registry.set(successAtom, true);
-          registry.set(autoVerifiedAtom, true);
-        })
-        .catch((err: unknown) => {
-          registry.set(errorAtom, err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          registry.set(verifyingAtom, false);
-        });
+      void Effect.runFork(
+        apiRequest("/api/verifyEmail", "POST", {
+          emailId: pendingEmailId,
+          token: pendingToken,
+        }, {
+          action: "auth.verify_email.auto",
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              registry.set(successAtom, true);
+              registry.set(autoVerifiedAtom, true);
+            })
+          ),
+          Effect.catchAll((err) =>
+            Effect.sync(() => {
+              registry.set(errorAtom, err.message);
+            })
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              registry.set(verifyingAtom, false);
+            })
+          ),
+        ),
+      );
     }
 
     if (verifying) {

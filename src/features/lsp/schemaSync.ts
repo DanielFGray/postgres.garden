@@ -3,6 +3,7 @@
  * and syncs it to the language server worker.
  */
 import * as S from "effect/Schema";
+import { Array, Option, pipe } from "effect";
 import type { Introspection } from "pg-introspection";
 import type { LanguageClient } from "vscode-languageclient/browser";
 
@@ -177,6 +178,9 @@ function provolatileToBehavior(
   }
 }
 
+const fromNullableOr = <A>(value: A | null | undefined, fallback: A): A =>
+  value ?? fallback;
+
 /**
  * Transform a pg-introspection result into the PGLS SchemaCache format.
  * Filters out system schemas (pg_catalog, pg_toast, information_schema).
@@ -192,27 +196,30 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
   const nsIdSet = new Set(userNamespaces.map((n) => n._id));
 
   // Build a lookup: class _id → namespace name
-  const classToNs = new Map<string, string>();
-  for (const cls of introspection.classes) {
-    const ns = introspection.namespaces.find((n) => n._id === cls.relnamespace);
-    if (ns) classToNs.set(cls._id, ns.nspname);
-  }
+  const classToNs = new Map(
+    Array.filterMap(introspection.classes, (cls) =>
+      pipe(
+        Array.findFirst(introspection.namespaces, (n) => n._id === cls.relnamespace),
+        Option.map((ns) => [cls._id, ns.nspname] as const),
+      ),
+    ),
+  );
 
   // Primary key lookup: attrelid+attnum → isPK
-  const pkSet = new Set<string>();
-  const uniqueSet = new Set<string>();
-  for (const con of introspection.constraints) {
-    if (con.contype === "p" && con.conkey) {
-      for (const num of con.conkey) {
-        pkSet.add(`${con.conrelid}:${num}`);
-      }
-    }
-    if (con.contype === "u" && con.conkey) {
-      for (const num of con.conkey) {
-        uniqueSet.add(`${con.conrelid}:${num}`);
-      }
-    }
-  }
+  const pkSet = new Set(
+    Array.flatMap(introspection.constraints, (con) =>
+      con.contype === "p" && con.conkey
+        ? con.conkey.map((num) => `${con.conrelid}:${num}`)
+        : ([] as string[]),
+    ),
+  );
+  const uniqueSet = new Set(
+    Array.flatMap(introspection.constraints, (con) =>
+      con.contype === "u" && con.conkey
+        ? con.conkey.map((num) => `${con.conrelid}:${num}`)
+        : ([] as string[]),
+    ),
+  );
 
   const userClasses = introspection.classes.filter(
     (cls) => nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind),
@@ -229,7 +236,11 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
     return {
       id: Number(n._id),
       name: n.nspname,
-      owner: introspection.roles.find((r) => r._id === n.nspowner)?.rolname ?? "unknown",
+      owner: pipe(
+        Array.findFirst(introspection.roles, (r) => r._id === n.nspowner),
+        Option.map((role) => role.rolname),
+        Option.getOrElse(() => "unknown"),
+      ),
       allowed_users: [],
       allowed_creators: [],
       table_count: tables.length,
@@ -242,7 +253,7 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
 
   const tables: SchemaCache["tables"] = userClasses.map((cls) => ({
     id: Number(cls._id),
-    schema: classToNs.get(cls._id) ?? "public",
+    schema: fromNullableOr(classToNs.get(cls._id), "public"),
     name: cls.relname,
     rls_enabled: cls.relrowsecurity ?? false,
     rls_forced: cls.relforcerowsecurity ?? false,
@@ -256,33 +267,43 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
   }));
 
   const columns: SchemaCache["columns"] = introspection.attributes
-    .filter((attr) => {
-      if (attr.attnum < 1 || attr.attisdropped) return false;
-      const cls = introspection.classes.find((c) => c._id === attr.attrelid);
-      return cls
-        ? nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind)
-        : false;
-    })
-    .map((attr) => {
-      const cls = introspection.classes.find((c) => c._id === attr.attrelid)!;
-      const typeName = introspection.types.find((t) => t._id === attr.atttypid)?.typname ?? null;
-      const key = `${attr.attrelid}:${attr.attnum}`;
-      return {
-        name: attr.attname,
-        table_name: cls.relname,
-        table_oid: Number(cls._id),
-        class_kind: relkindToClassKind(cls.relkind),
-        number: attr.attnum,
-        schema_name: classToNs.get(cls._id) ?? "public",
-        type_id: Number(attr.atttypid),
-        type_name: typeName,
-        is_nullable: !(attr.attnotnull ?? false),
-        is_primary_key: pkSet.has(key),
-        is_unique: pkSet.has(key) || uniqueSet.has(key),
-        default_expr: null, // pg-introspection doesn't include attrdef easily
-        varchar_length: attr.atttypmod != null && attr.atttypmod > 0 ? attr.atttypmod - 4 : null,
-        comment: null,
-      };
+    .flatMap((attr) => {
+      if (attr.attnum < 1 || attr.attisdropped) return [];
+      return pipe(
+        Array.findFirst(introspection.classes, (c) => c._id === attr.attrelid),
+        Option.filter(
+          (cls) => nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind),
+        ),
+        Option.match({
+          onNone: () => [] as SchemaCache["columns"],
+          onSome: (cls) => {
+            const key = `${attr.attrelid}:${attr.attnum}`;
+            const typeName = pipe(
+              Array.findFirst(introspection.types, (t) => t._id === attr.atttypid),
+              Option.map((type) => type.typname),
+              Option.getOrNull,
+            );
+            return [
+              {
+                name: attr.attname,
+                table_name: cls.relname,
+                table_oid: Number(cls._id),
+                class_kind: relkindToClassKind(cls.relkind),
+                number: attr.attnum,
+                schema_name: fromNullableOr(classToNs.get(cls._id), "public"),
+                type_id: Number(attr.atttypid),
+                type_name: typeName,
+                is_nullable: !(attr.attnotnull ?? false),
+                is_primary_key: pkSet.has(key),
+                is_unique: pkSet.has(key) || uniqueSet.has(key),
+                default_expr: null,
+                varchar_length: attr.atttypmod != null && attr.atttypmod > 0 ? attr.atttypmod - 4 : null,
+                comment: null,
+              },
+            ];
+          },
+        }),
+      );
     });
 
   const functions: SchemaCache["functions"] = introspection.procs
@@ -301,19 +322,36 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
       }));
       return {
         id: Number(p._id),
-        schema: ns?.nspname ?? "public",
+        schema: pipe(
+          Option.fromNullable(ns),
+          Option.map((namespace) => namespace.nspname),
+          Option.getOrElse(() => "public"),
+        ),
         name: p.proname,
-        language: lang?.lanname ?? "sql",
+        language: pipe(
+          Option.fromNullable(lang),
+          Option.flatMap((language) => Option.fromNullable(language.lanname)),
+          Option.getOrElse(() => "sql"),
+        ),
         kind: prokindToPglsKind(p.prokind),
         body: p.prosrc ?? null,
         definition: null,
         args: { args },
         argument_types: null,
         identity_argument_types: null,
-        return_type_id: p.prorettype ? Number(p.prorettype) : null,
-        return_type: p.prorettype
-          ? (introspection.types.find((t) => t._id === p.prorettype)?.typname ?? null)
-          : null,
+        return_type_id: pipe(
+          Option.fromNullable(p.prorettype),
+          Option.map((typeId) => Number(typeId)),
+          Option.getOrNull,
+        ),
+        return_type: pipe(
+          Option.fromNullable(p.prorettype),
+          Option.flatMap((returnTypeId) =>
+            Array.findFirst(introspection.types, (type) => type._id === returnTypeId),
+          ),
+          Option.map((type) => type.typname),
+          Option.getOrNull,
+        ),
         return_type_relation_id: null,
         is_set_returning_function: p.proretset ?? false,
         behavior: provolatileToBehavior(p.provolatile),

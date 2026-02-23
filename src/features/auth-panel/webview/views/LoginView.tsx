@@ -2,8 +2,6 @@ import * as Effect from "effect/Effect";
 import { Atom, AtomRegistry } from "fibrae";
 import { apiRequest, signInWithGitHub, notifyAuthComplete } from "../api";
 
-const idAtom = Atom.make("");
-const passwordAtom = Atom.make("");
 const submittingAtom = Atom.make(false);
 const errorAtom = Atom.make<string | null>(null);
 
@@ -13,31 +11,38 @@ interface LoginResponse {
 }
 
 export const LoginView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const registry = yield* AtomRegistry.AtomRegistry;
-    const id = yield* Atom.get(idAtom);
-    const password = yield* Atom.get(passwordAtom);
     const submitting = yield* Atom.get(submittingAtom);
     const error = yield* Atom.get(errorAtom);
 
     function handleSubmit(e: Event) {
       e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const data = new FormData(form);
       registry.set(errorAtom, null);
       registry.set(submittingAtom, true);
 
-      void apiRequest<LoginResponse>("/login", "POST", {
-        id: registry.get(idAtom),
-        password: registry.get(passwordAtom),
-      })
-        .then((data) => {
-          notifyAuthComplete(data.username);
-        })
-        .catch((err: unknown) => {
-          registry.set(errorAtom, err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          registry.set(submittingAtom, false);
-        });
+      void Effect.runFork(
+        apiRequest<LoginResponse>("/login", "POST", {
+          id: data.get("id"),
+          password: data.get("password"),
+        }, {
+          action: "auth.login.submit",
+        }).pipe(
+          Effect.tap((resp) => Effect.sync(() => notifyAuthComplete(resp.username))),
+          Effect.catchAll((err) =>
+            Effect.sync(() => {
+              registry.set(errorAtom, err.message);
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              registry.set(submittingAtom, false);
+            }),
+          ),
+        ),
+      );
     }
 
     return (
@@ -52,26 +57,16 @@ export const LoginView = (props: { onNavigate: (view: string) => void }) =>
             <label>Email or Username</label>
             <input
               type="text"
+              name="id"
               class="setting-input"
               placeholder="you@example.com"
-              value={id}
-              onInput={(e: Event) => {
-                registry.set(idAtom, (e.target as HTMLInputElement).value);
-              }}
               autoFocus
             />
           </div>
 
           <div class="auth-field">
             <label>Password</label>
-            <input
-              type="password"
-              class="setting-input"
-              value={password}
-              onInput={(e: Event) => {
-                registry.set(passwordAtom, (e.target as HTMLInputElement).value);
-              }}
-            />
+            <input type="password" name="password" class="setting-input" />
           </div>
 
           {error && (

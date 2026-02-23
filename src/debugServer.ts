@@ -124,12 +124,12 @@ class DAPSocket {
         if (idx !== -1) {
           const header = this.rawData.toString("utf8", 0, idx);
           const lines = header.split(HEADER_LINESEPARATOR);
-          for (const h of lines) {
+          lines.forEach((h) => {
             const kvPair = h.split(HEADER_FIELDSEPARATOR);
             if (kvPair[0] === "Content-Length") {
               this.contentLength = Number(kvPair[1]);
             }
-          }
+          });
           this.rawData = this.rawData.subarray(idx + TWO_CRLF.length);
           continue;
         }
@@ -218,9 +218,10 @@ new Elysia()
                 main: string;
                 files: Record<string, string>;
               };
-              for (const [file, content] of Object.entries(init.files)) {
+              await Object.entries(init.files).reduce(async (prev, [file, content]) => {
+                await prev;
                 await fs.promises.writeFile("/tmp/" + file, content);
-              }
+              }, Promise.resolve());
               const debuggerPort = await findPortFree();
               const exec = await container.exec({
                 Cmd: [

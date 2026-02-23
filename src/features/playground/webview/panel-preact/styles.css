@@ -2,93 +2,37 @@ body {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
-  background: var(--vscode-editor-background);
+  background: var(--vscode-sideBar-background);
   margin: 0;
   padding: 0;
-  overflow: hidden;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-sideBar-background);
-}
-
-.toolbar-left,
-.toolbar-right {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.button {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
-  padding: 6px 12px;
-  cursor: pointer;
-  border-radius: 2px;
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.button:hover:not(:disabled) {
-  background: var(--vscode-button-hoverBackground);
-}
-
-.button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.save-status {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 2px;
-}
-
-.save-status-info {
-  color: var(--vscode-descriptionForeground);
-}
-
-.save-status-success {
-  color: var(--vscode-charts-green);
-}
-
-.save-status-error {
-  color: var(--vscode-errorForeground);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .metadata-panel {
   display: flex;
-  gap: 16px;
-  padding: 16px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-sideBar-background);
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 12px 12px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
 }
 
 .form-group label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--vscode-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground);
 }
 
 .form-group input,
 .form-group select {
-  padding: 6px 8px;
+  padding: 4px 6px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border);
@@ -103,24 +47,9 @@ body {
   outline-offset: -1px;
 }
 
-.description-container {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-
-.description-container label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--vscode-foreground);
-}
-
-.description-container textarea {
-  flex: 1;
-  min-height: 200px;
-  padding: 8px;
+.form-group textarea {
+  min-height: 60px;
+  padding: 4px 6px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border);
@@ -130,13 +59,97 @@ body {
   resize: vertical;
 }
 
-.description-container textarea:focus {
+.form-group textarea:focus {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: -1px;
 }
 
+.action-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.action-pill {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  border: 1px solid var(--vscode-widget-border, transparent);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+}
+
+.action-pill:hover {
+  background: var(--vscode-toolbar-activeBackground, rgba(90, 93, 94, 0.5));
+}
+
+.action-pill .codicon {
+  font-size: 12px;
+}
+
+.action-pill--starred {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.action-pill--starred .codicon {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.action-pill__label {
+  color: inherit;
+}
+
+.action-pill__count {
+  color: var(--vscode-descriptionForeground);
+  padding-left: 2px;
+  border-left: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
+  margin-left: 2px;
+}
+
+.meta-text {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.save-status {
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.save-status-info {
+  color: var(--vscode-descriptionForeground);
+}
+
+.save-status-success {
+  color: var(--vscode-charts-green);
+}
+
+.save-status-error {
+  color: var(--vscode-errorForeground);
+}
+
+.dirty-indicator {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dirty-indicator .codicon {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground);
+  font-size: 8px;
+}
+
 .loading {
-  padding: 16px;
+  padding: 12px;
   text-align: center;
   color: var(--vscode-descriptionForeground);
 }

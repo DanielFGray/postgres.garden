@@ -1,197 +1,154 @@
 import * as Effect from "effect/Effect";
+import { Result } from "@effect-atom/atom";
 import { Atom, AtomRegistry } from "fibrae";
 import type { UserProfile } from "../../types";
 import { apiRequest } from "../api";
+import { formatDate } from "../format";
 
-const profileAtom = Atom.make<UserProfile | null>(null);
-const errorAtom = Atom.make<string | null>(null);
-const loadingAtom = Atom.make(true);
+const profileAtom = Atom.make(
+  apiRequest<{ user: UserProfile | null }>("/api/me", "GET", undefined, {
+    action: "account.profile.load",
+  }).pipe(
+    Effect.flatMap((data) =>
+      data.user
+        ? Effect.succeed(data.user)
+        : Effect.fail(new Error("Unauthorized")),
+    ),
+  ),
+);
 
-const editNameAtom = Atom.make("");
-const editBioAtom = Atom.make("");
-const editAvatarUrlAtom = Atom.make("");
+const bioLengthAtom = Atom.make(0);
 const savingAtom = Atom.make(false);
 const saveErrorAtom = Atom.make<string | null>(null);
 
-function loadProfile(registry: AtomRegistry.Registry) {
-  registry.set(loadingAtom, true);
-  registry.set(errorAtom, null);
-  apiRequest<{ user: UserProfile }>("/api/me")
-    .then((data) => {
-      registry.set(profileAtom, data.user);
-      registry.set(editNameAtom, data.user.name ?? "");
-      registry.set(editBioAtom, data.user.bio ?? "");
-      registry.set(editAvatarUrlAtom, data.user.avatar_url ?? "");
-    })
-    .catch((err: unknown) => {
-      registry.set(errorAtom, err instanceof Error ? err.message : String(err));
-    })
-    .finally(() => {
-      registry.set(loadingAtom, false);
-    });
-}
-
-let initialized = false;
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
 export const ProfileSection = () =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const registry = yield* AtomRegistry.AtomRegistry;
-
-    if (!initialized) {
-      initialized = true;
-      loadProfile(registry);
-    }
-
-    const loading = yield* Atom.get(loadingAtom);
-    const error = yield* Atom.get(errorAtom);
-    const profile = yield* Atom.get(profileAtom);
-    const editName = yield* Atom.get(editNameAtom);
-    const editBio = yield* Atom.get(editBioAtom);
-    const editAvatarUrl = yield* Atom.get(editAvatarUrlAtom);
+    const result = yield* Atom.get(profileAtom);
+    const bioLength = yield* Atom.get(bioLengthAtom);
     const saving = yield* Atom.get(savingAtom);
     const saveError = yield* Atom.get(saveErrorAtom);
 
-    function saveProfile() {
+    function handleSubmit(e: Event) {
+      e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const data = new FormData(form);
       registry.set(savingAtom, true);
       registry.set(saveErrorAtom, null);
-      void apiRequest("/api/me", "PATCH", {
-        name: registry.get(editNameAtom),
-        bio: registry.get(editBioAtom),
-        avatar_url: registry.get(editAvatarUrlAtom),
-      })
-        .then(() => {
-          loadProfile(registry);
-        })
-        .catch((err: unknown) => {
-          registry.set(saveErrorAtom, err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          registry.set(savingAtom, false);
-        });
-    }
-
-    if (loading) {
-      return <div class="section-loading">Loading profile...</div>;
-    }
-
-    if (error) {
-      return (
-        <div class="section-error">
-          <i class="codicon codicon-error" />
-          <span>{error}</span>
-          <button class="button" onClick={() => loadProfile(registry)}>
-            Retry
-          </button>
-        </div>
+      void Effect.runFork(
+        apiRequest(
+          "/api/me",
+          "PATCH",
+          {
+            username: data.get("username"),
+            name: data.get("name"),
+            bio: data.get("bio"),
+            avatar_url: data.get("avatar_url"),
+          },
+          { action: "account.profile.save" },
+        ).pipe(
+          Effect.tap(() => Effect.sync(() => registry.refresh(profileAtom))),
+          Effect.catchAll((err) =>
+            Effect.sync(() => {
+              registry.set(saveErrorAtom, err.message);
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              registry.set(savingAtom, false);
+            }),
+          ),
+        ),
       );
     }
 
-    const p = profile;
-    if (!p) return <></>;
-
-    return (
-      <div class="profile-section">
-        <div class="section-header">
-          <h2>Profile</h2>
+    return Result.builder(result)
+      .onInitial(() => <div class="section-loading">Loading profile...</div>)
+      .onError((error) => (
+        <div class="section-error">
+          <i class="codicon codicon-error" />
+          <span>{error.message}</span>
+          <button class="button" onClick={() => registry.refresh(profileAtom)}>
+            Retry
+          </button>
         </div>
+      ))
+      .onSuccess((p) => (
+        <div class="profile-section">
+          <div class="section-header">
+            <h2>Profile</h2>
+          </div>
 
-        <div class="profile-fields">
-          <div class="field">
-            <label>
-              <i class="codicon codicon-lock" style={{ marginRight: "4px" }} />
-              Username
-            </label>
-            <div class="field-value field-readonly">
-              <i class="codicon codicon-account" />
-              <span>{p.username}</span>
+          <form class="profile-fields" onSubmit={handleSubmit}>
+            <div class="field">
+              <label>Username</label>
+              <input type="text" name="username" class="setting-input" defaultValue={p.username} />
             </div>
-          </div>
 
-          <div class="field">
-            <label>Display Name</label>
-            <input
-              type="text"
-              class="setting-input"
-              value={editName}
-              onInput={(e: Event) => {
-                registry.set(editNameAtom, (e.target as HTMLInputElement).value);
-              }}
-            />
-          </div>
-
-          <div class="field">
-            <label>Bio</label>
-            <textarea
-              class="setting-input setting-textarea"
-              maxLength={500}
-              value={editBio}
-              onInput={(e: Event) => {
-                registry.set(editBioAtom, (e.target as HTMLTextAreaElement).value);
-              }}
-            />
-            <div class="field-hint" style={{ textAlign: "right" }}>
-              {editBio.length}/500
+            <div class="field">
+              <label>Display Name</label>
+              <input type="text" name="name" class="setting-input" defaultValue={p.name ?? ""} />
             </div>
-          </div>
 
-          <div class="field">
-            <label>Avatar URL</label>
-            <input
-              type="text"
-              class="setting-input"
-              value={editAvatarUrl}
-              onInput={(e: Event) => {
-                registry.set(editAvatarUrlAtom, (e.target as HTMLInputElement).value);
-              }}
-            />
-            <div class="field-hint">Syncs from GitHub on login</div>
-          </div>
-
-          <div class="field">
-            <label>Role</label>
-            <div class="field-value">
-              <span class={`badge badge-${p.role}`}>{p.role}</span>
+            <div class="field">
+              <label>Bio</label>
+              <textarea
+                name="bio"
+                class="setting-input setting-textarea"
+                maxLength={2000}
+                defaultValue={p.bio ?? ""}
+                onInput={(e: Event) => {
+                  registry.set(bioLengthAtom, (e.target as HTMLTextAreaElement).value.length);
+                }}
+              />
+              <div class="field-hint" style={{ textAlign: "right" }}>
+                {bioLength}/2000
+              </div>
             </div>
-          </div>
 
-          <div class="field">
-            <label>Verified</label>
-            <div class="field-value">
-              {p.is_verified ? (
-                <span class="badge badge-verified">
-                  <i class="codicon codicon-verified-filled" /> Verified
-                </span>
-              ) : (
-                <span class="badge badge-unverified">Unverified</span>
-              )}
+            <div class="field">
+              <label>Avatar URL</label>
+              <input type="text" name="avatar_url" class="setting-input" defaultValue={p.avatar_url ?? ""} />
             </div>
-          </div>
 
-          <div class="field">
-            <label>Member Since</label>
-            <div class="field-value">{formatDate(String(p.created_at))}</div>
-          </div>
-
-          {saveError && (
-            <div class="section-error" style={{ marginBottom: "8px" }}>
-              <i class="codicon codicon-error" />
-              <span>{saveError}</span>
+            <div class="field">
+              <label>Role</label>
+              <div class="field-value">
+                <span class={`badge badge-${p.role}`}>{p.role}</span>
+              </div>
             </div>
-          )}
-          <div style={{ marginTop: "12px" }}>
-            <button class="button button-primary" onClick={saveProfile} disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
-          </div>
+
+            <div class="field">
+              <label>Verified</label>
+              <div class="field-value">
+                {p.is_verified ? (
+                  <span class="badge badge-verified">
+                    <i class="codicon codicon-verified-filled" /> Verified
+                  </span>
+                ) : (
+                  <span class="badge badge-unverified">Unverified</span>
+                )}
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Member Since</label>
+              <div class="field-value">{formatDate(String(p.created_at))}</div>
+            </div>
+
+            {saveError && (
+              <div class="section-error" style={{ marginBottom: "8px" }}>
+                <i class="codicon codicon-error" />
+                <span>{saveError}</span>
+              </div>
+            )}
+            <div style={{ marginTop: "12px" }}>
+              <button type="submit" class="button button-primary" disabled={saving}>
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </form>
         </div>
-      </div>
-    );
+      ))
+      .render();
   });

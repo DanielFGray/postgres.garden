@@ -1,188 +1,314 @@
-import * as semicolons from "postgres-semicolons";
 import type { QueryOptions } from "@electric-sql/pglite";
-import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { live } from "@electric-sql/pglite/live";
+import { PGliteWorker } from "@electric-sql/pglite/worker";
+import { Effect, Ref } from "effect";
+import * as semicolons from "postgres-semicolons";
 
-declare global {
-  interface Window {
-    db?: PGliteWorker;
-  }
-}
+
+// ---------------------------------------------------------------------------
+// WorkerFS — Effect-native API to the Emscripten FS inside the PGlite worker
+// ---------------------------------------------------------------------------
+
+export type WorkerFsApi = {
+  /** Write a file into PGlite's Emscripten FS (creates parent dirs) */
+  readonly writeFile: (path: string, content: Uint8Array) => Effect.Effect<void, Error>;
+  /** Read a file from PGlite's Emscripten FS */
+  readonly readFile: (path: string) => Effect.Effect<Uint8Array, Error>;
+  /** Recursively list all file paths under a directory */
+  readonly listDir: (path: string) => Effect.Effect<readonly string[], Error>;
+  /** Delete a file from PGlite's Emscripten FS */
+  readonly deleteFile: (path: string) => Effect.Effect<void, Error>;
+};
 
 /**
- * PGlite service managing a Web Worker instance with multi-tab support.
- * Only the leader tab will run the actual database instance.
+ * Create a MessageChannel to the worker and return Effect-wrapped FS ops.
+ * Must be called *before* PGliteWorker.create() so the port message arrives
+ * in the worker's queue before the init message.
  */
-let instanceCounter = 0;
+function createFsChannel(worker: Worker): WorkerFsApi {
+  const channel = new MessageChannel();
+  worker.postMessage({ type: "pg-fs-port", port: channel.port2 }, [channel.port2]);
 
-export class PGliteService {
-  private db: PGliteWorker | null = null;
-  private initPromise: Promise<PGliteWorker> | null = null;
-  private worker: Worker | null = null;
-  private readonly instanceId = ++instanceCounter;
+  const port = channel.port1;
+  let nextId = 0;
+  const pending = new Map<number, {
+    resolve: (v: Record<string, unknown>) => void;
+    reject: (e: Error) => void;
+  }>();
 
-  /**
-   * Initialize the PGlite worker instance.
-   * Safe to call multiple times - will return the same instance.
-   */
-  async initialize(): Promise<PGliteWorker> {
-    if (this.db) {
-      return this.db;
+  port.onmessage = (e: MessageEvent) => {
+    const data = e.data as { id: number; ok: boolean; error?: string };
+    const p = pending.get(data.id);
+    if (p) {
+      pending.delete(data.id);
+      if (data.ok) {
+        p.resolve(e.data as Record<string, unknown>);
+      } else {
+        p.reject(new Error(data.error ?? "WorkerFS error"));
+      }
     }
+  };
 
-    // Ensure only one initialization happens at a time
-    if (this.initPromise) {
-      return this.initPromise;
-    }
+  const send = (data: Record<string, unknown>, transfer?: Transferable[]): Promise<Record<string, unknown>> => {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      port.postMessage({ ...data, id }, transfer ?? []);
+    });
+  };
 
-    this.initPromise = this.createWorker();
-
-    try {
-      this.db = await this.initPromise;
-      return this.db;
-    } finally {
-      this.initPromise = null;
-    }
-  }
-
-  private async createWorker(): Promise<PGliteWorker> {
-    try {
-      this.worker = new Worker(new URL("./pglite.worker.ts", import.meta.url), {
-        type: "module",
-      });
-
-      const worker = await PGliteWorker.create(this.worker, {
-        extensions: {
-          live, // Client-side extension for live queries
+  return {
+    writeFile: (path, content) =>
+      Effect.tryPromise({
+        try: async () => {
+          const copy = content.slice();
+          await send({ type: "writeFile", path, content: copy.buffer }, [copy.buffer]);
         },
-      });
+        catch: toError,
+      }),
 
-      window.db = worker;
+    readFile: (path) =>
+      Effect.tryPromise({
+        try: async () => {
+          const result = await send({ type: "readFile", path });
+          return new Uint8Array(result.content as ArrayBuffer);
+        },
+        catch: toError,
+      }),
 
-      // Log leader status
-      console.log(`[PGlite #${this.instanceId}] PGlite initialized - Leader: ${worker.isLeader}`);
+    listDir: (path) =>
+      Effect.tryPromise({
+        try: async () => {
+          const result = await send({ type: "listDir", path });
+          return result.files as string[];
+        },
+        catch: toError,
+      }),
 
-      // Subscribe to leader changes - this can cause the DB connection to close/reopen
-      worker.onLeaderChange(() => {
-        console.log(`[PGlite #${this.instanceId}] Leader changed - Now leader: ${worker.isLeader}`);
-        // When leadership changes, the IndexedDB connection may be closed
-        // We don't need to do anything here - our retry logic will handle it
-      });
+    deleteFile: (path) =>
+      Effect.tryPromise({
+        try: async () => {
+          await send({ type: "deleteFile", path });
+        },
+        catch: toError,
+      }),
+  };
+}
 
-      // Run healthcheck
-      const healthy = await this.healthcheck(worker);
-      if (!healthy) {
-        console.warn("PGlite healthcheck failed, but continuing...");
+// ---------------------------------------------------------------------------
+
+type PGliteState = {
+  readonly worker: Worker | null;
+  readonly db: PGliteWorker | null;
+  readonly fs: WorkerFsApi | null;
+};
+
+export type PGliteApi = {
+  readonly initialize: Effect.Effect<PGliteWorker, Error, never>;
+  readonly reinitialize: Effect.Effect<void, Error, never>;
+  readonly reset: Effect.Effect<void, Error, never>;
+  readonly query: <T>(
+    sql: string,
+    params?: unknown[],
+    opts?: QueryOptions,
+  ) => Effect.Effect<{ readonly statement: string; readonly rows: readonly T[]; [key: string]: unknown }, Error, never>;
+  readonly exec: (
+    sql: string,
+    opts?: QueryOptions,
+  ) => Effect.Effect<
+    ReadonlyArray<{
+      readonly statement: string;
+      readonly query: string;
+      readonly rows: readonly Record<string, unknown>[];
+      [key: string]: unknown;
+    }>,
+    Error,
+    never
+  >;
+  /** Emscripten FS operations (initializes PGlite first if needed) */
+  readonly fs: WorkerFsApi;
+};
+
+export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
+  scoped: Effect.gen(function* () {
+    const stateRef = yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null });
+    const lock = yield* Effect.makeSemaphore(1);
+
+    const initializeUnlocked = Effect.gen(function* () {
+      const state = yield* Ref.get(stateRef);
+      if (state.db) {
+        return state.db;
       }
 
-      return worker;
-    } catch (error) {
-      console.error("Failed to initialize PGlite worker:", error);
-      throw new Error(
-        `PGlite initialization failed: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
+      const next = yield* createInstance;
+      yield* Ref.set(stateRef, next);
+      return next.db;
+    });
+
+    const initialize = lock.withPermits(1)(
+      initializeUnlocked.pipe(Effect.withSpan("pglite.initialize")),
+    );
+
+    const reinitialize = lock.withPermits(1)(
+      Effect.gen(function* () {
+        const state = yield* Ref.get(stateRef);
+        yield* closeState(state);
+        yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
+        yield* initializeUnlocked;
+      }),
+    );
+
+    const query = <T>(sql: string, params?: unknown[], opts?: QueryOptions) =>
+      Effect.gen(function* () {
+        const db = yield* initialize;
+        const result = yield* Effect.tryPromise({
+          try: () => db.query<T>(sql, params, opts),
+          catch: toError,
+        });
+
+        return {
+          ...result,
+          statement: statementFromQuery(sql),
+        };
+      }).pipe(
+        Effect.tapError((err) =>
+          Effect.annotateCurrentSpan({
+            "error": true,
+            "error.message": err.message,
+          }),
+        ),
+        Effect.withSpan("pglite.query", { attributes: { "db.statement": statementFromQuery(sql) } }),
       );
+
+    const exec: PGliteApi["exec"] = (sql, opts) =>
+      Effect.gen(function* () {
+        const db = yield* initialize;
+        const result = yield* Effect.tryPromise({
+          try: () => db.exec(sql, opts),
+          catch: toError,
+        });
+        const metadata = metadataFromQueries(sql);
+
+        return result.map((row, index) => ({
+          ...row,
+          ...(metadata[index] ?? { statement: "", query: "" }),
+        }));
+      }).pipe(
+        Effect.tapError((err) =>
+          Effect.annotateCurrentSpan({
+            "error": true,
+            "error.message": err.message,
+          }),
+        ),
+        Effect.withSpan("pglite.exec", { attributes: { "db.statement": statementFromQuery(sql) } }),
+      );
+
+    yield* Effect.addFinalizer(() =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          const state = yield* Ref.get(stateRef);
+          yield* closeState(state);
+          yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
+        }),
+      ),
+    );
+
+    // Lazily get the WorkerFS (ensures PGlite is initialized first)
+    const getFs = Effect.gen(function* () {
+      yield* initialize;
+      const state = yield* Ref.get(stateRef);
+      if (!state.fs) return yield* Effect.fail(new Error("WorkerFS not available"));
+      return state.fs;
+    });
+
+    const fs: WorkerFsApi = {
+      writeFile: (path, content) =>
+        getFs.pipe(
+          Effect.flatMap((ch) => ch.writeFile(path, content)),
+          Effect.withSpan("pglite.fs.writeFile", { attributes: { path } }),
+        ),
+      readFile: (path) =>
+        getFs.pipe(
+          Effect.flatMap((ch) => ch.readFile(path)),
+          Effect.withSpan("pglite.fs.readFile", { attributes: { path } }),
+        ),
+      listDir: (path) =>
+        getFs.pipe(
+          Effect.flatMap((ch) => ch.listDir(path)),
+          Effect.withSpan("pglite.fs.listDir", { attributes: { path } }),
+        ),
+      deleteFile: (path) =>
+        getFs.pipe(
+          Effect.flatMap((ch) => ch.deleteFile(path)),
+          Effect.withSpan("pglite.fs.deleteFile", { attributes: { path } }),
+        ),
+    };
+
+    return {
+      initialize,
+      reinitialize,
+      reset: reinitialize,
+      query,
+      exec,
+      fs,
+    } satisfies PGliteApi;
+  }),
+}) {}
+
+const toError = (error: unknown) => new Error(error instanceof Error ? error.message : String(error));
+
+const closeState = (state: PGliteState) =>
+  Effect.promise(async () => {
+    if (state.db) {
+      await state.db.close();
     }
-  }
 
-  private async healthcheck(db: PGliteWorker): Promise<boolean> {
-    try {
-      const result = await db.query<{ test: 1 }>("select 1 as test");
-      return result.rows[0]?.test === 1;
-    } catch (error) {
-      console.error("PGlite healthcheck failed:", error);
-      return false;
+    if (state.worker) {
+      state.worker.terminate();
     }
-  }
+  }).pipe(Effect.orDie);
 
-  /**
-   * Reset the database by closing and reinitializing.
-   */
-  async reset(): Promise<void> {
-    console.log("[PGlite] Resetting database");
-    if (this.db) {
-      await this.db.close();
-      this.db = null;
-    }
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
-    this.initPromise = null;
-    await this.initialize();
-  }
+const createInstance = Effect.tryPromise({
+  try: async () => {
+    const worker = new Worker(new URL("./pglite.worker.ts", import.meta.url), {
+      type: "module",
+    });
 
-  /**
-   * Execute a query and return results with statement metadata.
-   */
-  async query<T>(query: string, params?: unknown[], opts?: QueryOptions) {
-    const db = await this.initialize();
-    const result = await db.query<T>(query, params, opts);
-    return Object.assign(result, { statement: statementFromQuery(query) });
-  }
+    const db = await PGliteWorker.create(worker, {
+      extensions: { live },
+    });
 
-  /**
-   * Execute SQL statements and return results with metadata.
-   */
-  async exec(sql: string, opts?: QueryOptions) {
-    const db = await this.initialize();
-    const results = db.exec(sql, opts);
-    const metadata = metadataFromQueries(sql);
-    return (await results).map((r, i) => Object.assign(r, metadata[i]));
-  }
+    // Set up FS sync channel AFTER PGliteWorker.create() completes.
+    // The worker's init handler uses addEventListener {once: true} —
+    // sending pg-fs-port before init would consume that one-shot listener.
+    const fs = createFsChannel(worker);
 
-  /**
-   * Get the underlying PGliteWorker instance.
-   * Useful for accessing extensions like live queries.
-   */
-  async getWorker(): Promise<PGliteWorker> {
-    return this.initialize();
-  }
-
-  /**
-   * Check if this instance is the leader.
-   */
-  async isLeader(): Promise<boolean> {
-    const db = await this.initialize();
-    return db.isLeader;
-  }
-
-  /**
-   * Dispose of the service and close the database connection.
-   */
-  async dispose(): Promise<void> {
-    if (this.db) {
-      await this.db.close();
-      this.db = null;
-    }
-
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
-
-    this.initPromise = null;
-  }
-}
+    return {
+      worker,
+      db,
+      fs,
+    } as const;
+  },
+  catch: toError,
+});
 
 function metadataFromQueries(sql: string) {
   const splits = semicolons.parseSplits(sql, false);
   const queries = semicolons.splitStatements(sql, splits.positions, true);
-  return queries.map((query) => {
-    const statement = statementFromQuery(query);
-    return { query, statement };
-  });
+  return queries.map((query) => ({
+    query,
+    statement: statementFromQuery(query),
+  }));
 }
 
 function statementFromQuery(query: string) {
   const lowerQuery = query.toLowerCase();
   const firstWords = lowerQuery.slice(0, 30).split(/\s+/);
-  const statement = lowerQuery.toLowerCase().startsWith("create or replace")
+  const statement = lowerQuery.startsWith("create or replace")
     ? [firstWords[0], firstWords[3]].join(" ")
-    : lowerQuery.startsWith("create") ||
-        lowerQuery.startsWith("alter") ||
-        lowerQuery.startsWith("drop")
+    : lowerQuery.startsWith("create") || lowerQuery.startsWith("alter") || lowerQuery.startsWith("drop")
       ? firstWords.slice(0, 2).join(" ")
       : (firstWords[0] ?? "");
+
   return statement.toUpperCase();
 }

@@ -1,6 +1,15 @@
 import * as vscode from "vscode";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
+import { Effect, Layer } from "effect";
 import { getNetworkState } from "../network";
 import type { AuthWebviewMessage, AuthPanelCallbacks } from "./types";
+import { generateNonce } from "../../utils/nonce";
+import { applyTelemetryHeaders, type RequestTelemetryContext } from "../webview/requestTelemetry";
+
+const WebviewHttpClientLayer = Layer.mergeAll(
+  FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
+);
 
 export class AuthPanelProvider {
   public static readonly viewType = "authPanel.editor";
@@ -82,7 +91,13 @@ export class AuthPanelProvider {
         break;
 
       case "request":
-        await this._handleApiRequest(message.id, message.endpoint, message.method, message.body);
+        await this._handleApiRequest(
+          message.id,
+          message.endpoint,
+          message.method,
+          message.body,
+          message.telemetry,
+        );
         break;
 
       case "github-signin":
@@ -136,7 +151,13 @@ export class AuthPanelProvider {
     }
   }
 
-  private async _handleApiRequest(id: string, endpoint: string, method: string, body?: unknown) {
+  private async _handleApiRequest(
+    id: string,
+    endpoint: string,
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    body?: unknown,
+    telemetry?: RequestTelemetryContext,
+  ) {
     const networkState = getNetworkState();
 
     if (networkState !== "online" && method !== "GET") {
@@ -158,17 +179,26 @@ export class AuthPanelProvider {
       if (body !== undefined) {
         headers["Content-Type"] = "application/json";
       }
+      applyTelemetryHeaders(headers, telemetry);
 
-      const response = await fetch(window.location.origin + endpoint, {
-        method,
-        credentials: "include",
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+      const { response, responseBody } = await Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient;
+        const requestWithoutBody = HttpClientRequest.make(method)(window.location.origin + endpoint).pipe(
+          HttpClientRequest.setHeaders(headers),
+        );
+        const request = body !== undefined
+          ? HttpClientRequest.bodyUnsafeJson(requestWithoutBody, body)
+          : requestWithoutBody;
 
-      const responseBody: unknown = await response.json().catch(() => null);
+        const response = yield* client.execute(request);
+        const responseBody: unknown = yield* response.json.pipe(Effect.orElseSucceed(() => null));
+        return { response, responseBody };
+      }).pipe(
+        Effect.provide(WebviewHttpClientLayer),
+        Effect.runPromise,
+      );
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         this._panel.webview.postMessage({
           type: "error",
           id,
@@ -216,7 +246,7 @@ export class AuthPanelProvider {
     const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
     const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
 
-    const nonce = getNonce();
+    const nonce = generateNonce();
 
     return `<!DOCTYPE html>
       <html lang="en">
@@ -234,13 +264,4 @@ export class AuthPanelProvider {
       </body>
       </html>`;
   }
-}
-
-function getNonce() {
-  let text = "";
-  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
 }

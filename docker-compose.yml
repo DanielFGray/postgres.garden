@@ -7,7 +7,10 @@ x-internal: &internal
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_OTEL_COLLECTOR_URL: ${VITE_OTEL_COLLECTOR_URL:-}
     <<: [*restart, *internal]
     env_file:
       - .env

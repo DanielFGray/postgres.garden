@@ -1,20 +1,8 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+import { Effect, Layer } from "effect";
 import { LanguageClient } from "vscode-languageclient/browser";
 import type { Introspection } from "pg-introspection";
 import { syncSchema } from "./lsp/schemaSync.js";
-
-const ext = registerExtension(
-  {
-    name: "pgls",
-    publisher: "postgres.garden",
-    description: "PostgreSQL Language Server (WASM)",
-    version: "0.1.0",
-    engines: { vscode: "*" },
-    capabilities: { virtualWorkspaces: true },
-    extensionKind: ["workspace"],
-  },
-  ExtensionHostKind.LocalProcess,
-);
+import { VSCodeService } from "../vscode/service";
 
 /** Resolve when the LSP client is ready. Used by postgres.ts to sync schema. */
 let resolveClient: (client: LanguageClient) => void;
@@ -29,9 +17,10 @@ export function updateSchema(introspection: Introspection): void {
   });
 }
 
-void ext
-  .getApi()
-  .then(() => {
+export const LspFeatureLive = Layer.scopedDiscard(
+  Effect.gen(function* () {
+    yield* VSCodeService;
+
     const worker = new Worker(new URL("./lsp/pgls.worker.ts", import.meta.url), { type: "module" });
 
     const client = new LanguageClient(
@@ -45,22 +34,21 @@ void ext
       worker,
     );
 
-    void client
-      .start()
-      .then(() => {
+    yield* Effect.tryPromise({
+      try: async () => {
+        await client.start();
         console.log("[PGLS] Language client started");
         resolveClient(client);
-      })
-      .catch((err: unknown) => {
-        console.warn(
-          "[PGLS] Language client failed to start:",
-          err instanceof Error ? err.message : String(err),
-        );
-      });
-  })
-  .catch((err: unknown) => {
-    console.error(
-      "[PGLS] Extension activation failed:",
-      err instanceof Error ? err.message : String(err),
+      },
+      catch: (err) =>
+        new Error(err instanceof Error ? `[PGLS] ${err.message}` : `[PGLS] ${String(err)}`),
+    });
+
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        await client.stop();
+        worker.terminate();
+      }),
     );
-  });
+  }).pipe(Effect.withSpan("feature.lsp")),
+);

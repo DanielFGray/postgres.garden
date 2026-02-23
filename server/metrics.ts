@@ -32,3 +32,7 @@ export const authActiveSessions = meter.createUpDownCounter("auth.active_session
 export const webhookReceived = meter.createCounter("webhook.received", {
   description: "Number of webhooks received",
 });
+
+export const httpErrors = meter.createCounter("http.errors", {
+  description: "HTTP errors by route, status, and kind",
+});

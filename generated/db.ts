@@ -9,12 +9,9 @@ export type AppPublicPrivacy = "private" | "public" | "secret";
 
 export type AppPublicUserRole = "admin" | "pro" | "sponsor" | "user";
 
-export type Generated<T> =
-  T extends ColumnType<infer S, infer I, infer U>
-    ? ColumnType<S, I | undefined, U>
-    : ColumnType<T, T | undefined, T>;
-
-export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S, I | undefined, U>
+  : ColumnType<T, T | undefined, T>;
 
 export type Json = JsonValue;
 
@@ -118,7 +115,7 @@ export interface AppPublicPlaygroundCommits {
 
 export interface AppPublicPlaygrounds {
   created_at: Generated<Timestamp>;
-  data_size: Generated<Int8>;
+  data_size: Generated<bigint>;
   description: string | null;
   expires_at: Timestamp | null;
   fork_hash: string | null;

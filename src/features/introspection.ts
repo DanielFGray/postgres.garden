@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
+import { Effect, Option, pipe } from "effect";
 import { Introspection, makeIntrospectionQuery, parseIntrospectionResults } from "pg-introspection";
 import { PGLITE_EXECUTE, type ExtendedResults } from "./constants.js";
+
+const toError = (err: unknown): Error =>
+  err instanceof Error ? err : new Error(String(err));
 
 export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity> {
   introspection: Introspection | undefined;
@@ -10,23 +14,31 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
   readonly onDidChangeTreeData: vscode.Event<Entity | undefined | null | void> =
     this.#onDidChangeTreeData.event;
 
-  refresh = async (): Promise<void> => {
-    const [result] = await vscode.commands.executeCommand<ExtendedResults[]>(
-      PGLITE_EXECUTE,
-      makeIntrospectionQuery(),
+  refresh = (): Promise<void> =>
+    Effect.runPromise(
+      Effect.gen(this, function* () {
+        const results = yield* Effect.tryPromise({
+          try: () =>
+            vscode.commands.executeCommand<ExtendedResults[]>(
+              PGLITE_EXECUTE,
+              makeIntrospectionQuery(),
+            ),
+          catch: toError,
+        });
+        const [result] = results;
+        if (!result || "error" in result) {
+          console.error("Failed to fetch introspection data");
+          return;
+        }
+        const introspectionJson = result.rows[0]?.introspection as string;
+        if (!introspectionJson) {
+          console.error("No introspection data returned");
+          return;
+        }
+        this.introspection = parseIntrospectionResults(introspectionJson, true);
+        this.#onDidChangeTreeData.fire();
+      }),
     );
-    if (!result || "error" in result) {
-      console.error("Failed to fetch introspection data");
-      return;
-    }
-    const introspectionJson = result.rows[0]?.introspection as string;
-    if (!introspectionJson) {
-      console.error("No introspection data returned");
-      return;
-    }
-    this.introspection = parseIntrospectionResults(introspectionJson, true);
-    this.#onDidChangeTreeData.fire();
-  };
 
   getTreeItem(element: Entity): vscode.TreeItem {
     return element;
@@ -306,10 +318,12 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
       }
       case "functions": {
         const [id] = parent.id.split("-");
-        return this.introspection.procs
+        const introspection = this.introspection;
+        if (!introspection) return [];
+        return introspection.procs
           .filter((proc) => proc.pronamespace === id)
           .map((proc) => {
-            const type = this.introspection!.getType({ id: proc?.prorettype });
+            const type = introspection.getType({ id: proc.prorettype });
             const returnType = proc.proretset ? "setof " + type?.typname : type?.typname;
             const args = proc.pronargs && proc.pronargs > 0 ? proc.pronargs : "";
             return new Entity({
@@ -365,10 +379,14 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
       }
 
       case "fnreturns": {
-        const id = parent.id.split("-")[0]!;
+        const id = pipe(
+          Option.fromNullable(parent.id.split("-")[0]),
+          Option.getOrElse(() => ""),
+        );
+        if (!id) return [];
         const proc = this.introspection.getProc({ id });
         if (!proc) return [];
-        const type = this.introspection.getType({ id: proc?.prorettype });
+        const type = this.introspection.getType({ id: proc.prorettype });
         if (!type) return [];
         return [
           new Entity({
@@ -382,8 +400,14 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
       }
 
       case "fnarguments": {
-        const argId = parent.id.split("-")[0]!;
-        const proc = this.introspection.getProc({ id: argId });
+        const argId = pipe(
+          Option.fromNullable(parent.id.split("-")[0]),
+          Option.getOrElse(() => ""),
+        );
+        if (!argId) return [];
+        const introspection = this.introspection;
+        if (!introspection) return [];
+        const proc = introspection.getProc({ id: argId });
         const types = proc?.proargtypes ?? [];
         return (
           proc?.proargnames ?? Array.from({ length: proc?.pronargs ?? 0 }, (_, i) => `arg${i + 1}`)
@@ -392,7 +416,12 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
             new Entity({
               id: `${parent.id}-${arg}`,
               label: arg,
-              description: this.introspection!.getType({ id: types[i]! })?.typname,
+              description: pipe(
+                Option.fromNullable(types[i]),
+                Option.flatMap((typeId) => Option.fromNullable(introspection.getType({ id: typeId }))),
+                Option.map((type) => type.typname),
+                Option.getOrUndefined,
+              ),
               kind: "label",
               icon: "symbol-property",
               state: vscode.TreeItemCollapsibleState.None,
@@ -424,7 +453,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
         const primaryKey = indexes
           .find((idx) => idx.indisprimary)
           ?.getKeys()
-          .map((k) => k!.attname);
+          .flatMap((key) => (key ? [key.attname] : []));
 
         const columns = this.introspection.attributes.filter((attr) => attr.attrelid === parent.id);
         return [

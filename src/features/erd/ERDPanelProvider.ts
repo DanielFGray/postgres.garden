@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import type { PGliteService } from "../pglite.js";
-import { getMermaidERD } from "./query.js";
+import { getMermaidERD, type ERDQueryClient } from "./query.js";
+import { generateNonce } from "../../utils/nonce";
 
 interface ExtensionToERDMessage {
   type: "load" | "error";
@@ -21,7 +21,7 @@ export class ERDPanelProvider {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
-  private _pgliteService: PGliteService;
+  private _pgliteService: ERDQueryClient;
 
   private static _refreshTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -34,7 +34,7 @@ export class ERDPanelProvider {
     }, 300);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri, pgliteService: PGliteService) {
+  public static createOrShow(extensionUri: vscode.Uri, pgliteService: ERDQueryClient) {
     // Check if we already have a panel
     if (ERDPanelProvider.panel) {
       ERDPanelProvider.panel._panel.reveal();
@@ -60,7 +60,7 @@ export class ERDPanelProvider {
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
-    pgliteService: PGliteService,
+    pgliteService: ERDQueryClient,
   ) {
     this._panel = panel;
     this._extensionUri = extensionUri;
@@ -133,7 +133,7 @@ export class ERDPanelProvider {
     const scriptUri = `${baseUri}/src/webview-dist/erd-viewer.js`;
     const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
 
-    const nonce = getNonce();
+    const nonce = generateNonce();
 
     return `<!DOCTYPE html>
       <html lang="en">
@@ -150,13 +150,4 @@ export class ERDPanelProvider {
       </body>
       </html>`;
   }
-}
-
-function getNonce() {
-  let text = "";
-  const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
 }

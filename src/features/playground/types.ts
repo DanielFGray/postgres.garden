@@ -41,28 +41,6 @@ export interface PlaygroundListItem {
   fork_hash?: string | null;
   user_id?: string | null;
   expires_at?: string | null;
+  stars?: string;
+  is_starred?: boolean;
 }
-
-// Message types for webview communication
-export type ExtensionToViewMessage =
-  | { type: "playgroundsList"; data: PlaygroundListItem[] }
-  | { type: "playgroundCreated" }
-  | { type: "playgroundDeleted" }
-  | { type: "error"; data: { message: string } };
-
-export type ViewToExtensionMessage =
-  | { type: "loadPlaygrounds" }
-  | { type: "createPlayground"; data: { name: string } }
-  | { type: "openPlayground"; data: { hash: string } }
-  | { type: "deletePlayground"; data: { hash: string } }
-  | { type: "forkPlayground"; data: { hash: string } };
-
-export type ExtensionToPanelMessage =
-  | { type: "loadPlayground"; data: Playground }
-  | { type: "saved"; data: { timestamp: string } }
-  | { type: "error"; data: { message: string } };
-
-export type PanelToExtensionMessage =
-  | { type: "updateMetadata"; data: { name?: string; description?: string; privacy?: string } }
-  | { type: "fork" }
-  | { type: "initialized" };

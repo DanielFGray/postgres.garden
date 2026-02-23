@@ -126,9 +126,9 @@ function processMessage(event: MessageEvent) {
   // Everything else (initialize, didOpen/Change/Close for diagnostics, etc.) → LSP
   try {
     const responses = lsp.handleMessage(event.data as string);
-    for (const resp of responses) {
+    responses.forEach((resp) => {
       self.postMessage(resp);
-    }
+    });
   } catch (err) {
     console.error(
       "[PGLS Worker] handleMessage error:",
@@ -139,14 +139,12 @@ function processMessage(event: MessageEvent) {
 
 /** Convert LSP line:character to byte offset. */
 function positionToOffset(content: string, line: number, character: number): number {
-  let offset = 0;
   const lines = content.split("\n");
-  for (let i = 0; i < line && i < lines.length; i++) {
-    offset += (lines[i]?.length ?? 0) + 1;
-  }
+  const lineOffset = lines
+    .slice(0, Math.min(line, lines.length))
+    .reduce((offset, currentLine) => offset + currentLine.length + 1, 0);
   // Approximate: character is UTF-16 offset, but for ASCII this is fine
-  offset += Math.min(character, (lines[line] ?? "").length);
-  return offset;
+  return lineOffset + Math.min(character, (lines[line] ?? "").length);
 }
 
 /** Map PGLS completion kind string to LSP CompletionItemKind number. */
@@ -184,9 +182,9 @@ try {
   console.log("[PGLS] WASM language server ready");
 
   // Process any messages that arrived during init
-  for (const msg of pendingMessages) {
+  pendingMessages.forEach((msg) => {
     processMessage(msg);
-  }
+  });
   pendingMessages.length = 0;
 } catch (err) {
   console.error(

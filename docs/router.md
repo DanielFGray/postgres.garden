@@ -50,8 +50,7 @@ The application now uses the **Navigation API** (with polyfill) for client-side 
 **Files:**
 
 - `server/data.ts` - Route parsing and data fetching
-- `server/dev.ts` - Development server with route-aware data injection
-- `server/prod.ts` - Production server with route-aware data injection
+- `server/httpapi/webServer.ts` - Unified server with route-aware data injection
 
 **Flow:**
 

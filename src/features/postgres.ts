@@ -1,464 +1,550 @@
-import * as vscode from "vscode";
-import { PGliteService } from "./pglite";
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
-import { DatabaseExplorerProvider } from "./introspection.js";
+import { Effect, Layer } from "effect";
+import type * as vscode from "vscode";
+import { getCurrentPlaygroundId } from "../shared/routes.js";
+import { VSCodeService } from "../vscode/service";
 import {
-  PGLITE_RESET,
-  PGLITE_EXECUTE,
-  PGLITE_INTROSPECT,
   DATABASE_EXPLORER,
   DATABASE_MIGRATE,
-  LATEST_POSTS,
   ERD_SHOW,
+  PGLITE_EXECUTE,
+  PGLITE_INTROSPECT,
+  PGLITE_RESET,
+  PLAYGROUND_CREATE,
+  PLAYGROUND_SHOW_BROWSER,
   SERVER_SYNC_COMMIT,
   WORKSPACE_DOWNLOAD,
 } from "./constants.js";
+import {
+	MenuId,
+	registerAction2,
+	Action2,
+} from "@codingame/monaco-vscode-api/vscode/vs/platform/actions/common/actions";
+import { Codicon } from "@codingame/monaco-vscode-api/vscode/vs/base/common/codicons";
+import { ICommandService } from "@codingame/monaco-vscode-api/vscode/vs/platform/commands/common/commands.service";
+import type { ServicesAccessor } from "@codingame/monaco-vscode-api/vscode/vs/platform/instantiation/common/instantiation";
+import { ERDPanelProvider } from "./erd/ERDPanelProvider.js";
+import { DatabaseExplorerProvider } from "./introspection.js";
+import { updateSchema } from "./lsp.js";
+import { MarkdownSerializer } from "./notebook/markdown.js";
 import { SQLNotebookExecutionController } from "./notebook/controller.js";
 import { SQLSerializer } from "./notebook/sql.js";
-import { MarkdownSerializer } from "./notebook/markdown.js";
+import { PGlite } from "./pglite";
 import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
-import { ERDPanelProvider } from "./erd/ERDPanelProvider.js";
-import { updateSchema } from "./lsp.js";
-import { getCurrentPlaygroundId } from "../routes.js";
 
-// Module-level subscriptions for HMR support
-const subscriptions: vscode.Disposable[] = [];
+const toError = (error: unknown): Error =>
+  new Error(error instanceof Error ? error.message : String(error));
 
-const ext = registerExtension(
-  {
-    name: "postgres.garden",
-    publisher: "postgres.garden",
-    description: "postgres.garden",
-    version: "1.0.0",
-    engines: { vscode: "*" },
-    capabilities: { virtualWorkspaces: true },
-    extensionKind: ["workspace"],
-    contributes: {
-      languages: [
-        {
-          id: "sql",
-          extensions: [".sql", ".dsql"],
-          aliases: ["PostgreSQL", "SQL", "sql"],
-          configuration: "./language-configuration.json",
-        },
-      ],
-      grammars: [
-        {
-          language: "sql",
-          scopeName: "source.sql",
-          path: "./syntaxes/sql.tmLanguage.json",
-        },
-      ],
-      walkthroughs: [
-        {
-          id: "pg-playground-getting-started",
-          title: "PostgreSQL Playground Getting Started",
-          description:
-            "Learn PostgreSQL with interactive examples and get started with your first playground",
-          steps: [
-            {
-              id: "choose-example",
-              title: "Choose Your Starting Example",
-              description: "[Empty Playground](command:pg-playground.createEmpty)",
-              media: {
-                markdown: "media/examples-overview.md",
-              },
-              completionEvents: [
-                "onCommand:pg-playground.loadExample",
-                "onCommand:pg-playground.createEmpty",
-              ],
-            },
-            {
-              id: "run-query",
-              title: "Run Your First Query",
-              description:
-                "Execute a query to see live results:\n\n[▶️ Run Current Query](command:pg-playground.runQuery)\n\nWatch the output panel to see your query results in real-time.",
-              media: {
-                image: "media/run-query.png",
-                altText: "Running a PostgreSQL query",
-              },
-              completionEvents: ["onCommand:pg-playground.runQuery"],
-            },
-            {
-              id: "explore-features",
-              title: "Explore Advanced Features",
-              description:
-                "Discover powerful PostgreSQL playground features:\n\n• **Schema Introspection**: Explore database structure\n• **Query History**: Access previous queries\n• **Export Results**: Save query outputs\n• **Share Playgrounds**: Collaborate with others\n\n[📖 Open Documentation](command:vscode.open?https://docs.pg-playground.com)",
-              media: {
-                image: "media/features-overview.png",
-                altText: "PostgreSQL playground features",
-              },
-            },
-          ],
-        },
-      ],
-      configuration: [
-        {
-          order: 22,
-          title: "postgres.garden",
-          properties: {
-            "postgres.garden.introspection-tree.grouping": {
-              title: "introspection tree grouping",
+const fromPromise = <A>(run: () => PromiseLike<A>) =>
+  Effect.tryPromise({
+    try: run,
+    catch: toError,
+  });
 
-              type: "string",
-              // scope: "window",
-              enum: ["alphabetical", "grouped by type"],
-              default: "grouped by type",
-              description: "Grouping of the introspection tree.",
-            },
-          },
-        },
-      ],
-      notebooks: [
-        {
-          type: "sql-notebook",
-          displayName: "SQL Notebook",
-          priority: "default",
-          selector: [{ filenamePattern: "*.sql" }],
-        },
-        {
-          type: "markdown-notebook",
-          displayName: "Markdown Notebook",
-          priority: "default",
-          selector: [{ filenamePattern: "*.md" }],
-        },
-      ],
-      notebookRenderer: [
-        {
-          id: "pg-playground-sql-renderer",
-          entrypoint: "./renderer/index.js",
-          displayName: "SQL Results Renderer",
-          mimeTypes: ["application/vnd.pg-playground.sql-result+json"],
-        },
-      ],
-      commands: [
-        {
-          command: PGLITE_RESET,
-          title: "Reset database",
-          icon: "$(trash)",
-        },
-        {
-          command: PGLITE_EXECUTE,
-          title: "Execute SQL",
-          icon: "$(notebook-execute)",
-        },
-        {
-          command: SERVER_SYNC_COMMIT,
-          title: "Save",
-          icon: "$(cloud-upload)",
-        },
-        {
-          command: PGLITE_INTROSPECT,
-          title: "Refresh introspection data",
-          icon: "$(repo-sync)",
-        },
-        {
-          command: DATABASE_MIGRATE,
-          title: "Run migrations",
-          icon: "$(run-all)",
-        },
-        {
-          command: "github-login",
-          title: "Login with GitHub",
-          icon: "$(github)",
-        },
-        {
-          command: LATEST_POSTS,
-          title: "Latest Posts",
-          icon: "$(clock)",
-        },
-        {
-          command: ERD_SHOW,
-          title: "Show ERD",
-          icon: "$(type-hierarchy)",
-        },
-        {
-          command: WORKSPACE_DOWNLOAD,
-          title: "Download workspace",
-          icon: "$(desktop-download)",
-        },
-      ],
-      menus: {
-        commandPalette: [
-          {
-            command: PGLITE_EXECUTE,
-            when: "editorLangId == sql",
-          },
-        ],
-        "view/title": [
-          {
-            command: ERD_SHOW,
-            when: "view == databaseExplorer",
-            group: "navigation",
-          },
-          {
-            command: PGLITE_INTROSPECT,
-            when: "view == databaseExplorer",
-            group: "navigation",
-          },
-        ],
-        "editor/title": [
-          // { command: "sql.format", group: "1_run" },
-          { command: DATABASE_MIGRATE, group: "1_run" },
-          { command: SERVER_SYNC_COMMIT, group: "1_run" },
-          { command: ERD_SHOW, group: "1_run" },
-          { command: WORKSPACE_DOWNLOAD, group: "1_run" },
-          { command: PGLITE_RESET, group: "5_close" },
-        ],
-        "notebook/cell/execute": [
-          {
-            command: PGLITE_EXECUTE,
-            group: "navigation",
-            when: "editorLangId == sql",
-          },
-        ],
-      },
-      views: {
-        explorer: [
-          { id: DATABASE_EXPLORER, name: "Database", visibility: "visible" },
-          // { id: PLAYGROUND_INFO, name: "Playground", type: "webview" },
-        ],
-      },
-      viewsWelcome: [
-        {
-          view: "workbench.explorer.emptyView",
-          contents:
-            "Welcome to PostgreSQL Playground! 🐘\n\nGet started with interactive PostgreSQL examples:\n\n[🆕 Create Empty Playground](command:pg-playground.createEmpty)\n\n[📚 Open Getting Started Guide](command:workbench.action.openWalkthrough?pg-playground-getting-started)",
-        },
-        {
-          view: DATABASE_EXPLORER,
-          contents: "Run some commands to see your schema",
-        },
-      ],
-    },
-  },
-  ExtensionHostKind.LocalProcess,
-);
-
-// Register renderer bundle (both with and without .js)
-// CSS is inlined into the JS bundle and injected into the Shadow DOM at runtime.
-ext.registerFileUrl(
-  "renderer/index",
-  new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
-);
-
-ext.registerFileUrl(
-  "renderer/index.js",
-  new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
-);
-
-// PostgreSQL language support (replaces @codingame/monaco-vscode-sql-default-extension)
-ext.registerFileUrl(
-  "./language-configuration.json",
-  new URL("./pgsql/language-configuration.json", import.meta.url).toString(),
-);
-
-ext.registerFileUrl(
-  "./syntaxes/sql.tmLanguage.json",
-  new URL("./pgsql/sql.tmLanguage.json", import.meta.url).toString(),
-);
-
-void ext.getApi().then(async (vscode) => {
-  console.log("[TEST READY] VSCode API initialized, setting window.vscode and window.vscodeReady");
-  window.vscode = vscode;
-  window.vscodeReady = Promise.resolve(vscode);
-  console.log("[TEST READY] window.vscodeReady is now set");
-
-  // Clear old subscriptions on HMR reload
-  // Wait for async disposals to complete before creating new services
-  await Promise.all(
-    subscriptions.map(async (d) => {
-      if (typeof d.dispose === "function") {
-        await d.dispose();
-      }
+const acquireDisposable = <A extends { dispose: () => void | Promise<void> }>(
+  acquire: Effect.Effect<A, Error, never>,
+) =>
+  Effect.acquireRelease(acquire, (resource) =>
+    Effect.promise(async () => {
+      await Promise.resolve(resource.dispose());
     }),
   );
-  subscriptions.length = 0;
 
-  // Register notebook serializers FIRST - before loading workspace
-  // This ensures .md and .sql files can be opened as notebooks
-  subscriptions.push(
-    vscode.workspace.registerNotebookSerializer("markdown-notebook", new MarkdownSerializer()),
-  );
-  const controller1 = new SQLNotebookExecutionController("markdown-notebook");
-  subscriptions.push(controller1);
+const registerFeatureAssets = (vscodeService: {
+  readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, never>;
+}) =>
+  Effect.all([
+    vscodeService.registerFileUrl(
+      "renderer/index",
+      new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
+    ),
+    vscodeService.registerFileUrl(
+      "renderer/index.js",
+      new URL("./notebook/renderer-dist/sql-renderer.js", import.meta.url).toString(),
+    ),
+    vscodeService.registerFileUrl(
+      "./language-configuration.json",
+      new URL("./pgsql/language-configuration.json", import.meta.url).toString(),
+    ),
+    vscodeService.registerFileUrl(
+      "./syntaxes/sql.tmLanguage.json",
+      new URL("./pgsql/sql.tmLanguage.json", import.meta.url).toString(),
+    ),
+  ]).pipe(Effect.asVoid);
 
-  subscriptions.push(
-    vscode.workspace.registerNotebookSerializer("sql-notebook", new SQLSerializer()),
-  );
-  const controller2 = new SQLNotebookExecutionController("sql-notebook");
-  subscriptions.push(controller2);
+const findFiles = (
+  vscodeApi: typeof import("vscode"),
+  dir: vscode.Uri,
+  predicate?: (x: readonly [file: vscode.Uri, type: vscode.FileType]) => boolean,
+): Effect.Effect<readonly vscode.Uri[], Error, never> =>
+  Effect.gen(function* () {
+    const entries = yield* fromPromise(() => vscodeApi.workspace.fs.readDirectory(dir));
 
-  // Create PGlite service instance
-  const pgliteService = new PGliteService();
+    const nested = yield* Effect.forEach(
+      entries,
+      ([file, fileType]) => {
+        const uri = vscodeApi.Uri.joinPath(dir, file);
 
-  // Add to subscriptions for proper cleanup
-  subscriptions.push({
-    dispose: () => pgliteService.dispose(),
+        if (predicate && !predicate([uri, fileType])) {
+          return Effect.succeed([] as const);
+        }
+
+        if (fileType & vscodeApi.FileType.Directory) {
+          return findFiles(vscodeApi, uri, predicate);
+        }
+
+        return Effect.succeed([uri] as const);
+      },
+      { concurrency: 1 },
+    );
+
+    return nested.flat();
   });
 
-  // Restore workspace from server (if available)
-  // Only restore for local workspaces (not remote)
-  // NOTE: This must happen AFTER notebook serializers are registered
-  await loadWorkspaceFromInitialData();
+const runCommand = (
+  effect: Effect.Effect<void, Error, never>,
+  label: string,
+): Promise<void> =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.tapError((error) => Effect.sync(() => console.error(label, error))),
+      Effect.catchAll(() => Effect.void),
+    ),
+  );
 
-  const pgliteOutputChannel = vscode.window.createOutputChannel("PGlite");
-  subscriptions.push(pgliteOutputChannel);
+const activatePostgresFeature = Effect.gen(function* () {
+  const vscodeService = yield* VSCodeService;
+  const vscodeApi = vscodeService.api;
 
-  // Initialize PGlite and show version info
-  void new Promise<void>((res) => {
-    pgliteOutputChannel.appendLine("starting postgres");
-    // pgliteOutputChannel.show();
-    pgliteService
-      .query<{ version: string }>("select version()")
-      .then((result) => {
-        pgliteOutputChannel.appendLine(result.rows[0]?.version ?? "");
-        pgliteOutputChannel.appendLine("Powered by @electric-sql/pglite");
-      })
-      .then(res)
-      .catch(console.error);
-  });
+  yield* registerFeatureAssets(vscodeService);
+
+  window.vscode = vscodeApi;
+  window.vscodeReady = Promise.resolve(vscodeApi);
+
+  yield* acquireDisposable(
+    Effect.sync(() =>
+      vscodeApi.workspace.registerNotebookSerializer("markdown-notebook", new MarkdownSerializer()),
+    ),
+  );
+  yield* acquireDisposable(Effect.sync(() => new SQLNotebookExecutionController("markdown-notebook")));
+
+  yield* acquireDisposable(
+    Effect.sync(() => vscodeApi.workspace.registerNotebookSerializer("sql-notebook", new SQLSerializer())),
+  );
+  yield* acquireDisposable(Effect.sync(() => new SQLNotebookExecutionController("sql-notebook")));
+
+  const pglite = yield* PGlite;
+
+  yield* Effect.forkScoped(
+    loadWorkspaceFromInitialData.pipe(
+      Effect.tapError((error) =>
+        Effect.annotateCurrentSpan({
+          "error": true,
+          "error.message": error instanceof Error ? error.message : String(error),
+          "error.type": "initial_data",
+        }),
+      ),
+      Effect.tapError((error) =>
+        Effect.sync(() => {
+          console.error("[Postgres] loadWorkspaceFromInitialData failed", error);
+        }),
+      ),
+      Effect.catchAll(() => Effect.void),
+    ),
+  );
+
+  const pgliteOutputChannel = yield* acquireDisposable(
+    Effect.sync(() => vscodeApi.window.createOutputChannel("PGlite")),
+  );
+
+  // Fork: don't block command registrations while PGlite initializes
+  yield* Effect.forkScoped(
+    pglite.query<{ version: string }>("select version()")
+      .pipe(
+        Effect.tap(({ rows }) =>
+          Effect.sync(() => {
+            pgliteOutputChannel.appendLine("starting postgres");
+            pgliteOutputChannel.appendLine(rows[0]?.version ?? "");
+            pgliteOutputChannel.appendLine("Powered by @electric-sql/pglite");
+          }),
+        ),
+        Effect.tapError((error) =>
+          Effect.annotateCurrentSpan({
+            "error": true,
+            "error.message": error instanceof Error ? error.message : String(error),
+            "error.type": "pglite_startup",
+          }),
+        ),
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            console.error("[PGlite] startup query failed", error);
+          }),
+        ),
+        Effect.catchAll(() => Effect.void),
+      ),
+  );
 
   const queryOpts = {};
 
-  subscriptions.push(
-    vscode.commands.registerCommand(DATABASE_MIGRATE, async function migrate(): Promise<void> {
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      if (!folder) return;
-      const uris = (await findFiles(folder.uri, ([f]) => /\/\d+[^/]+\.sql$/.test(f.path))).sort(
-        (a, b) => a.path.localeCompare(b.path),
-      );
-      if (!uris.length) {
-        await vscode.window.showInformationMessage("No migration files detected");
-        return;
-      }
-      const files = await Promise.all(
-        uris.map(async (f) => {
-          const raw = await vscode.workspace.fs.readFile(f);
-          return new TextDecoder().decode(raw);
-        }),
-      );
-      for (const sql of files) {
-        await vscode.commands.executeCommand(PGLITE_EXECUTE, sql);
-      }
-      vscode.commands.executeCommand(PGLITE_INTROSPECT);
-      vscode.window.showInformationMessage(`finished ${uris.length} migrations`);
-    }),
-  );
-
-  subscriptions.push(
-    vscode.commands.registerCommand(PGLITE_EXECUTE, async function exec(sql: string) {
-      try {
-        const result = await pgliteService.exec(sql, queryOpts);
-        result.forEach((stmt) => {
-          pgliteOutputChannel.appendLine(stmt.statement);
-        });
-        if (
-          result.some((r) =>
-            ["CREATE", "ALTER", "DROP"].some((stmt) => r.statement.startsWith(stmt)),
-          )
-        ) {
-          vscode.commands.executeCommand(PGLITE_INTROSPECT);
+  yield* vscodeService.registerCommand(DATABASE_MIGRATE, () =>
+    runCommand(
+      Effect.gen(function* () {
+        const folder = vscodeApi.workspace.workspaceFolders?.[0];
+        if (!folder) {
+          return;
         }
-        return result;
-      } catch (error) {
-        pgliteOutputChannel.appendLine(
-          `Error: ${(error as Error)?.message ?? JSON.stringify(error)}`,
+
+        const uris = (
+          yield* findFiles(vscodeApi, folder.uri, ([file]) => /\/\d+[^/]+\.sql$/.test(file.path))
+        ).toSorted((a, b) => a.path.localeCompare(b.path));
+
+        if (uris.length === 0) {
+          yield* fromPromise(() => vscodeApi.window.showInformationMessage("No migration files detected"));
+          return;
+        }
+
+        const files = yield* Effect.forEach(
+          uris,
+          (uri) =>
+            fromPromise(() => vscodeApi.workspace.fs.readFile(uri)).pipe(
+              Effect.map((raw) => new TextDecoder().decode(raw)),
+            ),
+          { concurrency: 1 },
         );
-        return [{ error, statement: sql }];
-      }
-    }),
+
+        yield* Effect.forEach(
+          files,
+          (sql) =>
+            fromPromise(() =>
+              vscodeApi.commands.executeCommand(PGLITE_EXECUTE, sql),
+            ).pipe(Effect.asVoid),
+          { concurrency: 1 },
+        ).pipe(Effect.asVoid);
+
+        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(Effect.asVoid);
+        yield* fromPromise(() =>
+          vscodeApi.window.showInformationMessage(`finished ${uris.length} migrations`),
+        ).pipe(Effect.asVoid);
+      }),
+      "[Postgres] migrate command failed",
+    ),
   );
 
-  subscriptions.push(
-    vscode.commands.registerCommand(PGLITE_RESET, async function reset() {
-      pgliteOutputChannel.replace("restarting postgres\n");
-      await pgliteService.reset();
-      vscode.commands.executeCommand(PGLITE_INTROSPECT);
-      const { rows } = await pgliteService.query<{ version: string }>("select version()");
-      pgliteOutputChannel.appendLine(rows[0]?.version ?? "failed fetching version");
-    }),
+  yield* vscodeService.registerCommand(PGLITE_EXECUTE, (...args) => {
+    const sql = typeof args[0] === "string" ? args[0] : "";
+    return Effect.runPromise(
+      Effect.gen(function* () {
+        const usesCopy = /\bCOPY\b/i.test(sql);
+
+        // Sync workspace → PGlite Emscripten FS before COPY queries
+        if (usesCopy) {
+          yield* syncWorkspaceToEmscriptenFs(vscodeApi, pglite).pipe(
+            Effect.tapError((err) =>
+              Effect.annotateCurrentSpan({
+                "error": true,
+                "error.message": err instanceof Error ? err.message : String(err),
+                "error.type": "fs_sync",
+              }),
+            ),
+            Effect.tapError((err) =>
+              Effect.sync(() => console.warn("[Postgres] workspace→emscripten sync failed", err)),
+            ),
+            Effect.catchAll(() => Effect.void),
+          );
+        }
+
+        const result = yield* pglite.exec(sql, queryOpts);
+
+        yield* Effect.sync(() => {
+          result.forEach((statementResult) => {
+            pgliteOutputChannel.appendLine(statementResult.statement);
+          });
+        });
+
+        // Sync new files from PGlite Emscripten FS → workspace after COPY queries
+        if (usesCopy) {
+          yield* syncEmscriptenFsToWorkspace(vscodeApi, pglite).pipe(
+            Effect.tapError((err) =>
+              Effect.annotateCurrentSpan({
+                "error": true,
+                "error.message": err instanceof Error ? err.message : String(err),
+                "error.type": "fs_sync",
+              }),
+            ),
+            Effect.tapError((err) =>
+              Effect.sync(() => console.warn("[Postgres] emscripten→workspace sync failed", err)),
+            ),
+            Effect.catchAll(() => Effect.void),
+          );
+        }
+
+        const didMutateSchema = result.some((statementResult) =>
+          ["CREATE", "ALTER", "DROP"].some((prefix) => statementResult.statement.startsWith(prefix)),
+        );
+
+        if (didMutateSchema) {
+          yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(
+            Effect.asVoid,
+          );
+        }
+
+        return result;
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            pgliteOutputChannel.appendLine(`Error: ${error.message}`);
+          }),
+        ),
+        Effect.catchAll((error) =>
+          Effect.succeed([{ error, statement: sql }]),
+        ),
+      ),
+    );
+  });
+
+  yield* vscodeService.registerCommand(PGLITE_RESET, () =>
+    runCommand(
+      Effect.gen(function* () {
+        yield* Effect.sync(() => {
+          pgliteOutputChannel.replace("restarting postgres\n");
+        });
+        yield* pglite.reset;
+        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(Effect.asVoid);
+        const { rows } = yield* pglite.query<{ version: string }>("select version()");
+        yield* Effect.sync(() => {
+          pgliteOutputChannel.appendLine(rows[0]?.version ?? "failed fetching version");
+        });
+      }),
+      "[Postgres] reset command failed",
+    ),
   );
 
   const dbExplorer = new DatabaseExplorerProvider();
-  const dbTreeView = vscode.window.createTreeView(DATABASE_EXPLORER, {
-    treeDataProvider: dbExplorer,
-  });
-  subscriptions.push(dbTreeView);
-  const [refreshIntrospection] = throttle(async () => {
-    await dbExplorer.refresh();
-    if (dbExplorer.introspection) {
-      updateSchema(dbExplorer.introspection);
-    }
+  const dbTreeView = yield* acquireDisposable(
+    Effect.sync(() =>
+      vscodeApi.window.createTreeView(DATABASE_EXPLORER, {
+        treeDataProvider: dbExplorer,
+      }),
+    ),
+  );
+
+  const [refreshIntrospection, cancelRefresh] = throttle(() => {
+    void runCommand(
+      Effect.gen(function* () {
+        yield* fromPromise(() => dbExplorer.refresh());
+        if (dbExplorer.introspection) {
+          const introspection = dbExplorer.introspection;
+          yield* Effect.sync(() => {
+            updateSchema(introspection);
+          });
+        }
+      }),
+      "[Postgres] introspection refresh failed",
+    );
   }, 50);
-  subscriptions.push(
-    vscode.commands.registerCommand(PGLITE_INTROSPECT, () => {
-      refreshIntrospection();
-      dbTreeView.reveal(undefined, { expand: true });
-      ERDPanelProvider.refresh();
+
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      cancelRefresh();
     }),
   );
 
-  // Download workspace as zip
-  subscriptions.push(
-    vscode.commands.registerCommand(WORKSPACE_DOWNLOAD, async function downloadWorkspace() {
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      if (!folder) return;
-
-      const uris = await findFiles(folder.uri);
-      if (uris.length === 0) {
-        void vscode.window.showInformationMessage("No files to download.");
-        return;
-      }
-
-      const entries = await Promise.all(
-        uris.map(async (uri) => {
-          const content = await vscode.workspace.fs.readFile(uri);
-          const relativePath = uri.path.replace(/^\/workspace\//, "");
-          return { name: relativePath, input: content };
-        }),
-      );
-
-      const { downloadZip } = await import("client-zip");
-      const blob = await downloadZip(entries).blob();
-      const name = getCurrentPlaygroundId() ?? "workspace";
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${name}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }),
+  yield* vscodeService.registerCommand(PGLITE_INTROSPECT, () =>
+    runCommand(
+      Effect.sync(() => {
+        refreshIntrospection();
+        void dbTreeView.reveal(undefined, { expand: true });
+        ERDPanelProvider.refresh();
+      }),
+      "[Postgres] introspect command failed",
+    ),
   );
 
-  // ERD panel
-  subscriptions.push(
-    vscode.commands.registerCommand(ERD_SHOW, () => {
-      ERDPanelProvider.createOrShow(vscode.Uri.parse(window.location.origin), pgliteService);
-    }),
+  yield* vscodeService.registerCommand(WORKSPACE_DOWNLOAD, () =>
+    runCommand(
+      Effect.gen(function* () {
+        const folder = vscodeApi.workspace.workspaceFolders?.[0];
+        if (!folder) {
+          return;
+        }
+
+        const uris = yield* findFiles(vscodeApi, folder.uri);
+        if (uris.length === 0) {
+          yield* fromPromise(() => vscodeApi.window.showInformationMessage("No files to download.")).pipe(
+            Effect.asVoid,
+          );
+          return;
+        }
+
+        const entries = yield* Effect.forEach(
+          uris,
+          (uri) =>
+            fromPromise(() => vscodeApi.workspace.fs.readFile(uri)).pipe(
+              Effect.map((content) => ({
+                name: uri.path.replace(/^\/workspace\//, ""),
+                input: content,
+              })),
+            ),
+        );
+
+        const { downloadZip } = yield* fromPromise(() => import("client-zip"));
+        const blob = yield* fromPromise(() => downloadZip(entries).blob());
+
+        const name = getCurrentPlaygroundId() ?? "workspace";
+
+        yield* Effect.sync(() => {
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `${name}.zip`;
+          anchor.click();
+          URL.revokeObjectURL(url);
+        });
+      }),
+      "[Postgres] download command failed",
+    ),
   );
+
+  yield* vscodeService.registerCommand(ERD_SHOW, () =>
+    runCommand(
+      Effect.sync(() => {
+        ERDPanelProvider.createOrShow(vscodeApi.Uri.parse(window.location.origin), {
+          query: <T>(sql: string, params?: unknown[]) => Effect.runPromise(pglite.query<T>(sql, params)),
+        });
+      }),
+      "[Postgres] ERD command failed",
+    ),
+  );
+
+  // Titlebar icons (top-right, alongside layout controls / accounts / settings)
+  const titleBarActions: Array<[string, string, (typeof Codicon)[keyof typeof Codicon], number]> = [
+    [PLAYGROUND_CREATE, "Create Playground", Codicon.add, 1],
+    [PLAYGROUND_SHOW_BROWSER, "Browse Playgrounds", Codicon.database, 2],
+    [SERVER_SYNC_COMMIT, "Save", Codicon.cloudUpload, 3],
+    [ERD_SHOW, "Show ERD", Codicon.typeHierarchy, 4],
+    [WORKSPACE_DOWNLOAD, "Download Workspace", Codicon.desktopDownload, 5],
+  ];
+
+  for (const [commandId, title, icon, order] of titleBarActions) {
+    yield* acquireDisposable(
+      Effect.sync(() =>
+        registerAction2(
+          class extends Action2 {
+            constructor() {
+              super({
+                id: `titlebar.${commandId}`,
+                title,
+                icon,
+                menu: [{ id: MenuId.TitleBar, group: "navigation", order }],
+              });
+            }
+            run(accessor: ServicesAccessor): void {
+              void accessor.get(ICommandService).executeCommand(commandId);
+            }
+          },
+        ),
+      ),
+    );
+  }
 });
 
+export const PostgresFeatureLive = Layer.scopedDiscard(
+  activatePostgresFeature.pipe(Effect.withSpan("feature.postgres")),
+);
+
+// ---------------------------------------------------------------------------
+// Workspace ↔ Emscripten FS sync (for COPY TO/FROM support)
+// ---------------------------------------------------------------------------
+
+import type { PGliteApi } from "./pglite";
+
+/** Push all /workspace files from VSCode FS → PGlite's Emscripten FS */
+const syncWorkspaceToEmscriptenFs = (
+  vscodeApi: typeof import("vscode"),
+  pglite: PGliteApi,
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const folder = vscodeApi.workspace.workspaceFolders?.[0];
+    if (!folder) return;
+
+    const uris = yield* findFiles(vscodeApi, folder.uri);
+
+    yield* Effect.forEach(
+      uris,
+      (uri) =>
+        Effect.gen(function* () {
+          const content = yield* fromPromise(() => vscodeApi.workspace.fs.readFile(uri));
+          yield* pglite.fs.writeFile(uri.path, content);
+        }),
+      { concurrency: "unbounded" },
+    );
+
+    console.log(`[Postgres] synced ${uris.length} workspace files → emscripten FS`);
+  }).pipe(Effect.withSpan("postgres.syncWorkspaceToEmscriptenFs"));
+
+/** Pull files from PGlite's Emscripten FS /workspace → VSCode FS (only new/changed) */
+const syncEmscriptenFsToWorkspace = (
+  vscodeApi: typeof import("vscode"),
+  pglite: PGliteApi,
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    // List what's currently in VSCode workspace
+    const folder = vscodeApi.workspace.workspaceFolders?.[0];
+    if (!folder) return;
+    const existingUris = yield* findFiles(vscodeApi, folder.uri);
+    const existingPaths = new Set(existingUris.map((u) => u.path));
+
+    // List what's in the Emscripten FS /workspace
+    const emFsPaths = yield* pglite.fs.listDir("/workspace");
+
+    // Find new files (in emscripten FS but not in VSCode workspace)
+    const newPaths = emFsPaths.filter((p) => !existingPaths.has(p));
+
+    if (newPaths.length === 0) return;
+
+    yield* Effect.forEach(
+      newPaths,
+      (path) =>
+        Effect.gen(function* () {
+          const content = yield* pglite.fs.readFile(path);
+          const uri = vscodeApi.Uri.file(path);
+          // Ensure parent directory exists
+          const lastSlash = path.lastIndexOf("/");
+          if (lastSlash > 0) {
+            yield* fromPromise(() =>
+              vscodeApi.workspace.fs.createDirectory(vscodeApi.Uri.file(path.substring(0, lastSlash))),
+            ).pipe(Effect.catchAll(() => Effect.void));
+          }
+          yield* fromPromise(() => vscodeApi.workspace.fs.writeFile(uri, content));
+        }),
+      { concurrency: 1 },
+    );
+
+    console.log(`[Postgres] synced ${newPaths.length} new files emscripten FS → workspace`);
+  }).pipe(Effect.withSpan("postgres.syncEmscriptenFsToWorkspace"));
+
 // oxlint-disable-next-line typescript/no-explicit-any -- generic constraint requires any for proper variance
-function throttle<F extends (...args: any[]) => any>(
-  func: F,
+function throttle<F extends (...args: any[]) => unknown>(
+  fn: F,
   wait: number,
-): [throttled: (...args: Parameters<F>) => void, cancel: () => void] {
+): readonly [throttled: (...args: Parameters<F>) => void, cancel: () => void] {
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  let lastArgs: Parameters<F> | null = null;
+  let latestArgs: Parameters<F> | null = null;
 
   const throttled = (...args: Parameters<F>) => {
-    lastArgs = args;
-    if (timeout === null) {
-      func(...lastArgs);
-      lastArgs = null;
-      timeout = setTimeout(() => {
-        timeout = null;
-        if (lastArgs) {
-          throttled(...lastArgs);
-        }
-      }, wait);
+    latestArgs = args;
+    if (timeout !== null) {
+      return;
     }
+
+    fn(...latestArgs);
+    latestArgs = null;
+
+    timeout = setTimeout(() => {
+      timeout = null;
+      if (latestArgs) {
+        throttled(...latestArgs);
+      }
+    }, wait);
   };
 
   const cancel = () => {
@@ -466,41 +552,8 @@ function throttle<F extends (...args: any[]) => any>(
       clearTimeout(timeout);
       timeout = null;
     }
-    lastArgs = null;
+    latestArgs = null;
   };
 
-  return [throttled, cancel];
-}
-
-async function findFiles(
-  dir: vscode.Uri,
-  predicate?: (x: [f: vscode.Uri, type: vscode.FileType]) => boolean,
-): Promise<vscode.Uri[]> {
-  const readdir = await vscode.workspace.fs.readDirectory(dir);
-  const files = [];
-  for (const [file, fileType] of readdir) {
-    const uri = vscode.Uri.joinPath(dir, file);
-    if (predicate && !predicate([uri, fileType])) continue;
-    if (fileType & vscode.FileType.Directory) {
-      const getDir = await findFiles(uri, predicate);
-      files.push(...getDir);
-    } else {
-      files.push(uri);
-    }
-  }
-  return files;
-}
-
-// HMR support - dispose resources on hot reload
-if (import.meta.hot) {
-  import.meta.hot.dispose(async () => {
-    console.log("[HMR] Disposing postgres extension resources");
-    // Wait for all disposals to complete
-    await Promise.all(
-      subscriptions.map(async (d) => {
-        await d.dispose();
-      }),
-    );
-    subscriptions.length = 0;
-  });
+  return [throttled, cancel] as const;
 }

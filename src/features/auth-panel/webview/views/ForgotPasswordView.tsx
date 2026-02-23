@@ -2,36 +2,47 @@ import * as Effect from "effect/Effect";
 import { Atom, AtomRegistry } from "fibrae";
 import { apiRequest } from "../api";
 
-const emailAtom = Atom.make("");
 const submittingAtom = Atom.make(false);
 const errorAtom = Atom.make<string | null>(null);
 const sentAtom = Atom.make(false);
 
 export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const registry = yield* AtomRegistry.AtomRegistry;
-    const email = yield* Atom.get(emailAtom);
     const submitting = yield* Atom.get(submittingAtom);
     const error = yield* Atom.get(errorAtom);
     const sent = yield* Atom.get(sentAtom);
 
     function handleSubmit(e: Event) {
       e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      const data = new FormData(form);
       registry.set(errorAtom, null);
       registry.set(submittingAtom, true);
 
-      void apiRequest("/api/forgotPassword", "POST", {
-        email: registry.get(emailAtom),
-      })
-        .then(() => {
-          registry.set(sentAtom, true);
-        })
-        .catch((err: unknown) => {
-          registry.set(errorAtom, err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          registry.set(submittingAtom, false);
-        });
+      void Effect.runFork(
+        apiRequest("/api/forgotPassword", "POST", {
+          email: data.get("email"),
+        }, {
+          action: "auth.forgot_password.submit",
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              registry.set(sentAtom, true);
+            }),
+          ),
+          Effect.catchAll((err) =>
+            Effect.sync(() => {
+              registry.set(errorAtom, err.message);
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              registry.set(submittingAtom, false);
+            }),
+          ),
+        ),
+      );
     }
 
     if (sent) {
@@ -49,7 +60,6 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
               class="auth-link"
               onClick={() => {
                 registry.set(sentAtom, false);
-                registry.set(emailAtom, "");
                 props.onNavigate("login");
               }}
             >
@@ -74,12 +84,9 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
             <label>Email</label>
             <input
               type="email"
+              name="email"
               class="setting-input"
               placeholder="you@example.com"
-              value={email}
-              onInput={(e: Event) => {
-                registry.set(emailAtom, (e.target as HTMLInputElement).value);
-              }}
               autoFocus
             />
           </div>
