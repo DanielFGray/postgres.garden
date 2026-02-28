@@ -26,7 +26,12 @@ const WebSdkLive = collectorUrl
 	? WebSdk.layer(() => ({
 			resource: { serviceName: "postgres-garden-web" },
 			spanProcessor: new BatchSpanProcessor(
-				new OTLPTraceExporter({ url: `${collectorUrl}/v1/traces` }),
+				new OTLPTraceExporter({
+					url: `${collectorUrl}/v1/traces`,
+					// Force fetch transport instead of sendBeacon — sendBeacon can't
+					// do CORS preflights, which breaks cross-origin JSON POSTs.
+					headers: {},
+				}),
 			),
 		}))
 	: WebSdk.layer(() => ({
