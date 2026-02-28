@@ -64,7 +64,10 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .selectFrom("app_public.users")
             .selectAll()
             .where("id", "=", sql<string>`app_public.current_user_id()`)
-            .pipe(Effect.head),
+            .pipe(
+              Effect.head,
+              Effect.catchTag("NoSuchElementException", () => Effect.succeed(null)),
+            ),
         ),
 
       updateProfile: (sessionId: string, input: UpdateProfileInput) =>
