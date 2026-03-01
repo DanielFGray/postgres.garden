@@ -6,6 +6,7 @@
 import * as vscode from "vscode";
 import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vscode";
 import { Effect, Layer, Option, pipe } from "effect";
+import { navigateTo } from "fibrae/router";
 import {
   ApiRequestError,
   httpApiCreatePlayground,
@@ -734,12 +735,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
       // Navigate to the fork source playground
       const url = `/playgrounds/${hash}`;
       console.log("[ServerSync] Opening fork source:", url);
-
-      if (window.navigation) {
-        window.navigation.navigate(url);
-      } else {
-        window.location.href = url;
-      }
+      navigateTo(url);
     });
 
     yield* vscodeService.registerCommand(SERVER_SYNC_VIEW_COMMIT, (commitId: unknown) => {
@@ -915,12 +911,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
         const url = `/playgrounds/${currentPlaygroundHash}/commits/${commitId}`;
 
         console.log("[ServerSync] Navigating to commit URL:", url);
-
-        if (window.navigation) {
-          window.navigation.navigate(url);
-        } else {
-          window.location.href = url;
-        }
+        navigateTo(url);
       },
     );
 
@@ -1252,11 +1243,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
           if (selected && selected.commitId !== currentCommitId && currentPlaygroundHash) {
             // Navigate to the selected commit
             const url = `/playgrounds/${currentPlaygroundHash}/commits/${selected.commitId}`;
-            if (window.navigation) {
-              window.navigation.navigate(url);
-            } else {
-              window.location.href = url;
-            }
+            navigateTo(url);
           }
         }).pipe(
           Effect.tapError((error) =>

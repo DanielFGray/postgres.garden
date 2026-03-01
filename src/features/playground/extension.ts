@@ -4,6 +4,7 @@
 
 import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
+import { navigateTo } from "fibrae/router";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
 import { PlaygroundService } from "./services/PlaygroundService";
@@ -85,15 +86,13 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   });
 
   // Refresh metadata on navigation (route changes update the playground ID)
-  if (window.navigation) {
-    const onNavigateSuccess = () => {
-      runFork(refreshMetadata);
-    };
-    window.navigation.addEventListener("navigatesuccess", onNavigateSuccess);
-    subscriptions.push({
-      dispose: () => window.navigation.removeEventListener("navigatesuccess", onNavigateSuccess),
-    });
-  }
+  const onNavigate = () => {
+    runFork(refreshMetadata);
+  };
+  window.addEventListener("popstate", onNavigate);
+  subscriptions.push({
+    dispose: () => window.removeEventListener("popstate", onNavigate),
+  });
 
   yield* vscodeService.registerCommand(PLAYGROUND_TOGGLE_STAR, () => {
     runFork(
@@ -145,12 +144,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
         });
 
         const url = `/playgrounds/${playground.hash}`;
-        if (window.navigation) {
-          window.navigation.navigate(url);
-          return;
-        }
-
-        window.location.href = url;
+        navigateTo(url);
       }).pipe(
         Effect.tapError((error) =>
           Effect.sync(() => {

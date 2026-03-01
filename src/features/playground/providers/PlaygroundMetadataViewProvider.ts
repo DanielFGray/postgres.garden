@@ -6,6 +6,7 @@
 import * as vscode from "vscode";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
 import { Effect, Layer } from "effect";
+import { navigateTo } from "fibrae/router";
 import { getNetworkState } from "../../network";
 import { generateNonce } from "../../../utils/nonce";
 import { applyTelemetryHeaders, type RequestTelemetryContext } from "../../webview/requestTelemetry";
@@ -115,11 +116,7 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
         const hash = data?.hash;
         if (typeof hash !== "string") return;
         const url = `/playgrounds/${hash}`;
-        if (window.navigation) {
-          window.navigation.navigate(url);
-        } else {
-          window.location.href = url;
-        }
+        navigateTo(url);
         break;
       }
       case "toggleStar": {

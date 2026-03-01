@@ -8,6 +8,7 @@ import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
 import { Effect, Exit, Option, pipe } from "effect";
 import * as S from "effect/Schema";
 import { HydrationState } from "fibrae";
+import { navigateTo } from "fibrae/router";
 import { httpApiGetPlaygroundCommit, httpApiListPlaygroundCommits } from "../httpapi-client";
 import { hydratePageState } from "../shared/dehydrate";
 import { getSmallExampleWorkspace } from "../templates";
@@ -439,9 +440,7 @@ const loadWorkspaceCore = (
       const path = commitId
         ? `/playgrounds/${playgroundHash}/commits/${commitId}`
         : `/playgrounds/${playgroundHash}`;
-      if (window.navigation) {
-        window.navigation.navigate(path);
-      }
+      navigateTo(path);
     }
 
     // Notify serverSync extension about the loaded workspace

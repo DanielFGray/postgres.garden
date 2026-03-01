@@ -207,7 +207,7 @@
         "dotenv": "^16.6.1",
         "effect": "3.19.19",
         "elysia": "^1.4.25",
-        "fibrae": "^0.2.2",
+        "fibrae": "^0.2.3",
         "graphile-migrate": "^2.0.0-rc.2",
         "graphile-worker": "^0.16.6",
         "highlight.js": "^11.11.1",
@@ -2280,7 +2280,7 @@
 
     "fflate": ["fflate@0.8.2", "", {}, "sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A=="],
 
-    "fibrae": ["fibrae@0.2.2", "", { "optionalDependencies": { "@effect/platform-browser": "catalog:", "@effect/platform-bun": "catalog:", "@effect/platform-node": "catalog:" }, "peerDependencies": { "@effect-atom/atom": "catalog:", "effect": "catalog:" } }, "sha512-EP6NsjGKZtLClqRekWnXjAx66WSqryxmNZeHu503lD8+LtQJy7IU8up7RE03LVbIr/2xLl51OrUy4bi6JgV9QQ=="],
+    "fibrae": ["fibrae@0.2.3", "", { "optionalDependencies": { "@effect/platform-browser": "catalog:", "@effect/platform-bun": "catalog:", "@effect/platform-node": "catalog:" }, "peerDependencies": { "@effect-atom/atom": "catalog:", "effect": "catalog:" } }, "sha512-NdJzgDyQepANjwRJkOAJvTfnnUahp0mnWT5oAcFMd5t3PE0v36Svgb3LVfHS6gYOqIaGW7pO5Gw2B907KwYmuw=="],
 
     "figures": ["figures@3.2.0", "", { "dependencies": { "escape-string-regexp": "^1.0.5" } }, "sha512-yaduQFRKLXYOGgEn6AZau90j3ggSOyiqXU0F9JZfeXYhNa+Jk4X+s45A2zg5jns87GAFa34BBm2kXw4XpNcbdg=="],
 

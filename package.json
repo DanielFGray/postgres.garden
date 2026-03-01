@@ -258,7 +258,7 @@
     "dotenv": "^16.6.1",
     "effect": "3.19.19",
     "elysia": "^1.4.25",
-    "fibrae": "^0.2.2",
+    "fibrae": "^0.2.3",
     "graphile-migrate": "^2.0.0-rc.2",
     "graphile-worker": "^0.16.6",
     "highlight.js": "^11.11.1",
