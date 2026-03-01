@@ -30,13 +30,13 @@ export const PlaygroundFile = S.Struct({ path: S.String, content: S.String });
 
 export const PlaygroundListItem = Playground.json.pipe(
   S.pick("hash", "fork_hash", "name", "description", "created_at", "updated_at"),
-  S.extend(S.Struct({ stars: S.String })),
+  S.extend(S.Struct({ stars: S.BigInt })),
 );
 
 export const PlaygroundListItemWithUser = Playground.json.pipe(
   S.pick("hash", "fork_hash", "name", "description", "created_at", "updated_at"),
   S.extend(S.Struct({
-    stars: S.String,
+    stars: S.BigInt,
     user: S.Struct({ username: S.String }),
   })),
 );
@@ -46,7 +46,7 @@ export const PlaygroundDetail = Playground.json.pipe(
   S.extend(S.Struct({
     expires_at: S.NullOr(S.DateTimeUtc),
     user: S.NullOr(S.Struct({ username: S.String })),
-    stars: S.String,
+    stars: S.BigInt,
     is_starred: S.Boolean,
     fork_of: S.NullOr(
       S.Struct({

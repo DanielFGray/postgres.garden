@@ -52,7 +52,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               (eb) =>
                 eb
                   .selectFrom("app_public.playground_stars")
-                  .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
+                  .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
                   .groupBy("playground_hash")
                   .as("star_counts"),
               (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
@@ -65,7 +65,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               "p.fork_hash",
               "p.name",
               "p.description",
-              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit("0")).as("stars"),
+              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
               "p.created_at",
               "p.updated_at",
             ]),
@@ -82,7 +82,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               (eb) =>
                 eb
                   .selectFrom("app_public.playground_stars")
-                  .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
+                  .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
                   .groupBy("playground_hash")
                   .as("star_counts"),
               (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
@@ -94,7 +94,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               "p.fork_hash",
               "p.name",
               "p.description",
-              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit("0")).as("stars"),
+              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
               "p.created_at",
               "p.updated_at",
               jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
@@ -114,7 +114,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 (eb) =>
                   eb
                     .selectFrom("app_public.playground_stars")
-                    .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
+                    .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
                     .groupBy("playground_hash")
                     .as("star_counts"),
                 (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
@@ -146,7 +146,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 "p.fork_hash",
                 "p.name",
                 "p.description",
-                eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit("0")).as("stars"),
+                eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
                 "p.created_at",
                 "p.updated_at",
                 jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
@@ -197,7 +197,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               (eb) =>
                 eb
                   .selectFrom("app_public.playground_stars")
-                  .select((eb) => ["playground_hash", eb.fn.countAll<string>().as("stars")])
+                  .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
                   .groupBy("playground_hash")
                   .as("star_counts"),
               (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
@@ -210,7 +210,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             .selectAll("p")
             .select((eb) => [
               jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
-              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit("0")).as("stars"),
+              eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
               eb("my_star.playground_hash", "is not", null).$castTo<boolean>().as("is_starred"),
               eb
                 .case()
