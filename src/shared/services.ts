@@ -8,7 +8,7 @@
 
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
-import type { Commit, User } from "./schemas.js";
+import type { Commit } from "./schemas.js";
 
 // =============================================================================
 // PlaygroundRepo
@@ -17,24 +17,8 @@ import type { Commit, User } from "./schemas.js";
 export class PlaygroundRepo extends Context.Tag("PlaygroundRepo")<
   PlaygroundRepo,
   {
-    readonly getLatestCommit: (
-      playgroundId: string,
-    ) => Effect.Effect<Commit | null>;
+    readonly getLatestCommit: (playgroundId: string) => Effect.Effect<Commit | null>;
 
-    readonly getCommit: (
-      playgroundId: string,
-      commitId: string,
-    ) => Effect.Effect<Commit | null>;
-  }
->() {}
-
-// =============================================================================
-// SessionRepo
-// =============================================================================
-
-export class SessionRepo extends Context.Tag("SessionRepo")<
-  SessionRepo,
-  {
-    readonly getCurrentUser: () => Effect.Effect<User | null>;
+    readonly getCommit: (playgroundId: string, commitId: string) => Effect.Effect<Commit | null>;
   }
 >() {}

@@ -21,71 +21,86 @@ export class SQLNotebookExecutionController {
   }
 
   #execute(cells: vscode.NotebookCell[]): void {
-    cells.forEach((cell) => {
-      void this.#doExecution(cell);
-    });
+    void this.runAll(cells);
   }
 
-  async #doExecution(cell: vscode.NotebookCell): Promise<void> {
+  /**
+   * Runs cells one at a time, in the given order, stopping at the first
+   * failure — later cells may depend on DDL/DML from earlier ones.
+   */
+  runAll(cells: readonly vscode.NotebookCell[]): Promise<boolean> {
+    return cells.reduce<Promise<boolean>>(
+      (prev, cell) => prev.then((ok) => (ok ? this.#doExecution(cell) : false)),
+      Promise.resolve(true),
+    );
+  }
+
+  #doExecution(cell: vscode.NotebookCell): Promise<boolean> {
     const execution = this.#controller.createNotebookCellExecution(cell);
     const text = cell.document.getText();
-    if (text.trim().length < 1) return;
+    if (text.trim().length < 1) return Promise.resolve(true);
     execution.executionOrder = ++this.#executionOrder;
-    execution.start(Date.now());
-    try {
-      const results = await vscode.commands.executeCommand<ExtendedResults[]>(PGLITE_EXECUTE, text);
-      if (!results || !Array.isArray(results)) {
+    execution.start(performance.now());
+    return Promise.resolve(
+      vscode.commands.executeCommand<ExtendedResults[]>(PGLITE_EXECUTE, text),
+    ).then(
+      (results) => {
+        if (!results || !Array.isArray(results)) {
+          execution.replaceOutput([
+            new vscode.NotebookCellOutput([
+              vscode.NotebookCellOutputItem.text("No results returned", "text/markdown"),
+            ]),
+          ]);
+          execution.end(false, performance.now());
+          return false;
+        }
+        const hasError = results.some((r) => "error" in r);
+        execution.replaceOutput(
+          results.map((result) => {
+            if ("error" in result) {
+              return new vscode.NotebookCellOutput([
+                vscode.NotebookCellOutputItem.text(
+                  `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${result.error?.message ?? "Unknown error"}</div>`,
+                  "text/markdown",
+                ),
+              ]);
+            }
+            if (result.fields.length > 0) {
+              return new vscode.NotebookCellOutput([
+                vscode.NotebookCellOutputItem.json(
+                  { ...result, query: text },
+                  "application/vnd.pg-playground.sql-result+json",
+                ),
+                vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
+              ]);
+            }
+            // Show success message for statements that don't return rows
+            const message = result.statement || "Query executed successfully";
+            const affectedInfo =
+              result.affectedRows !== undefined && result.affectedRows >= 0
+                ? ` (${result.affectedRows} rows affected)`
+                : "";
+            return new vscode.NotebookCellOutput([
+              vscode.NotebookCellOutputItem.text(`✓ ${message}${affectedInfo}`, "text/markdown"),
+            ]);
+          }),
+        );
+        execution.end(!hasError, performance.now());
+        return !hasError;
+      },
+      (err) => {
         execution.replaceOutput([
           new vscode.NotebookCellOutput([
-            vscode.NotebookCellOutputItem.text("No results returned", "text/markdown"),
+            vscode.NotebookCellOutputItem.text(
+              `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${err instanceof Error ? err.message : String(err)}</div>`,
+              "text/markdown",
+            ),
           ]),
         ]);
-        execution.end(false, Date.now());
-        return;
-      }
-      const hasError = results.some((r) => "error" in r);
-      execution.replaceOutput(
-        results.map((result) => {
-          if ("error" in result) {
-            return new vscode.NotebookCellOutput([
-              vscode.NotebookCellOutputItem.text(
-                `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${result.error?.message ?? "Unknown error"}</div>`,
-                "text/markdown",
-              ),
-            ]);
-          }
-          if (result.fields.length > 0) {
-            return new vscode.NotebookCellOutput([
-              vscode.NotebookCellOutputItem.json(
-                { ...result, query: text },
-                "application/vnd.pg-playground.sql-result+json",
-              ),
-              vscode.NotebookCellOutputItem.text(renderRowsAsTable(result), "text/html"),
-            ]);
-          }
-          // Show success message for statements that don't return rows
-          const message = result.statement || "Query executed successfully";
-          const affectedInfo =
-            result.affectedRows !== undefined && result.affectedRows >= 0
-              ? ` (${result.affectedRows} rows affected)`
-              : "";
-          return new vscode.NotebookCellOutput([
-            vscode.NotebookCellOutputItem.text(`✓ ${message}${affectedInfo}`, "text/markdown"),
-          ]);
-        }),
-      );
-      execution.end(!hasError, Date.now());
-    } catch (err) {
-      execution.replaceOutput([
-        new vscode.NotebookCellOutput([
-          vscode.NotebookCellOutputItem.text(
-            `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${err instanceof Error ? err.message : String(err)}</div>`,
-            "text/markdown",
-          ),
-        ]),
-      ]);
-      execution.end(false, Date.now());
-    }
+        execution.end(false, performance.now());
+        return false;
+      },
+    );
   }
 }
 

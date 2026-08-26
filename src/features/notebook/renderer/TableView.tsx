@@ -1,63 +1,71 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
-import type { SQLResult } from "./types";
+import { DateTime, Option } from "effect";
+import { createSignal, onCleanup, For, Show } from "solid-js";
+import * as S from "effect/Schema";
+import type { SQLResult, SqlValue } from "./types";
 
 /** Safely stringify a cell value, using JSON.stringify for objects */
-function stringifyCell(v: unknown): string {
-  if (typeof v === "object" && v !== null) return JSON.stringify(v);
-  return String(v);
+function stringifyCell(v: SqlValue): string {
+  if (v !== null && Object(v) === v) return JSON.stringify(v);
+  return JSON.stringify(v) ?? "";
 }
 
 // Inline JSON tree for table cells
-function JSONCell({ value }: { value: unknown }) {
-  // Each JSONCell instance needs its own collapsed atom
-  const collapsedAtom = Atom.make(true);
+function JSONCell(props: { value: SqlValue }) {
+  const [collapsed, setCollapsed] = createSignal(true);
 
-  return Effect.gen(function* () {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const collapsed = yield* Atom.get(collapsedAtom);
+  const entries = () => {
+    const value = props.value;
+    if (value === null || Object(value) !== value) return [];
+    const keys = Array.isArray(value) ? value.map((_, i) => i) : Object.keys(value);
+    return keys.map((key) => ({
+      key,
+      label: Array.isArray(value) ? `[${key}]` : `"${key}"`,
+      child: (value as Record<string, SqlValue>)[key]!,
+    }));
+  };
 
-    if (value === null) {
-      return <span class="json-null">null</span>;
-    }
+  const preview = () =>
+    Array.isArray(props.value) ? `[${entries().length}]` : `{${entries().length}}`;
 
-    if (typeof value !== "object") {
-      const type = typeof value;
-      return <span class={`json-${type}`}>{JSON.stringify(value)}</span>;
-    }
-
-    const isArray = Array.isArray(value);
-    const keys = isArray ? value.map((_, i) => i) : Object.keys(value);
-    const preview = isArray ? `[${keys.length}]` : `{${keys.length}}`;
-
-    return (
+  return (
+    <Show
+      when={props.value !== null && Object(props.value) === props.value}
+      fallback={
+        <Show when={props.value !== null} fallback={<span class="json-null">null</span>}>
+          <span class="json-scalar">{JSON.stringify(props.value)}</span>
+        </Show>
+      }
+    >
       <div class="json-cell-tree">
         <span
           class="json-toggle"
-          onClick={(e: MouseEvent) => {
+          onClick={(e) => {
             e.stopPropagation();
-            registry.set(collapsedAtom, !registry.get(collapsedAtom));
+            setCollapsed((value) => !value);
           }}
         >
-          {collapsed ? "\u25B6" : "\u25BC"} {preview}
+          {collapsed() ? "▶" : "▼"} {preview()}
         </span>
-        {!collapsed && (
+        <Show when={!collapsed()}>
           <div class="json-cell-children">
-            {keys.map((key) => (
-              <div key={key} class="json-cell-entry">
-                <span class="json-key">{isArray ? `[${key}]` : `"${key}"`}:</span>{" "}
-                <JSONCell value={(value as Record<string, unknown>)[key]} />
-              </div>
-            ))}
+            <For each={entries()}>
+              {(entry) => (
+                <div class="json-cell-entry">
+                  <span class="json-key">{entry.label}:</span> <JSONCell value={entry.child} />
+                </div>
+              )}
+            </For>
           </div>
-        )}
+        </Show>
       </div>
-    );
-  });
+    </Show>
+  );
 }
 
 // PostgreSQL type OID mapping
-const PG_TYPES: Record<number, string> = {
+type PgTypeMap = Record<number, string>;
+
+const PG_TYPES: PgTypeMap = {
   16: "boolean",
   20: "bigint",
   21: "smallint",
@@ -75,11 +83,11 @@ const PG_TYPES: Record<number, string> = {
 };
 
 interface CellProps {
-  value: unknown;
+  value: SqlValue;
   typeId?: number;
 }
 
-function formatCellValue(value: unknown, typeId: number | undefined): unknown {
+function formatCellValue(value: SqlValue, typeId: number | undefined) {
   if (value === null) {
     return <i class="null">null</i>;
   }
@@ -93,21 +101,22 @@ function formatCellValue(value: unknown, typeId: number | undefined): unknown {
     case "date":
     case "timestamp":
     case "timestamptz":
-      try {
-        const date = new Date(value as string | number);
-        return <span class="date">{date.toLocaleString()}</span>;
-      } catch {
-        return stringifyCell(value);
-      }
+      return Option.match(DateTime.make(value as string | number), {
+        onNone: () => stringifyCell(value),
+        onSome: (dt) => <span class="date">{DateTime.toDate(dt).toLocaleString()}</span>,
+      });
 
     case "json":
     case "jsonb":
-      try {
-        const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
-        return <JSONCell value={parsed} />;
-      } catch {
-        return stringifyCell(value);
-      }
+      return Option.match(
+        S.is(S.String)(value)
+          ? (S.decodeUnknownOption(S.parseJson(S.Unknown))(value) as Option.Option<SqlValue>)
+          : Option.some(value),
+        {
+          onNone: () => stringifyCell(value),
+          onSome: (parsed) => <JSONCell value={parsed} />,
+        },
+      );
 
     case "integer":
     case "bigint":
@@ -122,95 +131,86 @@ function formatCellValue(value: unknown, typeId: number | undefined): unknown {
   }
 }
 
-function Cell({ value, typeId }: CellProps) {
-  const formatted = formatCellValue(value, typeId);
-
+function Cell(props: CellProps) {
   return (
     <td>
-      <div class="cell-content">{formatted}</div>
+      <div class="cell-content">{formatCellValue(props.value, props.typeId) as never}</div>
     </td>
   );
 }
 
-// Module-level atoms for column resizing state
-const columnWidthsAtom = Atom.make<Record<string, number>>({});
-const resizingColumnAtom = Atom.make<string | null>(null);
+export function TableView(props: { data: SQLResult }) {
+  const [columnWidths, setColumnWidths] = createSignal<Record<string, number>>({});
+  const [resizingColumn, setResizingColumn] = createSignal<string | null>(null);
+  let resizeStart = { x: 0, width: 0 };
 
-let resizeInitialized = false;
-let startX = 0;
-let startWidth = 0;
+  // The listeners live for the component's lifetime and no-op unless a drag is
+  // active — the drag state is the guard, so no effect has to add/remove them.
+  const handleMove = (event: MouseEvent) => {
+    const column = resizingColumn();
+    if (!column) return;
+    const width = Math.max(50, resizeStart.width + event.pageX - resizeStart.x);
+    setColumnWidths((value) => ({ ...value, [column]: width }));
+  };
+  const handleUp = () => setResizingColumn(null);
 
-export function TableView({ data }: { data: SQLResult }) {
-  return Effect.gen(function* () {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const columnWidths = yield* Atom.get(columnWidthsAtom);
-    const resizingColumn = yield* Atom.get(resizingColumnAtom);
+  document.addEventListener("mousemove", handleMove);
+  document.addEventListener("mouseup", handleUp);
+  onCleanup(() => {
+    document.removeEventListener("mousemove", handleMove);
+    document.removeEventListener("mouseup", handleUp);
+  });
 
-    if (!resizeInitialized) {
-      resizeInitialized = true;
+  const handleMouseDown = (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
+    e.preventDefault();
+    setResizingColumn(fieldName);
+    resizeStart = { x: e.pageX, width: currentWidth };
+  };
 
-      document.addEventListener("mousemove", (e: MouseEvent) => {
-        const col = registry.get(resizingColumnAtom);
-        if (col) {
-          const diff = e.pageX - startX;
-          const newWidth = Math.max(50, startWidth + diff);
-          registry.set(columnWidthsAtom, {
-            ...registry.get(columnWidthsAtom),
-            [col]: newWidth,
-          });
-        }
-      });
-
-      document.addEventListener("mouseup", () => {
-        registry.set(resizingColumnAtom, null);
-      });
-    }
-
-    const handleMouseDown = (fieldName: string, currentWidth: number) => (e: MouseEvent) => {
-      e.preventDefault();
-      registry.set(resizingColumnAtom, fieldName);
-      startX = e.pageX;
-      startWidth = currentWidth;
-    };
-
-    return (
-      <div class="table-container">
-        <table class="sql-table">
-          <thead>
-            <tr>
-              {data.fields.map((field) => {
-                const width = columnWidths[field.name];
+  return (
+    <div class="table-container">
+      <table class="sql-table">
+        <thead>
+          <tr>
+            <For each={props.data.fields}>
+              {(field) => {
+                const width = () => columnWidths()[field.name];
                 return (
-                  <th key={field.name} style={{ width: width ? `${String(width)}px` : undefined }}>
+                  <th style={width() ? { width: `${String(width())}px` } : undefined}>
                     {field.name}
                     <div
-                      class={`resize-handle ${resizingColumn === field.name ? "resizing" : ""}`}
-                      onMouseDown={handleMouseDown(field.name, width || 150)}
+                      class={`resize-handle ${resizingColumn() === field.name ? "resizing" : ""}`}
+                      onMouseDown={handleMouseDown(field.name, width() || 150)}
                     />
                   </th>
                 );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.length === 0 ? (
+              }}
+            </For>
+          </tr>
+        </thead>
+        <tbody>
+          <Show
+            when={props.data.rows.length > 0}
+            fallback={
               <tr>
-                <td colspan={data.fields.length} class="empty">
+                <td colspan={props.data.fields.length} class="empty">
                   No results
                 </td>
               </tr>
-            ) : (
-              data.rows.map((row, i) => (
-                <tr key={i}>
-                  {data.fields.map((field) => (
-                    <Cell key={field.name} value={row[field.name]} typeId={field.dataTypeID} />
-                  ))}
+            }
+          >
+            <For each={props.data.rows}>
+              {(row) => (
+                <tr>
+                  <For each={props.data.fields}>
+                    {(field) => <Cell value={row[field.name] ?? null} typeId={field.dataTypeID} />}
+                  </For>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    );
-  });
+              )}
+            </For>
+          </Show>
+        </tbody>
+      </table>
+    </div>
+  );
 }

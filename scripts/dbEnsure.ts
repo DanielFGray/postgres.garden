@@ -1,7 +1,7 @@
 import pg from "pg";
 import runAll from "npm-run-all";
 import "dotenv/config";
-import { Effect, Schedule, pipe, Duration, Schema } from "effect";
+import { Config, Effect, Match, Schedule, pipe, Duration, Schema } from "effect";
 
 // Define custom error types for better error handling using Schema.TaggedError
 class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
@@ -65,11 +65,9 @@ export function dbTest(
       return true;
     }
 
-    return yield* Effect.fail(
-      new DatabaseError({
-        message: "Database test query returned unexpected result",
-      }),
-    );
+    return yield* new DatabaseError({
+      message: "Database test query returned unexpected result",
+    });
   });
 
   // Define retry policy with exponential backoff
@@ -122,14 +120,14 @@ const runAllOpts = {
 
 const mainProgram = Effect.gen(function* () {
   // Check for DATABASE_URL
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    return yield* Effect.fail(
-      new ConfigurationError({
-        message: "DATABASE_URL is not set",
-      }),
-    );
-  }
+  const databaseUrl = yield* Config.string("DATABASE_URL").pipe(Effect.option);
+  const url = yield* Match.value(databaseUrl).pipe(
+    Match.tags({
+      None: () => new ConfigurationError({ message: "DATABASE_URL is not set" }),
+      Some: ({ value }) => Effect.succeed(value),
+    }),
+    Match.exhaustive,
+  );
 
   // Start database using npm-run-all
   yield* Effect.tryPromise({
@@ -141,7 +139,7 @@ const mainProgram = Effect.gen(function* () {
   });
 
   // Test database connection with retries
-  const result = yield* dbTest(databaseUrl, {
+  const result = yield* dbTest(url, {
     maxTries: 7,
     verbose: false,
   });

@@ -1,8 +1,11 @@
-import { Effect, pipe } from "effect";
+import { Effect, Layer, pipe } from "effect";
+import * as S from "effect/Schema";
 import { sql } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
-import { PgAuthDB, withAuthContext } from "../db.js";
+import { DatabaseLive, visitorQuerier, type KyselyDB } from "../db.js";
+import { CurrentSession } from "../apiSchema.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
+import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
 
 export interface ListPlaygroundsQuery {
   readonly offset?: number | null;
@@ -36,15 +39,42 @@ export interface CommitPayload {
   readonly activeFile?: string | null;
 }
 
+/**
+ * Lift a flat `username` column into the nested `user` object the API contract
+ * expects, collapsing the anonymous case to a null user rather than a user with
+ * a null name.
+ *
+ * Playgrounds may have no owner (anonymous pastes), so the queries left-join
+ * users. Shaping the object in SQL would type it `{ username: string | null }`,
+ * because the query builder cannot see that a present user row implies a
+ * present name. Narrowing here in TypeScript proves it instead of asserting it.
+ */
+const nestUser = <T extends { readonly username: string | null }>({
+  username,
+  ...row
+}: T): Omit<T, "username"> & { readonly user: { readonly username: string } | null } => ({
+  ...row,
+  user: username === null ? null : { username },
+});
+
+/**
+ * @effect-expect-leaking CurrentSession
+ *
+ * `CurrentSession` differs per HTTP request, so unlike `AuthPool` it cannot
+ * be resolved once when this service's Layer is built — it is deliberately
+ * threaded through as a per-call requirement, the same way `HttpServerRequest`
+ * would be.
+ */
 export class PlaygroundService extends Effect.Service<PlaygroundService>()("PlaygroundService", {
-  effect: Effect.gen(function*() {
-    const authDb = yield* PgAuthDB;
+  accessors: true,
+  effect: Effect.gen(function* () {
+    const run = yield* visitorQuerier;
+    const asVisitor = <A, E, R>(use: (authDb: KyselyDB) => Effect.Effect<A, E, R>) =>
+      Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use));
 
     return {
-      listForUser: (sessionId: string | undefined, username: string, query: ListPlaygroundsQuery) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      listForUser: (username: string, query: ListPlaygroundsQuery) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.playgrounds as p")
             .innerJoin("app_public.users as u", "p.user_id", "u.id")
@@ -60,6 +90,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             .orderBy(sql.ref(query.sort ?? "created_at"), query.sort === "stars" ? "desc" : "desc")
             .limit(query.limit ?? 50)
             .where("u.username", "=", username)
+            .where(publicOrOwn)
             .select((eb) => [
               "p.hash",
               "p.fork_hash",
@@ -71,13 +102,11 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ]),
         ),
 
-      list: (sessionId: string | undefined, query: ListPlaygroundsQuery) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      list: (query: ListPlaygroundsQuery) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.playgrounds as p")
-            .innerJoin("app_public.users as u", "p.user_id", "u.id")
+            .leftJoin("app_public.users as u", "p.user_id", "u.id")
             .leftJoin(
               (eb) =>
                 eb
@@ -89,6 +118,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             )
             .orderBy(sql.ref(query.sort ?? "created_at"), query.sort === "stars" ? "desc" : "desc")
             .limit(query.limit ?? 50)
+            .where(publicOnly)
             .select((eb) => [
               "p.hash",
               "p.fork_hash",
@@ -97,68 +127,71 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
               "p.created_at",
               "p.updated_at",
-              jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
-            ]),
+              "u.username",
+            ])
+            .pipe(Effect.map((rows) => rows.map(nestUser))),
         ),
 
-      search: (sessionId: string | undefined, q: string, limit?: number, offset?: number) => {
+      search: (q: string, limit?: number, offset?: number) => {
         const parsed = parseSearchDSL(q);
-        return withAuthContext(
-          authDb,
-          sessionId,
-          pipe(
-            authDb
-              .selectFrom("app_public.playgrounds as p")
-              .innerJoin("app_public.users as u", "p.user_id", "u.id")
-              .leftJoin(
-                (eb) =>
-                  eb
-                    .selectFrom("app_public.playground_stars")
-                    .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
-                    .groupBy("playground_hash")
-                    .as("star_counts"),
-                (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
-              )
-              .orderBy(sql.ref(parsed.sort), "desc")
-              .limit(limit ?? 50)
-              .offset(offset ?? 0),
-            (q) =>
-              parsed.starred && sessionId
-                ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
-                    join
-                      .onRef("my_stars.playground_hash", "=", "p.hash")
-                      .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
-                  )
-                : q,
-            (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
-            (q) =>
-              parsed.text
-                ? q.where((eb) =>
-                    eb.or([
-                      eb("p.name", "ilike", `%${parsed.text}%`),
-                      eb("p.description", "ilike", `%${parsed.text}%`),
-                    ]),
-                  )
-                : q,
-            (q) =>
-              q.select((eb) => [
-                "p.hash",
-                "p.fork_hash",
-                "p.name",
-                "p.description",
-                eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
-                "p.created_at",
-                "p.updated_at",
-                jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
-              ]),
+        // `starred:` narrows to the caller's own stars, so it only means
+        // anything when somebody is logged in.
+        return Effect.flatMap(CurrentSession, ({ session }) =>
+          run(session?.id, (authDb) =>
+            pipe(
+              authDb
+                .selectFrom("app_public.playgrounds as p")
+                .leftJoin("app_public.users as u", "p.user_id", "u.id")
+                .leftJoin(
+                  (eb) =>
+                    eb
+                      .selectFrom("app_public.playground_stars")
+                      .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
+                      .groupBy("playground_hash")
+                      .as("star_counts"),
+                  (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
+                )
+                .orderBy(sql.ref(parsed.sort), "desc")
+                .limit(limit ?? 50)
+                .offset(offset ?? 0),
+              (q) =>
+                parsed.starred && session
+                  ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
+                      join
+                        .onRef("my_stars.playground_hash", "=", "p.hash")
+                        .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
+                    )
+                  : q,
+              (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
+              (q) => q.where(publicOrOwn),
+              (q) =>
+                parsed.text
+                  ? q.where((eb) =>
+                      eb.or([
+                        eb("p.name", "ilike", `%${parsed.text}%`),
+                        eb("p.description", "ilike", `%${parsed.text}%`),
+                      ]),
+                    )
+                  : q,
+              (q) =>
+                q.select((eb) => [
+                  "p.hash",
+                  "p.fork_hash",
+                  "p.name",
+                  "p.description",
+                  eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
+                  "p.created_at",
+                  "p.updated_at",
+                  "u.username",
+                ]),
+              (q) => q.pipe(Effect.map((rows) => rows.map(nestUser))),
+            ),
           ),
         );
       },
 
-      create: (sessionId: string, body: CreatePlaygroundInput) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      create: (body: CreatePlaygroundInput) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom(
               sql<{
@@ -168,12 +201,12 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 message: string;
                 created_at: Date;
               }>`app_public.create_playground_commit(
-                ${body.name ?? null},
-                ${body.message},
-                ${JSON.stringify({ files: body.files, activeFile: body.activeFile })}::jsonb,
-                ${null},
-                ${body.description ?? null}
-              )`.as("result"),
+                                            ${body.name ?? null},
+                                            ${body.message},
+                                            ${S.encodeSync(S.parseJson(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
+                                            ${null},
+                                            ${body.description ?? null}
+                                          )`.as("result"),
             )
             .selectAll()
             .pipe(
@@ -184,10 +217,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ),
         ),
 
-      getByHash: (sessionId: string | undefined, hash: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      getByHash: (hash: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.playgrounds as p")
             .leftJoin("app_public.users as u", "p.user_id", "u.id")
@@ -209,7 +240,7 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             )
             .selectAll("p")
             .select((eb) => [
-              jsonBuildObject({ username: eb.ref("u.username") }).as("user"),
+              "u.username",
               eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
               eb("my_star.playground_hash", "is not", null).$castTo<boolean>().as("is_starred"),
               eb
@@ -227,13 +258,11 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 .as("fork_of"),
             ])
             .where("p.hash", "=", hash)
-            .pipe(Effect.head),
+            .pipe(Effect.head, Effect.map(nestUser)),
         ),
 
-      fork: (sessionId: string, hash: string, name: string | null | undefined) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      fork: (hash: string, name: string | null | undefined) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom((eb) =>
               eb
@@ -255,10 +284,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ),
         ),
 
-      update: (sessionId: string, hash: string, input: UpdatePlaygroundInput) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      update: (hash: string, input: UpdatePlaygroundInput) =>
+        asVisitor((authDb) =>
           pipe(
             authDb.updateTable("app_public.playgrounds").where("hash", "=", hash),
             (q) => (input.name !== undefined ? q.set("name", input.name) : q),
@@ -269,11 +296,9 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
           ),
         ),
 
-      createCommit: (sessionId: string, userId: string, hash: string, body: CommitPayload) =>
-        withAuthContext(
-          authDb,
-          sessionId,
-          Effect.gen(function*() {
+      createCommit: (userId: string, hash: string, body: CommitPayload) =>
+        asVisitor((authDb) =>
+          Effect.gen(function* () {
             const playground = yield* authDb
               .selectFrom("app_public.playgrounds")
               .select(["hash", "user_id"])
@@ -281,6 +306,10 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               .pipe(Effect.head);
 
             if (playground.user_id === userId) {
+              const filesJson = yield* S.encode(S.parseJson(S.Unknown))({
+                files: body.files,
+                activeFile: body.activeFile,
+              });
               return yield* authDb
                 .selectFrom(
                   sql<{
@@ -290,12 +319,14 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                     message: string;
                     created_at: Date;
                   }>`app_public.create_playground_commit(
-                    ${null},
-                    ${body.message},
-                    ${JSON.stringify({ files: body.files, activeFile: body.activeFile })}::jsonb,
-                    ${hash},
-                    ${null}
-                  )`.as("result"),
+                                                                                          ${null},
+                                                                                          ${body.message},
+                                                                                          ${filesJson}::jsonb,
+                                                                                          ${hash},
+                                                                                          ${null}
+                                                                                        )`.as(
+                    "result",
+                  ),
                 )
                 .selectAll()
                 .pipe(
@@ -333,10 +364,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
           }),
         ),
 
-      listCommits: (sessionId: string | undefined, hash: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      listCommits: (hash: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.playground_commits as c")
             .leftJoin("app_public.users as u", "c.user_id", "u.id")
@@ -357,10 +386,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ),
         ),
 
-      getCommit: (sessionId: string | undefined, hash: string, commitId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      getCommit: (hash: string, commitId: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.playground_commits")
             .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
@@ -387,15 +414,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ),
         ),
 
-      getCommitHistory: (
-        sessionId: string | undefined,
-        hash: string,
-        commitId: string,
-        limit = 50,
-      ) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      getCommitHistory: (hash: string, commitId: string, limit = 50) =>
+        asVisitor((authDb) =>
           authDb
             .withRecursive("commit_history", (cte) =>
               cte
@@ -445,11 +465,9 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             ),
         ),
 
-      getCommitDiff: (sessionId: string | undefined, hash: string, commitId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
-          Effect.gen(function*() {
+      getCommitDiff: (hash: string, commitId: string) =>
+        asVisitor((authDb) =>
+          Effect.gen(function* () {
             const commit = yield* authDb
               .selectFrom("app_public.playground_commits")
               .select(["id", "parent_id", "data"])
@@ -496,11 +514,9 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
           }),
         ),
 
-      toggleStar: (sessionId: string, hash: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
-          Effect.gen(function*() {
+      toggleStar: (hash: string) =>
+        asVisitor((authDb) =>
+          Effect.gen(function* () {
             const deleted = yield* authDb
               .deleteFrom("app_public.playground_stars")
               .where("playground_hash", "=", hash)
@@ -515,10 +531,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
           }),
         ),
 
-      deletePlayground: (sessionId: string, hash: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      deletePlayground: (hash: string) =>
+        asVisitor((authDb) =>
           authDb
             .deleteFrom("app_public.playgrounds")
             .where("hash", "=", hash)
@@ -527,9 +541,9 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
         ),
     } as const;
   }),
-  dependencies: [PgAuthDB.Live],
-  accessors: true,
-}) { }
+}) {}
 
 export const runPlaygroundService = <A, E>(effect: Effect.Effect<A, E, PlaygroundService>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(PlaygroundService.Default)));
+  Effect.runPromise(
+    effect.pipe(Effect.provide(PlaygroundService.Default.pipe(Layer.provideMerge(DatabaseLive)))),
+  );

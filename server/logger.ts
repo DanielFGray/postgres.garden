@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { DateTime, Effect } from "effect";
 
 export interface LoggerOptions {
   /** Skip logging for certain paths (e.g., health checks) */
@@ -65,11 +66,13 @@ export const logger = ({ skip = [], logBody = false, colorize = true }: LoggerOp
       const method = request.method;
 
       // Log incoming request
-      const timestamp = new Date().toISOString();
+      const timestamp = DateTime.formatIso(DateTime.unsafeNow());
       const c = colorize ? colors : { reset: "", dim: "", cyan: "", magenta: "" };
 
-      console.log(
-        `${c.dim}${timestamp}${c.reset} ${c.magenta}${method}${c.reset} ${c.cyan}${url.pathname}${c.reset}${url.search || ""}${logBody && request.body ? ` ${c.dim}body=${JSON.stringify(request.body)}${c.reset}` : ""}`,
+      Effect.runFork(
+        Effect.log(
+          `${c.dim}${timestamp}${c.reset} ${c.magenta}${method}${c.reset} ${c.cyan}${url.pathname}${c.reset}${url.search || ""}${logBody && request.body ? ` ${c.dim}body=${JSON.stringify(request.body)}${c.reset}` : ""}`,
+        ),
       );
     })
     .onAfterResponse(({ request, set }) => {
@@ -84,8 +87,10 @@ export const logger = ({ skip = [], logBody = false, colorize = true }: LoggerOp
       const url = new URL(request.url);
       const c = colorize ? colors : { reset: "", dim: "", green: "", yellow: "", red: "" };
 
-      console.log(
-        `${c.dim}${new Date().toISOString()}${c.reset} ${method} ${url.pathname} ${statusColor(statusNum)}${statusNum}${c.reset} ${c.dim}${formatDuration(duration)}${c.reset}`,
+      Effect.runFork(
+        Effect.log(
+          `${c.dim}${DateTime.formatIso(DateTime.unsafeNow())}${c.reset} ${method} ${url.pathname} ${statusColor(statusNum)}${statusNum}${c.reset} ${c.dim}${formatDuration(duration)}${c.reset}`,
+        ),
       );
     });
 

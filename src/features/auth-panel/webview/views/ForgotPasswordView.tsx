@@ -1,53 +1,43 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, Show } from "solid-js";
 import { apiRequest } from "../api";
+import { runRequest } from "../../../webview/request";
 
-const submittingAtom = Atom.make(false);
-const errorAtom = Atom.make<string | null>(null);
-const sentAtom = Atom.make(false);
+export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }) => {
+  const [submitting, setSubmitting] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const [sent, setSent] = createSignal(false);
 
-export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const submitting = yield* Atom.get(submittingAtom);
-    const error = yield* Atom.get(errorAtom);
-    const sent = yield* Atom.get(sentAtom);
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = new FormData(form);
+    const getText = (name: string) => {
+      const value = data.get(name);
+      return value instanceof File ? "" : (value ?? "");
+    };
+    setError(null);
+    setSubmitting(true);
 
-    function handleSubmit(e: Event) {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const data = new FormData(form);
-      registry.set(errorAtom, null);
-      registry.set(submittingAtom, true);
+    void runRequest(
+      apiRequest(
+        "/api/forgotPassword",
+        "POST",
+        { email: getText("email") },
+        { action: "auth.forgot_password.submit" },
+      ),
+    )
+      .then(
+        () => setSent(true),
+        (reason: Error) => setError(reason.message),
+      )
+      .finally(() => setSubmitting(false));
+  }
 
-      void Effect.runFork(
-        apiRequest("/api/forgotPassword", "POST", {
-          email: data.get("email"),
-        }, {
-          action: "auth.forgot_password.submit",
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              registry.set(sentAtom, true);
-            }),
-          ),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(errorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(submittingAtom, false);
-            }),
-          ),
-        ),
-      );
-    }
-
-    if (sent) {
-      return (
-        <div class="auth-view">
+  return (
+    <Show
+      when={!sent()}
+      fallback={
+        <div class="auth-view" data-pw="forgot-password-sent">
           <div class="auth-header">
             <h2>Check Your Email</h2>
             <p class="auth-subtitle">
@@ -59,7 +49,7 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
             <button
               class="auth-link"
               onClick={() => {
-                registry.set(sentAtom, false);
+                setSent(false);
                 props.onNavigate("login");
               }}
             >
@@ -67,10 +57,8 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
             </button>
           </div>
         </div>
-      );
-    }
-
-    return (
+      }
+    >
       <div class="auth-view">
         <div class="auth-header">
           <h2>Forgot Password</h2>
@@ -79,7 +67,7 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} data-pw="forgot-password-form">
           <div class="auth-field">
             <label>Email</label>
             <input
@@ -87,19 +75,27 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
               name="email"
               class="setting-input"
               placeholder="you@example.com"
-              autoFocus
+              autofocus
+              data-pw="forgot-email-input"
             />
           </div>
 
-          {error && (
-            <div class="auth-error">
-              <i class="codicon codicon-error" />
-              <span>{error}</span>
-            </div>
-          )}
+          <Show when={error()}>
+            {(message) => (
+              <div class="auth-error" data-pw="forgot-password-error">
+                <i class="codicon codicon-error" />
+                <span>{message()}</span>
+              </div>
+            )}
+          </Show>
 
-          <button class="button auth-button-primary" type="submit" disabled={submitting}>
-            {submitting ? "Sending..." : "Send Reset Link"}
+          <button
+            class="button auth-button-primary"
+            type="submit"
+            disabled={submitting()}
+            data-pw="forgot-submit-button"
+          >
+            {submitting() ? "Sending..." : "Send Reset Link"}
           </button>
         </form>
 
@@ -109,5 +105,6 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
           </button>
         </div>
       </div>
-    );
-  });
+    </Show>
+  );
+};

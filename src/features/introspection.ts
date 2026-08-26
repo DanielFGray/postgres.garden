@@ -1,10 +1,13 @@
 import * as vscode from "vscode";
-import { Effect, Option, pipe } from "effect";
+import { Effect, Option, Schema, pipe } from "effect";
 import { Introspection, makeIntrospectionQuery, parseIntrospectionResults } from "pg-introspection";
 import { PGLITE_EXECUTE, type ExtendedResults } from "./constants.js";
+import { toError } from "../shared/index.js";
 
-const toError = (err: unknown): Error =>
-  err instanceof Error ? err : new Error(String(err));
+class IntrospectionError extends Schema.TaggedError<IntrospectionError>()("IntrospectionError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
+}) {}
 
 export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity> {
   introspection: Introspection | undefined;
@@ -23,16 +26,16 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
               PGLITE_EXECUTE,
               makeIntrospectionQuery(),
             ),
-          catch: toError,
+          catch: (cause) => new IntrospectionError({ message: toError(cause).message, cause }),
         });
         const [result] = results;
         if (!result || "error" in result) {
-          console.error("Failed to fetch introspection data");
+          yield* Effect.logError("Failed to fetch introspection data");
           return;
         }
         const introspectionJson = result.rows[0]?.introspection as string;
         if (!introspectionJson) {
-          console.error("No introspection data returned");
+          yield* Effect.logError("No introspection data returned");
           return;
         }
         this.introspection = parseIntrospectionResults(introspectionJson, true);
@@ -418,7 +421,9 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
               label: arg,
               description: pipe(
                 Option.fromNullable(types[i]),
-                Option.flatMap((typeId) => Option.fromNullable(introspection.getType({ id: typeId }))),
+                Option.flatMap((typeId) =>
+                  Option.fromNullable(introspection.getType({ id: typeId })),
+                ),
                 Option.map((type) => type.typname),
                 Option.getOrUndefined,
               ),

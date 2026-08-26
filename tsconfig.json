@@ -1,14 +1,14 @@
 {
-  "$schema": "https://json.schemastore.org/tsconfig",
+  "$schema": "./node_modules/@effect/tsgo/schema.json",
   "compilerOptions": {
     "target": "ESNext",
     "useDefineForClassFields": true,
     "module": "ESNext",
     "lib": ["ESNext", "DOM"],
-    "types": ["node"],
+    "types": ["node", "bun"],
     "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "jsxImportSource": "fibrae",
+    "jsx": "preserve",
+    "jsxImportSource": "@solidjs/web",
     "strict": true,
     "sourceMap": true,
     "resolveJsonModule": true,
@@ -34,10 +34,40 @@
         "diagnostics": true,
         "quickinfo": true,
         "completions": true,
-        "namespaceImportPackages": ["effect", "@effect/*"]
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "abortControllerInEffect": "warning",
+          "asyncFunction": "warning",
+          "cryptoRandomUUID": "warning",
+          "cryptoRandomUUIDInEffect": "warning",
+          "extendsNativeError": "warning",
+          "globalConsole": "warning",
+          "globalConsoleInEffect": "warning",
+          "globalDate": "warning",
+          "globalDateInEffect": "warning",
+          "globalFetch": "warning",
+          "globalFetchInEffect": "warning",
+          "globalRandom": "warning",
+          "globalRandomInEffect": "warning",
+          "globalTimers": "warning",
+          "globalTimersInEffect": "warning",
+          "instanceOfSchema": "warning",
+          "newPromise": "warning",
+          "nodeBuiltinImport": "warning",
+          "preferSchemaOverJson": "warning",
+          "processEnv": "warning",
+          "processEnvInEffect": "warning",
+          "unsafeEffectTypeAssertion": "warning"
+        }
       }
     ]
   },
-  "exclude": ["node_modules", "dist", "src/features/notebook/renderer/pev2", "src/sw.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/features/notebook/renderer/pev2",
+    "src/sw.ts",
+    "server/vendor"
+  ],
   "include": ["src", "server", "lib", "scripts"]
 }

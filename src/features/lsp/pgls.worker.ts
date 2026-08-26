@@ -1,5 +1,6 @@
 import { createLanguageServer, type LanguageServer } from "@postgres-language-server/wasm/lsp";
 import { createWorkspace, type Workspace } from "@postgres-language-server/wasm/workspace";
+import { Effect } from "effect";
 
 let lsp: LanguageServer | null = null;
 let workspace: Workspace | null = null;
@@ -18,22 +19,25 @@ function processMessage(event: MessageEvent) {
   const msg = event.data as {
     id?: number;
     method?: string;
-    params?: Record<string, unknown>;
+    params?: object;
   };
 
   // Intercept schema sync — use Workspace API (synchronous) which works,
   // unlike the LSP notification path that loses the actual serde error.
   if (msg.method === "pgls/setSchema" && workspace) {
     try {
-      const schema = msg.params?.schema as string | undefined;
+      const params = msg.params as { schema?: string } | undefined;
+      const schema = params?.schema;
       if (schema) {
         workspace.setSchema(schema);
-        console.log("[PGLS Worker] Schema set via Workspace API");
+        Effect.runSync(Effect.log("[PGLS Worker] Schema set via Workspace API"));
       }
     } catch (err) {
-      console.error(
-        "[PGLS Worker] setSchema error:",
-        err instanceof Error ? err.message : String(err),
+      Effect.runSync(
+        Effect.logError(
+          "[PGLS Worker] setSchema error:",
+          err instanceof Error ? err.message : String(err),
+        ),
       );
     }
     return;
@@ -130,9 +134,11 @@ function processMessage(event: MessageEvent) {
       self.postMessage(resp);
     });
   } catch (err) {
-    console.error(
-      "[PGLS Worker] handleMessage error:",
-      err instanceof Error ? err.message : String(err),
+    Effect.runSync(
+      Effect.logError(
+        "[PGLS Worker] handleMessage error:",
+        err instanceof Error ? err.message : String(err),
+      ),
     );
   }
 }
@@ -179,7 +185,7 @@ try {
   lsp = await createLanguageServer();
   // createWorkspace reuses the singleton WASM module from loadWasm()
   workspace = await createWorkspace();
-  console.log("[PGLS] WASM language server ready");
+  Effect.runSync(Effect.log("[PGLS] WASM language server ready"));
 
   // Process any messages that arrived during init
   pendingMessages.forEach((msg) => {
@@ -187,8 +193,10 @@ try {
   });
   pendingMessages.length = 0;
 } catch (err) {
-  console.error(
-    "[PGLS Worker] Failed to initialize:",
-    err instanceof Error ? err.message : String(err),
+  Effect.runSync(
+    Effect.logError(
+      "[PGLS Worker] Failed to initialize:",
+      err instanceof Error ? err.message : String(err),
+    ),
   );
 }

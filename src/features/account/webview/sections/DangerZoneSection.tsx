@@ -1,207 +1,257 @@
+import { createSignal, refresh, Match, Show, Switch } from "solid-js";
 import * as Effect from "effect/Effect";
-import { Result } from "@effect-atom/atom";
-import { Atom, AtomRegistry } from "fibrae";
-import { apiRequest } from "../api";
+import { apiRequest, notifyAccountDeleted } from "../api";
+import { createRequest, runRequest } from "../../../webview/request";
+import { SectionBoundary } from "../SectionBoundary";
+import { WebviewRequestError } from "../../../webview/apiBridge";
 
-const usernameAtom = Atom.make(
+const loadUsername = () =>
   apiRequest<{ user: { username: string } | null }>("/api/me", "GET", undefined, {
     action: "account.danger.load",
   }).pipe(
     Effect.flatMap((data) =>
       data.user
         ? Effect.succeed(data.user.username)
-        : Effect.fail(new Error("Unauthorized")),
+        : Effect.fail(new WebviewRequestError({ message: "Unauthorized", code: "UNAUTHORIZED" })),
     ),
-  ),
-);
+  );
 
-const showConfirmAtom = Atom.make(false);
-const confirmInputAtom = Atom.make("");
-const requestingAtom = Atom.make(false);
-const requestedAtom = Atom.make(false);
-const mutationErrorAtom = Atom.make<string | null>(null);
+const [deleteToken, setDeleteToken] = createSignal<string | null>(null);
 
-export const DangerZoneSection = () =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const result = yield* Atom.get(usernameAtom);
-    const showConfirm = yield* Atom.get(showConfirmAtom);
-    const confirmInput = yield* Atom.get(confirmInputAtom);
-    const requesting = yield* Atom.get(requestingAtom);
-    const requested = yield* Atom.get(requestedAtom);
-    const mutationError = yield* Atom.get(mutationErrorAtom);
+export function initializeDangerZone(options?: { deleteToken?: string }) {
+  setDeleteToken(options?.deleteToken ?? null);
+}
 
-    function handleDeleteRequest(username: string) {
-      if (confirmInput !== username) return;
+const dangerButton = (enabled: boolean) => ({
+  background: "var(--vscode-inputValidation-errorBorder)",
+  color: "#fff",
+  border: "none",
+  padding: "6px 12px",
+  cursor: enabled ? "pointer" : "not-allowed",
+  "border-radius": "2px",
+  "font-family": "var(--vscode-font-family)",
+  "font-size": "var(--vscode-font-size)",
+  opacity: enabled ? 1 : 0.5,
+});
 
-      registry.set(requestingAtom, true);
-      registry.set(mutationErrorAtom, null);
-      void Effect.runFork(
-        apiRequest<{ success: boolean }>("/api/me", "DELETE", undefined, {
-          action: "account.danger.request_delete",
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              registry.set(requestedAtom, true);
-              registry.set(showConfirmAtom, false);
-            }),
-          ),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(mutationErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(requestingAtom, false);
-            }),
-          ),
-        ),
-      );
-    }
+const mutedText = {
+  margin: "0 0 12px",
+  color: "var(--vscode-descriptionForeground)",
+  "font-size": "12px",
+};
 
-    function handleCancel() {
-      registry.set(showConfirmAtom, false);
-      registry.set(confirmInputAtom, "");
-      registry.set(mutationErrorAtom, null);
-    }
+export const DangerZoneSection = () => {
+  const username = createRequest(loadUsername);
+  const [showConfirm, setShowConfirm] = createSignal(false);
+  const [confirmInput, setConfirmInput] = createSignal("");
+  const [requesting, setRequesting] = createSignal(false);
+  const [requested, setRequested] = createSignal(false);
+  const [mutationError, setMutationError] = createSignal<string | null>(null);
+  const [deleted, setDeleted] = createSignal(false);
 
-    return Result.builder(result)
-      .onInitial(() => <div class="section-loading">Loading...</div>)
-      .onError((error) => (
-        <div class="section-error">
+  const confirmed = () => confirmInput() === username();
+
+  function handleDeleteRequest() {
+    if (!confirmed()) return;
+
+    setRequesting(true);
+    setMutationError(null);
+    void runRequest(
+      apiRequest<{ success: boolean }>("/api/me", "DELETE", undefined, {
+        action: "account.danger.request_delete",
+      }),
+    )
+      .then(
+        () => {
+          setRequested(true);
+          setShowConfirm(false);
+        },
+        (error: Error) => setMutationError(error.message),
+      )
+      .finally(() => setRequesting(false));
+  }
+
+  function handleCancel() {
+    setShowConfirm(false);
+    setConfirmInput("");
+    setMutationError(null);
+  }
+
+  function handleDeleteConfirm(token: string) {
+    setRequesting(true);
+    setMutationError(null);
+    void runRequest(
+      apiRequest<{ success: boolean }>(
+        `/api/me?token=${encodeURIComponent(token)}`,
+        "DELETE",
+        undefined,
+        { action: "account.danger.confirm_delete" },
+      ),
+    )
+      .then(
+        (response) => {
+          if (response.success) {
+            setDeleted(true);
+            notifyAccountDeleted();
+          } else setMutationError("Account deletion confirmation failed");
+        },
+        (error: Error) => setMutationError(error.message),
+      )
+      .finally(() => setRequesting(false));
+  }
+
+  const MutationError = () => (
+    <Show when={mutationError()}>
+      {(message) => (
+        <div
+          class="section-error"
+          style={{ "margin-bottom": "12px" }}
+          data-pw="account-delete-error"
+        >
           <i class="codicon codicon-error" />
-          <span>{error.message}</span>
-          <button class="button" onClick={() => registry.refresh(usernameAtom)}>
-            Retry
-          </button>
+          <span>{message()}</span>
         </div>
-      ))
-      .onSuccess((username) => (
-        <div class="danger-zone-section">
-          <div class="section-header">
-            <h2>Danger Zone</h2>
-          </div>
+      )}
+    </Show>
+  );
 
-          <div
-            class="danger-zone-container"
+  return (
+    <SectionBoundary loading="Loading..." retry={() => refresh(username)}>
+      <div class="danger-zone-section" data-pw="danger-zone-section">
+        <div class="section-header">
+          <h2>Danger Zone</h2>
+        </div>
+
+        <div
+          class="danger-zone-container"
+          style={{
+            border: "1px solid var(--vscode-inputValidation-errorBorder)",
+            "border-radius": "2px",
+            padding: "16px",
+          }}
+        >
+          <p style={{ margin: "0 0 8px", "font-weight": 500 }}>Delete Account</p>
+          <p style={{ ...mutedText, margin: "0 0 16px" }}>
+            Permanently delete your account and all associated data. This action cannot be undone.
+          </p>
+
+          <ul
             style={{
-              border: "1px solid var(--vscode-inputValidation-errorBorder)",
-              borderRadius: "2px",
-              padding: "16px",
+              margin: "0 0 16px",
+              "padding-left": "20px",
+              "font-size": "12px",
+              color: "var(--vscode-descriptionForeground)",
             }}
           >
-            <p style={{ margin: "0 0 8px", fontWeight: 500 }}>Delete Account</p>
-            <p
-              style={{
-                margin: "0 0 16px",
-                color: "var(--vscode-descriptionForeground)",
-                fontSize: "12px",
-              }}
-            >
-              Permanently delete your account and all associated data. This action cannot be undone.
-            </p>
+            <li>All playgrounds</li>
+            <li>All comments</li>
+            <li>All stars</li>
+            <li>All email addresses</li>
+            <li>All linked accounts</li>
+          </ul>
 
-            <ul
-              style={{
-                margin: "0 0 16px",
-                paddingLeft: "20px",
-                fontSize: "12px",
-                color: "var(--vscode-descriptionForeground)",
-              }}
-            >
-              <li>All playgrounds</li>
-              <li>All comments</li>
-              <li>All stars</li>
-              <li>All email addresses</li>
-              <li>All linked accounts</li>
-            </ul>
-
-            {requested ? (
-              <p style={{ margin: 0, color: "var(--vscode-charts-green)" }}>
-                <i class="codicon codicon-mail" style={{ marginRight: "6px" }} />A confirmation email
-                has been sent to your primary email address. Click the link in the email to complete
-                the deletion.
+          <Switch>
+            <Match when={deleted()}>
+              <p
+                style={{ margin: 0, color: "var(--vscode-charts-green)" }}
+                data-pw="account-delete-complete"
+              >
+                <i class="codicon codicon-check" style={{ "margin-right": "6px" }} />
+                Your account has been deleted.
               </p>
-            ) : !showConfirm ? (
+            </Match>
+
+            <Match when={deleteToken()}>
+              {(token) => (
+                <div data-pw="account-delete-token-confirm">
+                  <p style={{ margin: "0 0 12px", "font-weight": 500 }}>
+                    <i class="codicon codicon-warning" style={{ "margin-right": "6px" }} />
+                    Confirm account deletion
+                  </p>
+                  <p style={mutedText}>
+                    This email link will permanently delete your account and all associated data.
+                  </p>
+                  <MutationError />
+                  <button
+                    class="button"
+                    disabled={requesting()}
+                    onClick={() => handleDeleteConfirm(token())}
+                    data-pw="account-delete-confirm-button"
+                  >
+                    {requesting() ? "Deleting..." : "Delete My Account"}
+                  </button>
+                </div>
+              )}
+            </Match>
+
+            <Match when={requested()}>
+              <p
+                style={{ margin: 0, color: "var(--vscode-charts-green)" }}
+                data-pw="account-delete-request-sent"
+              >
+                <i class="codicon codicon-mail" style={{ "margin-right": "6px" }} />A confirmation
+                email has been sent to your primary email address. Click the link in the email to
+                complete the deletion.
+              </p>
+            </Match>
+
+            <Match when={!showConfirm()}>
               <button
-                style={{
-                  background: "var(--vscode-inputValidation-errorBorder)",
-                  color: "#fff",
-                  border: "none",
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  borderRadius: "2px",
-                  fontFamily: "var(--vscode-font-family)",
-                  fontSize: "var(--vscode-font-size)",
-                }}
-                onClick={() => {
-                  registry.set(showConfirmAtom, true);
-                }}
+                style={dangerButton(true)}
+                onClick={() => setShowConfirm(true)}
+                data-pw="account-delete-request-button"
               >
                 Delete Account
               </button>
-            ) : (
+            </Match>
+
+            <Match when={true}>
               <div
                 style={{
                   background: "var(--vscode-inputValidation-errorBackground)",
                   border: "1px solid var(--vscode-inputValidation-errorBorder)",
-                  borderRadius: "2px",
+                  "border-radius": "2px",
                   padding: "12px",
                 }}
               >
-                <p style={{ margin: "0 0 12px", fontWeight: 500 }}>
-                  <i class="codicon codicon-warning" style={{ marginRight: "6px" }} />
+                <p style={{ margin: "0 0 12px", "font-weight": 500 }}>
+                  <i class="codicon codicon-warning" style={{ "margin-right": "6px" }} />
                   This action is irreversible. All your data will be permanently deleted.
                 </p>
 
-                {mutationError && (
-                  <div class="section-error" style={{ marginBottom: "12px" }}>
-                    <i class="codicon codicon-error" />
-                    <span>{mutationError}</span>
-                  </div>
-                )}
+                <MutationError />
 
-                <div class="field" style={{ marginBottom: "12px" }}>
+                <div class="field" style={{ "margin-bottom": "12px" }}>
                   <label>Type your username to confirm</label>
                   <input
                     type="text"
                     class="setting-input"
-                    placeholder={username}
-                    value={confirmInput}
-                    onInput={(e: Event) => {
-                      registry.set(confirmInputAtom, (e.target as HTMLInputElement).value);
-                    }}
-                    disabled={requesting}
+                    placeholder={username()}
+                    value={confirmInput()}
+                    onInput={(e) => setConfirmInput(e.currentTarget.value)}
+                    disabled={requesting()}
+                    data-pw="account-delete-confirm-input"
                   />
                 </div>
 
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button
-                    style={{
-                      background: "var(--vscode-inputValidation-errorBorder)",
-                      color: "#fff",
-                      border: "none",
-                      padding: "6px 12px",
-                      cursor: confirmInput === username ? "pointer" : "not-allowed",
-                      borderRadius: "2px",
-                      fontFamily: "var(--vscode-font-family)",
-                      fontSize: "var(--vscode-font-size)",
-                      opacity: confirmInput === username && !requesting ? 1 : 0.5,
-                    }}
-                    disabled={confirmInput !== username || requesting}
-                    onClick={() => handleDeleteRequest(username)}
+                    style={dangerButton(confirmed() && !requesting())}
+                    disabled={!confirmed() || requesting()}
+                    onClick={handleDeleteRequest}
+                    data-pw="account-delete-request-confirm-button"
                   >
-                    {requesting ? "Requesting..." : "I understand, delete my account"}
+                    {requesting() ? "Requesting..." : "I understand, delete my account"}
                   </button>
-                  <button class="button" onClick={handleCancel} disabled={requesting}>
+                  <button class="button" onClick={handleCancel} disabled={requesting()}>
                     Cancel
                   </button>
                 </div>
               </div>
-            )}
-          </div>
+            </Match>
+          </Switch>
         </div>
-      ))
-      .render();
-  });
+      </div>
+    </SectionBoundary>
+  );
+};

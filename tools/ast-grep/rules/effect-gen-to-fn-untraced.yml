@@ -1,0 +1,10 @@
+id: effect-gen-to-fn-untraced
+language: TypeScript
+rule:
+  any:
+    - pattern: "function $N($$$ARGS): Effect.Effect<$T> { return Effect.gen(function*() { $$$BODY }) }"
+    - pattern: "function $N($$$ARGS) { return Effect.gen(function*() { $$$BODY }) }"
+    - pattern: "const $N = ($$$ARGS): Effect.Effect<$T> => { return Effect.gen(function*() { $$$BODY }) }"
+    - pattern: "const $N = ($$$ARGS): Effect.Effect<$T> => Effect.gen(function*() { $$$BODY })"
+    - pattern: "const $N = ($$$ARGS) => Effect.gen(function*() { $$$BODY })"
+fix: const $N = Effect.fnUntraced(function*($$$ARGS) { $$$BODY })

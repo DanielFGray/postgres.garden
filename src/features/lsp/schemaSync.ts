@@ -3,7 +3,7 @@
  * and syncs it to the language server worker.
  */
 import * as S from "effect/Schema";
-import { Array, Option, pipe } from "effect";
+import { Array, Effect, Match, Option, pipe } from "effect";
 import type { Introspection } from "pg-introspection";
 import type { LanguageClient } from "vscode-languageclient/browser";
 
@@ -118,68 +118,47 @@ export type SchemaCache = typeof SchemaCache.Type;
 
 const SYSTEM_SCHEMAS = new Set(["pg_catalog", "pg_toast", "information_schema"]);
 
-function relkindToTableKind(
+const relkindToTableKind = (
   relkind: string,
-): "Ordinary" | "View" | "MaterializedView" | "Partitioned" {
-  switch (relkind) {
-    case "v":
-      return "View";
-    case "m":
-      return "MaterializedView";
-    case "p":
-      return "Partitioned";
-    default:
-      return "Ordinary";
-  }
-}
+): "Ordinary" | "View" | "MaterializedView" | "Partitioned" =>
+  Match.value(relkind).pipe(
+    Match.when("v", () => "View" as const),
+    Match.when("m", () => "MaterializedView" as const),
+    Match.when("p", () => "Partitioned" as const),
+    Match.orElse(() => "Ordinary" as const),
+  );
 
-function relkindToClassKind(
+const relkindToClassKind = (
   relkind: string,
-): "OrdinaryTable" | "View" | "MaterializedView" | "ForeignTable" | "PartitionedTable" {
-  switch (relkind) {
-    case "v":
-      return "View";
-    case "m":
-      return "MaterializedView";
-    case "f":
-      return "ForeignTable";
-    case "p":
-      return "PartitionedTable";
-    default:
-      return "OrdinaryTable";
-  }
-}
+): "OrdinaryTable" | "View" | "MaterializedView" | "ForeignTable" | "PartitionedTable" =>
+  Match.value(relkind).pipe(
+    Match.when("v", () => "View" as const),
+    Match.when("m", () => "MaterializedView" as const),
+    Match.when("f", () => "ForeignTable" as const),
+    Match.when("p", () => "PartitionedTable" as const),
+    Match.orElse(() => "OrdinaryTable" as const),
+  );
 
-function prokindToPglsKind(
+const prokindToPglsKind = (
   prokind: string | null | undefined,
-): "Function" | "Aggregate" | "Window" | "Procedure" {
-  switch (prokind) {
-    case "a":
-      return "Aggregate";
-    case "w":
-      return "Window";
-    case "p":
-      return "Procedure";
-    default:
-      return "Function";
-  }
-}
+): "Function" | "Aggregate" | "Window" | "Procedure" =>
+  Match.value(prokind).pipe(
+    Match.when("a", () => "Aggregate" as const),
+    Match.when("w", () => "Window" as const),
+    Match.when("p", () => "Procedure" as const),
+    Match.orElse(() => "Function" as const),
+  );
 
-function provolatileToBehavior(
+const provolatileToBehavior = (
   provolatile: string | null | undefined,
-): "Immutable" | "Stable" | "Volatile" {
-  switch (provolatile) {
-    case "i":
-      return "Immutable";
-    case "s":
-      return "Stable";
-    default:
-      return "Volatile";
-  }
-}
+): "Immutable" | "Stable" | "Volatile" =>
+  Match.value(provolatile).pipe(
+    Match.when("i", () => "Immutable" as const),
+    Match.when("s", () => "Stable" as const),
+    Match.orElse(() => "Volatile" as const),
+  );
 
-const fromNullableOr = <A>(value: A | null | undefined, fallback: A): A =>
-  value ?? fallback;
+const fromNullableOr = <A>(value: A | null | undefined, fallback: A): A => value ?? fallback;
 
 /**
  * Transform a pg-introspection result into the PGLS SchemaCache format.
@@ -266,45 +245,45 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
     comment: null,
   }));
 
-  const columns: SchemaCache["columns"] = introspection.attributes
-    .flatMap((attr) => {
-      if (attr.attnum < 1 || attr.attisdropped) return [];
-      return pipe(
-        Array.findFirst(introspection.classes, (c) => c._id === attr.attrelid),
-        Option.filter(
-          (cls) => nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind),
-        ),
-        Option.match({
-          onNone: () => [] as SchemaCache["columns"],
-          onSome: (cls) => {
-            const key = `${attr.attrelid}:${attr.attnum}`;
-            const typeName = pipe(
-              Array.findFirst(introspection.types, (t) => t._id === attr.atttypid),
-              Option.map((type) => type.typname),
-              Option.getOrNull,
-            );
-            return [
-              {
-                name: attr.attname,
-                table_name: cls.relname,
-                table_oid: Number(cls._id),
-                class_kind: relkindToClassKind(cls.relkind),
-                number: attr.attnum,
-                schema_name: fromNullableOr(classToNs.get(cls._id), "public"),
-                type_id: Number(attr.atttypid),
-                type_name: typeName,
-                is_nullable: !(attr.attnotnull ?? false),
-                is_primary_key: pkSet.has(key),
-                is_unique: pkSet.has(key) || uniqueSet.has(key),
-                default_expr: null,
-                varchar_length: attr.atttypmod != null && attr.atttypmod > 0 ? attr.atttypmod - 4 : null,
-                comment: null,
-              },
-            ];
-          },
-        }),
-      );
-    });
+  const columns: SchemaCache["columns"] = introspection.attributes.flatMap((attr) => {
+    if (attr.attnum < 1 || attr.attisdropped) return [];
+    return pipe(
+      Array.findFirst(introspection.classes, (c) => c._id === attr.attrelid),
+      Option.filter(
+        (cls) => nsIdSet.has(cls.relnamespace) && ["r", "v", "m", "p", "f"].includes(cls.relkind),
+      ),
+      Option.match({
+        onNone: () => [] as SchemaCache["columns"],
+        onSome: (cls) => {
+          const key = `${attr.attrelid}:${attr.attnum}`;
+          const typeName = pipe(
+            Array.findFirst(introspection.types, (t) => t._id === attr.atttypid),
+            Option.map((type) => type.typname),
+            Option.getOrNull,
+          );
+          return [
+            {
+              name: attr.attname,
+              table_name: cls.relname,
+              table_oid: Number(cls._id),
+              class_kind: relkindToClassKind(cls.relkind),
+              number: attr.attnum,
+              schema_name: fromNullableOr(classToNs.get(cls._id), "public"),
+              type_id: Number(attr.atttypid),
+              type_name: typeName,
+              is_nullable: !(attr.attnotnull ?? false),
+              is_primary_key: pkSet.has(key),
+              is_unique: pkSet.has(key) || uniqueSet.has(key),
+              default_expr: null,
+              varchar_length:
+                attr.atttypmod != null && attr.atttypmod > 0 ? attr.atttypmod - 4 : null,
+              comment: null,
+            },
+          ];
+        },
+      }),
+    );
+  });
 
   const functions: SchemaCache["functions"] = introspection.procs
     .filter((p) => nsIdSet.has(p.pronamespace))
@@ -391,10 +370,17 @@ export function syncSchema(client: LanguageClient, introspection: Introspection)
     void client.sendNotification("pgls/setSchema", {
       schema: JSON.stringify(encoded),
     });
-    console.log(
-      `[PGLS] Schema synced: ${cache.schemas.length} schemas, ${cache.tables.length} tables, ${cache.columns.length} columns, ${cache.functions.length} functions`,
+    Effect.runSync(
+      Effect.log(
+        `[PGLS] Schema synced: ${cache.schemas.length} schemas, ${cache.tables.length} tables, ${cache.columns.length} columns, ${cache.functions.length} functions`,
+      ),
     );
   } catch (err) {
-    console.warn("[PGLS] Schema sync error:", err instanceof Error ? err.message : String(err));
+    Effect.runSync(
+      Effect.logWarning(
+        "[PGLS] Schema sync error:",
+        err instanceof Error ? err.message : String(err),
+      ),
+    );
   }
 }

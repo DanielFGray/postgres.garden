@@ -1,35 +1,8 @@
-import { HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpApp, HttpServerResponse } from "@effect/platform";
-import { Context, Effect, Layer, Redacted } from "effect";
+import { HttpApiBuilder, HttpApp, HttpServerResponse } from "@effect/platform";
+import { Effect, Layer, Redacted } from "effect";
 import { SessionService } from "./sessionService.js";
+import { sessionCookie, SessionMiddleware } from "../apiSchema.js";
 import { env } from "../assertEnv.js";
-
-export const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "session" });
-
-export type SessionUser = {
-  readonly id: string;
-  readonly username: string;
-  readonly role: string;
-  readonly is_verified: boolean;
-};
-
-export type SessionInfo = {
-  readonly id: string;
-  readonly cookie_id: string;
-  readonly user_id: string;
-  readonly expires_at: Date;
-};
-
-export type SessionData = {
-  readonly user: SessionUser | null;
-  readonly session: SessionInfo | null;
-};
-
-export class CurrentSession extends Context.Tag("CurrentSession")<CurrentSession, SessionData>() {}
-
-export class SessionMiddleware extends HttpApiMiddleware.Tag<SessionMiddleware>()("SessionMiddleware", {
-  provides: CurrentSession,
-  security: { session: sessionCookie },
-}) {}
 
 export const SessionMiddlewareLive = Layer.effect(
   SessionMiddleware,
@@ -42,9 +15,9 @@ export const SessionMiddlewareLive = Layer.effect(
         if (!token) {
           return Effect.succeed(noSession);
         }
-        return sessionService.validateSessionToken(token).pipe(
-          Effect.catchAll(() => Effect.succeed(noSession)),
-        );
+        return sessionService
+          .validateSessionToken(token)
+          .pipe(Effect.orElseSucceed(() => noSession));
       },
     });
   }),

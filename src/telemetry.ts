@@ -13,30 +13,30 @@ const isDev = import.meta.env.DEV;
 
 // Auto-instrumentations registered globally (hook the global TracerProvider set by WebSdk)
 registerInstrumentations({
-	instrumentations: [
-		new FetchInstrumentation({
-			propagateTraceHeaderCorsUrls: [window.location.origin],
-		}),
-		new DocumentLoadInstrumentation(),
-		new UserInteractionInstrumentation(),
-	],
+  instrumentations: [
+    new FetchInstrumentation({
+      propagateTraceHeaderCorsUrls: [window.location.origin],
+    }),
+    new DocumentLoadInstrumentation(),
+    new UserInteractionInstrumentation(),
+  ],
 });
 
 const WebSdkLive = collectorUrl
-	? WebSdk.layer(() => ({
-			resource: { serviceName: "postgres-garden-web" },
-			spanProcessor: new BatchSpanProcessor(
-				new OTLPTraceExporter({
-					url: `${collectorUrl}/v1/traces`,
-					// Force fetch transport instead of sendBeacon — sendBeacon can't
-					// do CORS preflights, which breaks cross-origin JSON POSTs.
-					headers: {},
-				}),
-			),
-		}))
-	: WebSdk.layer(() => ({
-			resource: { serviceName: "postgres-garden-web" },
-		}));
+  ? WebSdk.layer(() => ({
+      resource: { serviceName: "postgres-garden-web" },
+      spanProcessor: new BatchSpanProcessor(
+        new OTLPTraceExporter({
+          url: `${collectorUrl}/v1/traces`,
+          // Force fetch transport instead of sendBeacon — sendBeacon can't
+          // do CORS preflights, which breaks cross-origin JSON POSTs.
+          headers: {},
+        }),
+      ),
+    }))
+  : WebSdk.layer(() => ({
+      resource: { serviceName: "postgres-garden-web" },
+    }));
 
 // DevTools.layer() includes Socket.layerWebSocketConstructorGlobal
 // which uses the browser's native WebSocket — no platform-browser import needed

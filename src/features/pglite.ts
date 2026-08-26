@@ -1,9 +1,21 @@
 import type { QueryOptions } from "@electric-sql/pglite";
 import { live } from "@electric-sql/pglite/live";
 import { PGliteWorker } from "@electric-sql/pglite/worker";
-import { Effect, Ref } from "effect";
+import { Effect, Ref, Schema } from "effect";
 import * as semicolons from "postgres-semicolons";
 
+class PGliteError extends Schema.TaggedError<PGliteError>()("PGliteError", {
+  cause: Schema.optional(Schema.String),
+}) {}
+
+type WorkerMessageValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ArrayBuffer
+  | readonly WorkerMessageValue[]
+  | { readonly [key: string]: WorkerMessageValue };
 
 // ---------------------------------------------------------------------------
 // WorkerFS — Effect-native API to the Emscripten FS inside the PGlite worker
@@ -31,10 +43,13 @@ function createFsChannel(worker: Worker): WorkerFsApi {
 
   const port = channel.port1;
   let nextId = 0;
-  const pending = new Map<number, {
-    resolve: (v: Record<string, unknown>) => void;
-    reject: (e: Error) => void;
-  }>();
+  const pending = new Map<
+    number,
+    {
+      resolve: (v: Record<string, WorkerMessageValue>) => void;
+      reject: (e: PGliteError) => void;
+    }
+  >();
 
   port.onmessage = (e: MessageEvent) => {
     const data = e.data as { id: number; ok: boolean; error?: string };
@@ -42,56 +57,43 @@ function createFsChannel(worker: Worker): WorkerFsApi {
     if (p) {
       pending.delete(data.id);
       if (data.ok) {
-        p.resolve(e.data as Record<string, unknown>);
+        p.resolve(e.data as Record<string, WorkerMessageValue>);
       } else {
-        p.reject(new Error(data.error ?? "WorkerFS error"));
+        p.reject(new PGliteError({ cause: data.error ?? "WorkerFS error" }));
       }
     }
   };
 
-  const send = (data: Record<string, unknown>, transfer?: Transferable[]): Promise<Record<string, unknown>> => {
-    const id = nextId++;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+  const send = (data: Record<string, WorkerMessageValue>, transfer?: Transferable[]) =>
+    Effect.async<Record<string, WorkerMessageValue>, PGliteError>((resume) => {
+      const id = nextId++;
+      pending.set(id, {
+        resolve: (value) => resume(Effect.succeed(value)),
+        reject: (error) => resume(Effect.fail(error)),
+      });
       port.postMessage({ ...data, id }, transfer ?? []);
     });
-  };
 
   return {
     writeFile: (path, content) =>
-      Effect.tryPromise({
-        try: async () => {
-          const copy = content.slice();
-          await send({ type: "writeFile", path, content: copy.buffer }, [copy.buffer]);
-        },
-        catch: toError,
+      Effect.gen(function* () {
+        const copy = content.slice();
+        yield* send({ type: "writeFile", path, content: copy.buffer }, [copy.buffer]);
       }),
 
     readFile: (path) =>
-      Effect.tryPromise({
-        try: async () => {
-          const result = await send({ type: "readFile", path });
-          return new Uint8Array(result.content as ArrayBuffer);
-        },
-        catch: toError,
+      Effect.gen(function* () {
+        const result = yield* send({ type: "readFile", path });
+        return new Uint8Array(result.content as ArrayBuffer);
       }),
 
     listDir: (path) =>
-      Effect.tryPromise({
-        try: async () => {
-          const result = await send({ type: "listDir", path });
-          return result.files as string[];
-        },
-        catch: toError,
+      Effect.gen(function* () {
+        const result = yield* send({ type: "listDir", path });
+        return result.files as string[];
       }),
 
-    deleteFile: (path) =>
-      Effect.tryPromise({
-        try: async () => {
-          await send({ type: "deleteFile", path });
-        },
-        catch: toError,
-      }),
+    deleteFile: (path) => send({ type: "deleteFile", path }).pipe(Effect.asVoid),
   };
 }
 
@@ -103,15 +105,41 @@ type PGliteState = {
   readonly fs: WorkerFsApi | null;
 };
 
+type PGliteRuntimeState = {
+  readonly stateRef: Ref.Ref<PGliteState>;
+  readonly lock: Effect.Semaphore;
+};
+
+// A hot replacement must not terminate the worker that owns the in-memory
+// database. Keep its coordination primitives in HMR data so the replacement
+// service reconnects to the same PGlite instance.
+let sharedRuntimeState = import.meta.hot?.data.pgliteRuntimeState as
+  | PGliteRuntimeState
+  | undefined;
+
+if (import.meta.hot) {
+  import.meta.hot.dispose((data) => {
+    data.pgliteRuntimeState = sharedRuntimeState;
+  });
+}
+
+const isHmrReloading = () =>
+  (globalThis as typeof globalThis & { __postgresGardenHmrReloading?: boolean })
+    .__postgresGardenHmrReloading === true;
+
 export type PGliteApi = {
-  readonly initialize: Effect.Effect<PGliteWorker, Error, never>;
-  readonly reinitialize: Effect.Effect<void, Error, never>;
-  readonly reset: Effect.Effect<void, Error, never>;
+  readonly initialize: Effect.Effect<PGliteWorker, PGliteError, never>;
+  readonly reinitialize: Effect.Effect<void, PGliteError, never>;
+  readonly reset: Effect.Effect<void, PGliteError, never>;
   readonly query: <T>(
     sql: string,
     params?: unknown[],
     opts?: QueryOptions,
-  ) => Effect.Effect<{ readonly statement: string; readonly rows: readonly T[]; [key: string]: unknown }, Error, never>;
+  ) => Effect.Effect<
+    { readonly statement: string; readonly rows: readonly T[] },
+    PGliteError,
+    never
+  >;
   readonly exec: (
     sql: string,
     opts?: QueryOptions,
@@ -119,10 +147,9 @@ export type PGliteApi = {
     ReadonlyArray<{
       readonly statement: string;
       readonly query: string;
-      readonly rows: readonly Record<string, unknown>[];
-      [key: string]: unknown;
+      readonly rows: readonly Record<string, WorkerMessageValue>[];
     }>,
-    Error,
+    PGliteError,
     never
   >;
   /** Emscripten FS operations (initializes PGlite first if needed) */
@@ -131,8 +158,15 @@ export type PGliteApi = {
 
 export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
   scoped: Effect.gen(function* () {
-    const stateRef = yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null });
-    const lock = yield* Effect.makeSemaphore(1);
+    const runtimeState =
+      sharedRuntimeState ??
+      ({
+        stateRef: yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null }),
+        lock: yield* Effect.makeSemaphore(1),
+      } satisfies PGliteRuntimeState);
+    sharedRuntimeState = runtimeState;
+
+    const { stateRef, lock } = runtimeState;
 
     const initializeUnlocked = Effect.gen(function* () {
       const state = yield* Ref.get(stateRef);
@@ -163,7 +197,7 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
         const db = yield* initialize;
         const result = yield* Effect.tryPromise({
           try: () => db.query<T>(sql, params, opts),
-          catch: toError,
+          catch: (cause) => new PGliteError({ cause: String(cause) }),
         });
 
         return {
@@ -173,11 +207,13 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
       }).pipe(
         Effect.tapError((err) =>
           Effect.annotateCurrentSpan({
-            "error": true,
+            error: true,
             "error.message": err.message,
           }),
         ),
-        Effect.withSpan("pglite.query", { attributes: { "db.statement": statementFromQuery(sql) } }),
+        Effect.withSpan("pglite.query", {
+          attributes: { "db.statement": statementFromQuery(sql) },
+        }),
       );
 
     const exec: PGliteApi["exec"] = (sql, opts) =>
@@ -185,7 +221,7 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
         const db = yield* initialize;
         const result = yield* Effect.tryPromise({
           try: () => db.exec(sql, opts),
-          catch: toError,
+          catch: (cause) => new PGliteError({ cause: String(cause) }),
         });
         const metadata = metadataFromQueries(sql);
 
@@ -196,7 +232,7 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
       }).pipe(
         Effect.tapError((err) =>
           Effect.annotateCurrentSpan({
-            "error": true,
+            error: true,
             "error.message": err.message,
           }),
         ),
@@ -204,20 +240,22 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
       );
 
     yield* Effect.addFinalizer(() =>
-      lock.withPermits(1)(
-        Effect.gen(function* () {
-          const state = yield* Ref.get(stateRef);
-          yield* closeState(state);
-          yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
-        }),
-      ),
+      isHmrReloading()
+        ? Effect.void
+        : lock.withPermits(1)(
+            Effect.gen(function* () {
+              const state = yield* Ref.get(stateRef);
+              yield* closeState(state);
+              yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
+            }),
+          ),
     );
 
     // Lazily get the WorkerFS (ensures PGlite is initialized first)
     const getFs = Effect.gen(function* () {
       yield* initialize;
       const state = yield* Ref.get(stateRef);
-      if (!state.fs) return yield* Effect.fail(new Error("WorkerFS not available"));
+      if (!state.fs) return yield* new PGliteError({ cause: "WorkerFS not available" });
       return state.fs;
     });
 
@@ -255,41 +293,23 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
   }),
 }) {}
 
-const toError = (error: unknown) => new Error(error instanceof Error ? error.message : String(error));
-
 const closeState = (state: PGliteState) =>
-  Effect.promise(async () => {
-    if (state.db) {
-      await state.db.close();
-    }
-
-    if (state.worker) {
-      state.worker.terminate();
-    }
-  }).pipe(Effect.orDie);
+  Effect.promise(() => (state.db ? state.db.close() : Promise.resolve())).pipe(
+    Effect.andThen(Effect.sync(() => state.worker?.terminate())),
+    Effect.orDie,
+  );
 
 const createInstance = Effect.tryPromise({
-  try: async () => {
+  try: () => {
     const worker = new Worker(new URL("./pglite.worker.ts", import.meta.url), {
       type: "module",
     });
 
-    const db = await PGliteWorker.create(worker, {
+    return PGliteWorker.create(worker, {
       extensions: { live },
-    });
-
-    // Set up FS sync channel AFTER PGliteWorker.create() completes.
-    // The worker's init handler uses addEventListener {once: true} —
-    // sending pg-fs-port before init would consume that one-shot listener.
-    const fs = createFsChannel(worker);
-
-    return {
-      worker,
-      db,
-      fs,
-    } as const;
+    }).then((db) => ({ worker, db, fs: createFsChannel(worker) }) as const);
   },
-  catch: toError,
+  catch: (cause) => new PGliteError({ cause: String(cause) }),
 });
 
 function metadataFromQueries(sql: string) {
@@ -306,7 +326,9 @@ function statementFromQuery(query: string) {
   const firstWords = lowerQuery.slice(0, 30).split(/\s+/);
   const statement = lowerQuery.startsWith("create or replace")
     ? [firstWords[0], firstWords[3]].join(" ")
-    : lowerQuery.startsWith("create") || lowerQuery.startsWith("alter") || lowerQuery.startsWith("drop")
+    : lowerQuery.startsWith("create") ||
+        lowerQuery.startsWith("alter") ||
+        lowerQuery.startsWith("drop")
       ? firstWords.slice(0, 2).join(" ")
       : (firstWords[0] ?? "");
 

@@ -4,10 +4,10 @@
 
 import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
-import { navigateTo } from "fibrae/router";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
 import { PlaygroundService } from "./services/PlaygroundService";
+import { navigateTo } from "../../shared/navigation";
 import { getCurrentPlaygroundId } from "../../shared/routes";
 import { Workbench } from "../../workbench";
 import {
@@ -30,8 +30,8 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   const subscriptions: vscode.Disposable[] = [];
   const extensionUri = vscodeService.extensionUri;
 
-  console.log("Playground extension activated");
-  console.log("Extension URI:", extensionUri.toString());
+  yield* Effect.log("Playground extension activated");
+  yield* Effect.log("Extension URI:", extensionUri.toString());
 
   const metadataProvider = new PlaygroundMetadataViewProvider(extensionUri);
   subscriptions.push(
@@ -46,18 +46,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   runFork(refreshMetadata);
 
   yield* vscodeService.registerCommand(PLAYGROUND_SHOW_BROWSER, () => {
-    runFork(
-      Effect.sync(() => {
-        PlaygroundBrowserPanel.createOrShow(extensionUri);
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.sync(() => {
-            console.error("[Playground] Failed to open playground browser:", error);
-          }),
-        ),
-        Effect.catchAll(() => Effect.void),
-      ),
-    );
+    runFork(Effect.sync(() => PlaygroundBrowserPanel.createOrShow(extensionUri)));
   });
 
   yield* vscodeService.registerCommand(PLAYGROUND_OPEN, (playgroundId) => {
@@ -118,21 +107,19 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   yield* vscodeService.registerCommand(PLAYGROUND_CREATE, () => {
     runFork(
       Effect.gen(function* () {
-        const name = yield* Effect.tryPromise({
-          try: () =>
-            vscodeApi.window.showInputBox({
-              prompt: "Enter playground name",
-              placeHolder: "my-playground",
-              validateInput: (value) => {
-                if (!value) return "Name is required";
-                if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-                  return "Name can only contain letters, numbers, hyphens, and underscores";
-                }
-                return null;
-              },
-            }),
-          catch: (error) => new Error(error instanceof Error ? error.message : String(error)),
-        });
+        const name = yield* Effect.tryPromise(() =>
+          vscodeApi.window.showInputBox({
+            prompt: "Enter playground name",
+            placeHolder: "my-playground",
+            validateInput: (value) => {
+              if (!value) return "Name is required";
+              if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+                return "Name can only contain letters, numbers, hyphens, and underscores";
+              }
+              return null;
+            },
+          }),
+        );
 
         if (!name) {
           return;
@@ -143,7 +130,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
           privacy: "private",
         });
 
-        const url = `/playgrounds/${playground.hash}`;
+        const url = `/playgrounds/${playground.playground_hash}`;
         navigateTo(url);
       }).pipe(
         Effect.tapError((error) =>
@@ -158,14 +145,12 @@ const activatePlaygroundExtension = Effect.gen(function* () {
     );
   });
 
-  return yield* Effect.acquireRelease(
-    Effect.succeed(subscriptions),
-    (all) =>
-      Effect.sync(() => {
-        all.forEach((disposable) => {
-          disposable.dispose();
-        });
-      }),
+  return yield* Effect.acquireRelease(Effect.succeed(subscriptions), (all) =>
+    Effect.sync(() => {
+      all.forEach((disposable) => {
+        disposable.dispose();
+      });
+    }),
   );
 });
 

@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import * as S from "effect/Schema";
 import { templateHack } from "../../../lib/index.js";
 import type { QueryOptions } from "@electric-sql/pglite";
 
@@ -7,9 +9,15 @@ export interface ERDQueryClient {
   query<T>(sql: string, params?: unknown[], opts?: QueryOptions): Promise<{ rows: readonly T[] }>;
 }
 
-export async function getMermaidERD(service: ERDQueryClient) {
-  const result = await service.query<{ erd: string }>(sql`
-    select 'erDiagram' as erd
+export class ErdQueryError extends S.TaggedError<ErdQueryError>()("ErdQueryError", {
+  cause: S.optional(S.Unknown),
+}) {}
+
+export const getMermaidERD = (service: ERDQueryClient): Effect.Effect<string, ErdQueryError> =>
+  Effect.tryPromise({
+    try: () =>
+      service.query<{ erd: string }>(sql`
+    select E'erDiagram\n  direction LR' as erd
 
     union all
 
@@ -41,6 +49,6 @@ export async function getMermaidERD(service: ERDQueryClient) {
       join pg_class c2 on c.confrelid = c2.oid
     where
       not c1.relispartition and not c2.relispartition;
-  `);
-  return result.rows.map((r: { erd: string }) => r.erd).join("\n");
-}
+  `),
+    catch: (cause) => new ErdQueryError({ cause }),
+  }).pipe(Effect.map((result) => result.rows.map((r) => r.erd).join("\n")));

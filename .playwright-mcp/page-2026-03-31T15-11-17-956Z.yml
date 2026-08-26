@@ -1,0 +1,285 @@
+- application [ref=e5]:
+    - generic [ref=e9]:
+        - generic [ref=e11]:
+            - toolbar [ref=e19]:
+                - button "Go Back (Ctrl+Alt+-)" [ref=e584] [cursor=pointer]: 
+                - button "Go Forward (Ctrl+Shift+-)" [disabled] [ref=e585]: 
+                - toolbar "Agent Status" [ref=e586] [cursor=pointer]:
+                    - generic [ref=e587]:
+                        - button "Open Quick Access" [ref=e588]:
+                            - generic [ref=e589]: postgres.garden - Sign In
+                        - generic [ref=e590]:
+                            - button "Toggle Chat" [ref=e591]:
+                                - button "Toggle Chat" [ref=e592]: 
+                            - button "More Actions" [ref=e596]: 
+            - toolbar "Title actions" [ref=e37]:
+                - button "Create Playground" [ref=e38] [cursor=pointer]: 
+                - button "Browse Playgrounds" [ref=e39] [cursor=pointer]: 
+                - button "Save" [ref=e40] [cursor=pointer]: 
+                - button "Show ERD" [ref=e41] [cursor=pointer]: 
+                - button "Download Workspace" [ref=e42] [cursor=pointer]: 
+                - button "Accounts" [ref=e43] [cursor=pointer]:
+                    - generic "Accounts" [ref=e44]: 
+                - button "Manage" [ref=e45] [cursor=pointer]:
+                    - generic "Manage" [ref=e46]: 
+        - generic [ref=e52]:
+            - main [ref=e61]:
+                - generic [ref=e71] [cursor=pointer]:
+                    - tablist [ref=e72]:
+                        - tab "example.md, preview" [ref=e73]:
+                            - generic "example.md" [ref=e74]:
+                                - text: 
+                                - generic [ref=e76]: example.md
+                            - toolbar "Tab actions" [ref=e79]:
+                                - button "Close (Ctrl+W)" [ref=e80]: 
+                        - tab "Sign In" [selected] [ref=e597]:
+                            - generic "Sign In" [ref=e598]:
+                                - text: 
+                                - generic [ref=e600]: Sign In
+                            - toolbar "Tab actions" [ref=e603]:
+                                - button "Close (Ctrl+W)" [ref=e604]: 
+                    - toolbar "Editor actions" [ref=e84]:
+                        - button "Split Editor Right (Ctrl+\\) [Alt] Split Editor Down" [ref=e605]: 
+                        - button "More Actions..." [ref=e608]: 
+            - generic [ref=e112]:
+                - tablist "Active View Switcher" [ref=e117]:
+                    - tab "Explorer (Ctrl+Shift+E)" [expanded] [selected] [ref=e118] [cursor=pointer]:
+                        - generic "Explorer (Ctrl+Shift+E)" [ref=e119]: 
+                    - tab "Search (Ctrl+Shift+F)" [ref=e120] [cursor=pointer]:
+                        - generic "Search (Ctrl+Shift+F)" [ref=e121]: 
+                    - tab "Source Control (Ctrl+Shift+G)" [ref=e122] [cursor=pointer]:
+                        - generic "Source Control (Ctrl+Shift+G)" [ref=e123]: 
+                    - tab "Run and Debug (Ctrl+Shift+D)" [ref=e124] [cursor=pointer]:
+                        - generic "Run and Debug (Ctrl+Shift+D)" [ref=e125]: 
+                    - tab "Extensions (Ctrl+Shift+X)" [ref=e126] [cursor=pointer]:
+                        - generic "Extensions (Ctrl+Shift+X)" [ref=e127]: 
+                - generic [ref=e128]:
+                    - heading "Explorer" [level=2] [ref=e130]
+                    - toolbar "Explorer actions" [ref=e134]:
+                        - button "Views and More Actions..." [ref=e137] [cursor=pointer]: 
+                    - generic:
+                        - generic:
+                            - generic:
+                                - toolbar
+                - generic [ref=e142]:
+                    - generic [ref=e144]:
+                        - 'button "Explorer Section: workspace (Workspace)" [expanded] [ref=e145] [cursor=pointer]':
+                            - generic [ref=e146]: 
+                            - text: 
+                            - 'heading "Explorer Section: workspace (Workspace)" [level=3] [ref=e147]': workspace (Workspace)
+                            - text:    
+                        - tree "Files Explorer" [ref=e150]:
+                            - generic [ref=e151]:
+                                - treeitem "workspace" [expanded] [level=1] [ref=e152] [cursor=pointer]:
+                                    - generic [ref=e153]:
+                                        - generic [ref=e154]: 
+                                        - generic "/workspace" [ref=e156]:
+                                            - generic [ref=e159]: workspace
+                                - treeitem "00010-graphile-starter.sql" [level=2] [ref=e160] [cursor=pointer]:
+                                    - generic "~/00010-graphile-starter.sql" [ref=e163]:
+                                        - text: 
+                                        - generic [ref=e166]: 00010-graphile-starter.sql
+                                - treeitem "00100-posts.sql" [level=2] [ref=e167] [cursor=pointer]:
+                                    - generic "~/00100-posts.sql" [ref=e170]:
+                                        - text: 
+                                        - generic [ref=e173]: 00100-posts.sql
+                                - treeitem "99999-fixtures.sql" [level=2] [ref=e174] [cursor=pointer]:
+                                    - generic "~/99999-fixtures.sql" [ref=e177]:
+                                        - text: 
+                                        - generic [ref=e180]: 99999-fixtures.sql
+                                - treeitem "example.md" [level=2] [selected] [ref=e181] [cursor=pointer]:
+                                    - generic "~/example.md" [ref=e184]:
+                                        - text: 
+                                        - generic [ref=e187]: example.md
+                    - button "Outline Section" [ref=e190] [cursor=pointer]:
+                        - generic [ref=e191]: 
+                        - text: 
+                        - heading "Outline" [level=3] [ref=e192]
+                        - text:  
+                    - button "Database Section" [ref=e195] [cursor=pointer]:
+                        - generic [ref=e196]: 
+                        - text: 
+                        - heading "Database" [level=3] [ref=e197]
+                        - text:  
+                    - button "Playground Info Section" [ref=e200] [cursor=pointer]:
+                        - generic [ref=e201]: 
+                        - text: 
+                        - heading "Playground Info" [level=3] [ref=e202]
+                        - text:  
+        - status [ref=e204]:
+            - generic [ref=e205]:
+                - generic "remote postgres.garden" [ref=e206]:
+                    - button "remote postgres.garden" [ref=e207]:
+                        - generic [ref=e208]: 
+                        - text: postgres.garden
+                - 'generic "Errors: 3" [ref=e209]':
+                    - 'button "Errors: 3" [ref=e210] [cursor=pointer]':
+                        - generic [ref=e211]: 
+                        - text: "3"
+                        - generic [ref=e212]: 
+                        - text: "0"
+            - generic [ref=e213]:
+                - generic "Notifications" [ref=e214]:
+                    - button "Notifications" [ref=e215] [cursor=pointer]:
+                        - generic [ref=e216]: 
+                - 'generic "Layout: us" [ref=e217]':
+                    - 'button "Layout: us" [ref=e218] [cursor=pointer]'
+                - generic "account Sign In, Click to sign in" [ref=e219]:
+                    - button "account Sign In, Click to sign in" [ref=e220] [cursor=pointer]:
+                        - generic [ref=e221]: 
+                        - text: Sign In
+                - generic "Copilot status" [ref=e224]:
+                    - button "Copilot status" [ref=e225] [cursor=pointer]:
+                        - generic [ref=e226]: 
+    - generic [ref=e229]:
+        - alert
+        - alert
+    - list "Notebook Use Shift+Alt+F1 for accessibility help" [ref=e258]:
+        - generic [ref=e259]:
+            - iframe [ref=e261]:
+                - document [active] [ref=f2e1]:
+                    - iframe [ref=f2e2]:
+                        - document [active]
+            - toolbar [ref=e266]:
+                - button [ref=e267] [cursor=pointer]:
+                    - generic [ref=e268]: 
+                    - text: Generate
+                - button [ref=e269] [cursor=pointer]:
+                    - generic [ref=e270]: 
+                    - text: Code
+                - button [ref=e271] [cursor=pointer]:
+                    - generic [ref=e272]: 
+                    - text: Markdown
+            - listitem "code cell" [ref=e428]:
+                - generic [ref=e429]:
+                    - generic "Execution Order" [ref=e432]:
+                        - generic [ref=e433]: "[ ]"
+                    - generic [ref=e436]:
+                        - code [ref=e438]:
+                            - generic [ref=e439]:
+                                - textbox "Editor content"
+                                - textbox [ref=e440]
+                                - generic [ref=e443]:
+                                    - generic [ref=e446] [cursor=pointer]: 
+                                    - generic [ref=e448] [cursor=pointer]: 
+                                    - generic [ref=e452] [cursor=pointer]: 
+                                - generic [ref=e482]:
+                                    - generic [ref=e484]: with make_user(id) as (
+                                    - generic [ref=e486]: select id from app_private
+                                    - generic [ref=e488]: .really_create_user('bob', 'bob@test.com', true, 'bob', null)
+                                    - generic [ref=e490]: ),
+                                    - generic [ref=e492]: make_session as (
+                                    - generic [ref=e494]: insert into app_private.sessions (user_id) values ((select id from make_user)) returning *
+                                    - generic [ref=e496]: )
+                                    - generic [ref=e498]: select set_config('my.session_id', (select uuid from make_session)::text, true);
+                                    - generic [ref=e501]: select * from app_public.create_post('Hello world', 'my hands are typing words', 'private')
+                                    - generic [ref=e503]: union all
+                                    - generic [ref=e505]: select * from app_public.create_post('testing', 'This is another test post with more unique words', 'private')
+                                    - generic [ref=e507]: union all
+                                    - generic [ref=e509]: select * from app_public.create_post('sphinx of black quartz, judge my vow', 'The five boxing wizards jump quickly', 'private');
+                        - generic "PostgreSQL" [ref=e514] [cursor=pointer]
+                    - text: 
+                    - toolbar [ref=e519]:
+                        - button "Start Chat to Generate Code (Ctrl+I)" [ref=e520] [cursor=pointer]:
+                            - generic [ref=e521]: 
+                            - text: Generate
+                        - button "Add Code Cell (Ctrl+Enter)" [ref=e522] [cursor=pointer]:
+                            - generic [ref=e523]: 
+                            - text: Code
+                        - button "Add Markdown Cell" [ref=e524] [cursor=pointer]:
+                            - generic [ref=e525]: 
+                            - text: Markdown
+            - listitem "code cell" [ref=e527]:
+                - generic [ref=e528]:
+                    - generic "Execution Order" [ref=e531]:
+                        - generic [ref=e532]: "[ ]"
+                    - generic [ref=e535]:
+                        - code [ref=e537]:
+                            - generic [ref=e538]:
+                                - textbox "Editor content"
+                                - textbox [ref=e539]
+                                - generic [ref=e542]:
+                                    - generic [ref=e545] [cursor=pointer]: 
+                                    - generic [ref=e547] [cursor=pointer]: 
+                                    - generic [ref=e612] [cursor=pointer]: 
+                                - generic [ref=e557]:
+                                    - generic [ref=e559]: with make_user(id) as (
+                                    - generic [ref=e561]: select id from app_private
+                                    - generic [ref=e563]: .really_create_user('charlie', 'charlie@test.com', true, 'charlie', null)
+                                    - generic [ref=e635]: ),
+                                    - generic [ref=e637]: make_session as (
+                                    - generic [ref=e639]: insert into app_private.sessions (user_id) values ((select id from make_user)) returning *
+                                    - generic [ref=e641]: )
+                                    - generic [ref=e643]: select set_config('my.session_id', (select uuid from make_session)::text, true);
+                                    - generic [ref=e646]: select * from app_public.create_post('Hello world', 'my hands are typing words', 'private')
+                                    - generic [ref=e648]: union all
+                                    - generic [ref=e650]: select * from app_public.create_post('testing', 'This is another test post with more unique words', 'private')
+                                    - generic [ref=e652]: union all
+                                    - generic [ref=e654]: select * from app_public.create_post('sphinx of black quartz, judge my vow', 'The five boxing wizards jump quickly', 'private');
+                        - generic "PostgreSQL" [ref=e568] [cursor=pointer]
+                    - text: 
+                    - toolbar [ref=e573]:
+                        - button "Start Chat to Generate Code (Ctrl+I)" [ref=e574] [cursor=pointer]:
+                            - generic [ref=e575]: 
+                            - text: Generate
+                        - button "Add Code Cell (Ctrl+Enter)" [ref=e576] [cursor=pointer]:
+                            - generic [ref=e577]: 
+                            - text: Code
+                        - button "Add Markdown Cell" [ref=e578] [cursor=pointer]:
+                            - generic [ref=e579]: 
+                            - text: Markdown
+            - listitem "code cell" [ref=e273]:
+                - generic [ref=e274]:
+                    - generic "Execution Order" [ref=e291]:
+                        - generic [ref=e292]: "[ ]"
+                    - generic [ref=e301]:
+                        - code [ref=e655]:
+                            - generic [ref=e656]:
+                                - textbox "Editor content"
+                                - textbox [ref=e657]
+                                - generic [ref=e667]: select * from app_public.top_posts();
+                        - generic "PostgreSQL" [ref=e668] [cursor=pointer]
+                    - text: 
+                    - toolbar [ref=e329]:
+                        - button "Start Chat to Generate Code (Ctrl+I)" [ref=e330] [cursor=pointer]:
+                            - generic [ref=e331]: 
+                            - text: Generate
+                        - button "Add Code Cell (Ctrl+Enter)" [ref=e332] [cursor=pointer]:
+                            - generic [ref=e333]: 
+                            - text: Code
+                        - button "Add Markdown Cell" [ref=e334] [cursor=pointer]:
+                            - generic [ref=e335]: 
+                            - text: Markdown
+            - listitem "code cell" [ref=e669]:
+                - generic [ref=e670]:
+                    - generic "Execution Order" [ref=e673]:
+                        - generic [ref=e674]: "[ ]"
+                    - generic [ref=e677]:
+                        - code [ref=e679]:
+                            - generic [ref=e680]:
+                                - textbox "Editor content"
+                                - textbox [ref=e681]
+                                - generic [ref=e691]: rollback;
+                        - generic "PostgreSQL" [ref=e696] [cursor=pointer]
+                    - text: 
+                    - toolbar [ref=e701]:
+                        - button "Start Chat to Generate Code (Ctrl+I)" [ref=e702] [cursor=pointer]:
+                            - generic [ref=e703]: 
+                            - text: Generate
+                        - button "Add Code Cell (Ctrl+Enter)" [ref=e704] [cursor=pointer]:
+                            - generic [ref=e705]: 
+                            - text: Code
+                        - button "Add Markdown Cell" [ref=e706] [cursor=pointer]:
+                            - generic [ref=e707]: 
+                            - text: Markdown
+    - iframe [active] [ref=e712]:
+        - document [ref=f4e1]:
+            - iframe [active] [ref=f4e2]:
+                - document [active] [ref=f5e1]:
+                    - generic [ref=f5e4]:
+                        - generic [ref=f5e5]:
+                            - heading "Sign In" [level=2] [ref=f5e6]
+                            - paragraph [ref=f5e7]: Sign in to your postgres.garden account
+                        - generic [ref=f5e9]:
+                            - generic [ref=f5e10]: Email or Username
+                            - textbox "you@example.com" [ref=f5e11]

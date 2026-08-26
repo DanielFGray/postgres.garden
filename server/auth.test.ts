@@ -10,9 +10,11 @@
 
 import { describe, expect, layer } from "@effect/vitest";
 import { Context, Effect, Layer, pipe } from "effect";
+import * as S from "effect/Schema";
+import crypto from "node:crypto";
 import { HttpApiBuilder, HttpServer } from "@effect/platform";
-import { PgRootDB } from "./db.js";
-import { HttpApiLive } from "./httpapi/server.js";
+import { asRoot, DatabaseLive } from "./db.js";
+import { HttpApiLive } from "./apiHandlers.js";
 import { valkey } from "./valkey.js";
 import { testingServer } from "./testing.js";
 
@@ -30,7 +32,7 @@ class WebHandler extends Context.Tag("test/WebHandler")<
     Effect.acquireRelease(
       Effect.sync(() =>
         HttpApiBuilder.toWebHandler(
-          Layer.mergeAll(HttpApiLive, HttpServer.layerContext),
+          Layer.mergeAll(HttpApiLive, HttpServer.layerContext).pipe(Layer.provide(DatabaseLive)),
         ),
       ),
       ({ dispose }) => Effect.promise(() => dispose()),
@@ -49,16 +51,15 @@ class TestingWebHandler extends Context.Tag("test/TestingWebHandler")<
 }
 
 /** Shared layer: in-process HTTP + direct DB for cleanup. */
-const TestLayer = Layer.mergeAll(WebHandler.Live, TestingWebHandler.Live, PgRootDB.Live);
+const TestLayer = Layer.mergeAll(WebHandler.Live, TestingWebHandler.Live, DatabaseLive);
 
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-const randomSuffix = () => Math.random().toString(36).substring(2, 10);
+const randomSuffix = () => crypto.randomUUID().replaceAll("-", "").substring(0, 8);
 
-const parseCookie = (headers: Headers): string =>
-  headers.get("set-cookie")?.split(";")[0] ?? "";
+const parseCookie = (headers: Headers): string => headers.get("set-cookie")?.split(";")[0] ?? "";
 
 const sessionIdFromCookie = (cookie: string): string =>
   decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
@@ -68,52 +69,45 @@ const sessionIdFromCookie = (cookie: string): string =>
 // ---------------------------------------------------------------------------
 
 /** Send an HTTP request through the in-process handler. */
-const http = (
+const http = Effect.fnUntraced(function* (
   method: string,
   path: string,
   opts?: { body?: unknown; cookie?: string },
-) =>
-  Effect.gen(function*() {
-    const { fetch } = yield* WebHandler;
-    const headers: Record<string, string> = {};
-    if (opts?.body) headers["Content-Type"] = "application/json";
-    if (opts?.cookie) headers["Cookie"] = opts.cookie;
+) {
+  const { fetch } = yield* WebHandler;
+  const headers: Record<string, string> = {};
+  if (opts?.body) headers["Content-Type"] = "application/json";
+  if (opts?.cookie) headers["Cookie"] = opts.cookie;
 
-    const response = yield* Effect.tryPromise(() =>
-      fetch(
-        new Request(`http://localhost${path}`, {
-          method,
-          headers,
-          body: opts?.body ? JSON.stringify(opts.body) : undefined,
-        }),
-      ),
-    );
+  const body = opts?.body ? yield* S.encode(S.parseJson(S.Unknown))(opts.body) : undefined;
 
-    return {
-      status: response.status,
-      headers: response.headers,
-      json: <T = unknown>() =>
-        Effect.tryPromise(() => response.json() as Promise<T>),
-    } as const;
-  });
+  const response = yield* Effect.tryPromise(() =>
+    fetch(
+      new Request(`http://localhost${path}`, {
+        method,
+        headers,
+        body,
+      }),
+    ),
+  );
+
+  return {
+    status: response.status,
+    headers: response.headers,
+    json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
+  } as const;
+});
 
 /** Delete a user by username. Errors are swallowed (cleanup must not fail tests). */
 const deleteUser = (username: string) =>
   pipe(
-    PgRootDB,
-    Effect.flatMap((db) =>
-      db
-        .deleteFrom("app_public.users")
-        .where("username", "=", username),
-    ),
+    asRoot((db) => db.deleteFrom("app_public.users").where("username", "=", username)),
     Effect.ignore,
   );
 
 /** Run an effect with guaranteed user cleanup afterward. */
-const withCleanup = <A, E, R>(
-  username: string,
-  effect: Effect.Effect<A, E, R>,
-) => Effect.ensuring(effect, deleteUser(username));
+const withCleanup = <A, E, R>(username: string, effect: Effect.Effect<A, E, R>) =>
+  Effect.ensuring(effect, deleteUser(username));
 
 /** Register a user via the HTTP API. */
 const register = (username: string) =>
@@ -132,8 +126,8 @@ const registerAndGetCookie = (username: string) =>
     Effect.map((res) => parseCookie(res.headers)),
   );
 
-/** Send request to /api/testingCommand endpoints through in-process testing server. */
-const testingHttp = (
+/** Send request to /api/testing endpoints through in-process testing server. */
+const testingHttp = Effect.fnUntraced(function* (
   method: string,
   path: string,
   opts?: {
@@ -142,33 +136,35 @@ const testingHttp = (
     cookie?: string;
     redirect?: RequestRedirect;
   },
+) {
+  const { fetch } = yield* TestingWebHandler;
+  const headers: Record<string, string> = {};
+  if (opts?.body) headers["Content-Type"] = "application/json";
+  if (opts?.cookie) headers["Cookie"] = opts.cookie;
+  const query = opts?.query ? `?${new URLSearchParams(opts.query).toString()}` : "";
+  const body = opts?.body ? yield* S.encode(S.parseJson(S.Unknown))(opts.body) : undefined;
+  const response = yield* Effect.tryPromise(() =>
+    fetch(
+      new Request(`http://localhost/api/testing${path}${query}`, {
+        method,
+        headers,
+        redirect: opts?.redirect,
+        body,
+      }),
+    ),
+  );
+
+  return {
+    status: response.status,
+    headers: response.headers,
+    json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
+  } as const;
+});
+
+const createTestUser = (
+  username: string,
+  options?: { verified?: "true" | "false"; password?: string },
 ) =>
-  Effect.gen(function* () {
-    const { fetch } = yield* TestingWebHandler;
-    const headers: Record<string, string> = {};
-    if (opts?.body) headers["Content-Type"] = "application/json";
-    if (opts?.cookie) headers["Cookie"] = opts.cookie;
-    const query = opts?.query ? `?${new URLSearchParams(opts.query).toString()}` : "";
-    const response = yield* Effect.tryPromise(() =>
-      fetch(
-        new Request(`http://localhost/api/testingCommand${path}${query}`, {
-          method,
-          headers,
-          redirect: opts?.redirect,
-          body: opts?.body ? JSON.stringify(opts.body) : undefined,
-        }),
-      ),
-    );
-
-    return {
-      status: response.status,
-      headers: response.headers,
-      json: <T = unknown>() =>
-        Effect.tryPromise(() => response.json() as Promise<T>),
-    } as const;
-  });
-
-const createTestUser = (username: string, options?: { verified?: "true" | "false"; password?: string }) =>
   testingHttp("GET", "/createUser", {
     query: {
       username,
@@ -190,7 +186,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_reg_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const res = yield* register(username);
           const body = yield* res.json<{ id: string; username: string }>();
 
@@ -209,7 +205,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_dup_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           yield* register(username);
           const res = yield* register(username);
           expect(res.status).toBe(409);
@@ -225,7 +221,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_me_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const cookie = yield* registerAndGetCookie(username);
 
           const res = yield* http("GET", "/me", { cookie });
@@ -238,7 +234,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
     });
 
     it.effect("/me returns null for invalid session token", () =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const res = yield* http("GET", "/me", {
           cookie: "session=invalid.token",
         });
@@ -253,7 +249,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_evict_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const cookie = yield* registerAndGetCookie(username);
           const id = sessionIdFromCookie(cookie);
 
@@ -277,7 +273,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_login_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           yield* register(username);
 
           const res = yield* http("POST", "/login", {
@@ -299,7 +295,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_loginusr_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           yield* register(username);
 
           const res = yield* http("POST", "/login", {
@@ -320,7 +316,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
       const username = `test_logout_${randomSuffix()}`;
       return withCleanup(
         username,
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           yield* register(username);
 
           // Login for a fresh session

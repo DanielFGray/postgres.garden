@@ -19,27 +19,27 @@ const otlpEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
 // Register auto-instrumentations globally (hooks into pg, ioredis, undici)
 // These attach to whatever TracerProvider is registered globally by NodeSdk
 registerInstrumentations({
-	instrumentations: [
-		new PgInstrumentation(),
-		new IORedisInstrumentation(),
-		new UndiciInstrumentation(),
-	],
+  instrumentations: [
+    new PgInstrumentation(),
+    new IORedisInstrumentation(),
+    new UndiciInstrumentation(),
+  ],
 });
 
 const NodeSdkLive = NodeSdk.layer(() => ({
-	resource: { serviceName: "postgres-garden" },
-	spanProcessor: otlpEndpoint
-		? new BatchSpanProcessor(new OTLPTraceExporter({ url: `${otlpEndpoint}/v1/traces` }))
-		: undefined,
-	metricReader: otlpEndpoint
-		? new PeriodicExportingMetricReader({
-				exporter: new OTLPMetricExporter({ url: `${otlpEndpoint}/v1/metrics` }),
-				exportIntervalMillis: 60_000,
-			})
-		: undefined,
-	logRecordProcessor: otlpEndpoint
-		? new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${otlpEndpoint}/v1/logs` }))
-		: undefined,
+  resource: { serviceName: "postgres-garden" },
+  spanProcessor: otlpEndpoint
+    ? new BatchSpanProcessor(new OTLPTraceExporter({ url: `${otlpEndpoint}/v1/traces` }))
+    : undefined,
+  metricReader: otlpEndpoint
+    ? new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter({ url: `${otlpEndpoint}/v1/metrics` }),
+        exportIntervalMillis: 60_000,
+      })
+    : undefined,
+  logRecordProcessor: otlpEndpoint
+    ? new BatchLogRecordProcessor(new OTLPLogExporter({ url: `${otlpEndpoint}/v1/logs` }))
+    : undefined,
 }));
 
 // DevTools layer connects via WebSocket to effect-devtui (port 34437)

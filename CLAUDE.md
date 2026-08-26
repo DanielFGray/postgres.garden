@@ -17,7 +17,7 @@
 
 ### Server (`server/`)
 
-Bun + Effect Platform backend. Look at `server/httpapi/` for routes and `server/layers/` for service layers. SSR uses Effect HttpApi contracts. Kysely for DB queries with `withAuthContext()` for RLS.
+Bun + Effect Platform backend. Look at `server/apiHandlers.ts` for routes and `server/services/` for service layers. SSR uses Effect HttpApi contracts. Kysely for DB queries, scoped to the caller's session via `asVisitor()`/`asRoot()` in `server/db.ts` for RLS.
 
 ### Client (`src/`)
 
@@ -41,14 +41,14 @@ Run `prog prime` for workflow context
 **Quick reference:**
 
 ```
-prog ready -p pg.garden         # Find unblocked work
-prog add "Title" -p pg.garden   # Create task
+prog ready -p postgres.garden         # Find unblocked work
+prog add "Title" -p postgres.garden   # Create task
 prog start <id>                 # Claim work
 prog log <id> "msg"             # Log progress
 prog done <id>                  # Complete work
 ```
 
-MUST use `-p pg.garden` for all commands that dont have an <id>
+MUST use `-p postgres.garden` for all commands that dont have an <id>
 
 For full workflow: `prog prime`
 

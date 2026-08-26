@@ -1,0 +1,32 @@
+GUIDANCE for @effect/language-service diagnostics (rule -> fix):
+- asyncFunction: rewrite `async function`/`async () =>` bodies as Effect.gen(function* () {...}) or Effect.tryPromise, not async/await.
+- globalConsole / globalConsoleInEffect: replace console.log/warn/error with Effect.log / Effect.logWarning / Effect.logError (inside Effect code) or a Logger (outside).
+- globalErrorInEffectCatch / globalErrorInEffectFailure / extendsNativeError: don't use global `Error` or `class X extends Error` in the Effect failure channel. Define a `class XError extends Schema.TaggedError<XError>()("XError", { cause: Schema.optional(Schema.Unknown), ... })` and fail/wrap with that instead.
+- globalDate / globalDateInEffect: replace `new Date()` with `DateTime.now` (an Effect) or `DateTime.unsafeNow()` only outside Effect.
+- newPromise: replace `new Promise((resolve, reject) => ...)` with `Effect.async`, `Effect.promise`, or `Effect.tryPromise`.
+- runEffectInsideEffect: don't call `Effect.runPromise`/`Effect.runFork` from inside an Effect.gen/pipe chain; use `yield*` on the child Effect directly, or `Effect.runtime`/`Runtime.runPromise` if a raw promise boundary is truly required.
+- globalTimers: replace `setTimeout`/`setInterval` with `Effect.sleep` or `Schedule`.
+- unnecessaryFailYieldableError: `yield* Effect.fail(err)` -> `yield* err` (a TaggedError is already yieldable).
+- unnecessaryEffectGen: an `Effect.gen(function* () { return X })` with a single return and no yields -> just `Effect.succeed(X)` or drop the wrapper.
+- nodeBuiltinImport: replace `node:path`/`node:fs`/etc with the `@effect/platform` equivalents (`Path`, `FileSystem`, etc from `@effect/platform`), obtained via `yield* Path.Path` inside Effect.gen.
+- preferSchemaOverJson: replace `JSON.parse`/`JSON.stringify` with `Schema.decodeUnknown(Schema.parseJson(schema))` / `Schema.encode(Schema.parseJson(schema))` (use `Schema.Unknown` if shape isn't known).
+- instanceOfSchema: replace `x instanceof SomeSchemaClass` with `Schema.is(SomeSchema)(x)`.
+- globalRandom: replace `Math.random()` with the Effect `Random` service (`yield* Random.next`).
+- catchToOrElseSucceed: `Effect.catchAll(() => Effect.succeed(x))` -> `Effect.orElseSucceed(() => x)`.
+- flatMapToMap: `Effect.flatMap(x => Effect.succeed(f(x)))` -> `Effect.map(f)`.
+- effectSucceedWithVoid: `Effect.succeed(undefined)` / `Effect.succeed(void 0)` -> `Effect.void`.
+- processEnv / processEnvInEffect: replace `process.env.X` with Effect's `Config` module (`Config.string("X")`, etc), read via `yield*` in Effect code.
+- effectInFailure: don't put an Effect value in the failure/error channel; only put actual error values there.
+- unnecessaryTypeofType: `typeof someValue.Type` in a type position can just reference the named type directly (e.g. `User`) instead.
+- leakingRequirements: a Layer/Effect is leaking a requirement it should provide internally; see https://effect.website/docs/requirements-management/layers/#avoiding-requirement-leakage - satisfy dependencies inside the layer construction rather than exposing them upward.
+- multipleEffectProvide: chained `.pipe(Effect.provide(A), Effect.provide(B))` -> combine into one `Effect.provide(Layer.mergeAll(A, B))` (or a single merged layer).
+- multipleCatchTag: consecutive `.pipe(Effect.catchTag(...), Effect.catchTag(...))` -> a single `Effect.catchTags({...})`.
+- catchUnfailableEffect: an error-handling branch (catchAll/catchTag/etc) sits after an Effect that can never fail (e.g. E = never) — the handler is dead code; remove it (or fix the upstream effect if failure was actually intended).
+
+General rules for all fixes (from project CLAUDE.md):
+- Never throw/try-catch; use `yield*` and `Effect.catch*`.
+- Never leave `unknown` in Error or Requirements channels.
+- Use `Schema.TaggedError` (not `Data.TaggedError`) for tagged errors.
+- Use `@effect/platform` modules (FileSystem, Path, etc) instead of `node:` builtins.
+- Prefer `Match` over switch/if chains on the same value.
+- Prefer `Effect.fnUntraced` over functions returning `Effect.gen`.

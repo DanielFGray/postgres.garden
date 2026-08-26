@@ -1,0 +1,10 @@
+- generic [ref=e3]:
+    - generic [ref=e4]: '[plugin:builtin:vite-wasm-fallback] "ESM integration proposal for Wasm" is not supported currently. Use plugin-wasm or other community plugins to handle this. Alternatively, you can use `.wasm?init` or `.wasm?url`. See https://vitejs.dev/guide/features.html#webassembly for more details.'
+    - generic [ref=e6]:
+        - text: Click outside, press Esc key, or fix the code to dismiss.You can also disable this overlay by setting
+        - code [ref=e7]: server.hmr.overlay
+        - text: to
+        - code [ref=e8]: "false"
+        - text: in
+        - code [ref=e9]: vite.config.ts
+        - text: .

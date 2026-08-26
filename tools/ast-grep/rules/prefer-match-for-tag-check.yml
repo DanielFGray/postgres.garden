@@ -1,0 +1,12 @@
+id: prefer-match-for-tag-check
+language: TypeScript
+severity: warning
+message: >-
+  Prefer Effect Match for discriminated-union _tag checks. Use
+  Match.value(...).pipe(Match.tag(...), Match.orElse(...)) for selected cases;
+  Match.valueTags(...) for a direct tag-to-handler map; or
+  Match.type(...).pipe(Match.tags(...), Match.exhaustive) for a reusable
+  exhaustive matcher. Use Match.tagsExhaustive(...) when the handler map is
+  already available as an object.
+rule:
+  pattern: if ($A._tag === $B) $$$BODY

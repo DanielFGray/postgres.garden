@@ -85,7 +85,12 @@ interface EmscriptenFS {
 
 function setupFsPort(port: MessagePort) {
   port.onmessage = (msg: MessageEvent) => {
-    const { id, type } = msg.data as { id: number; type: string; path?: string; content?: ArrayBuffer };
+    const { id, type } = msg.data as {
+      id: number;
+      type: string;
+      path?: string;
+      content?: ArrayBuffer;
+    };
 
     if (!pgInstance) {
       port.postMessage({ id, ok: false, error: "PGlite not initialized" });
@@ -97,7 +102,12 @@ function setupFsPort(port: MessagePort) {
 
     switch (type) {
       case "writeFile": {
-        const { path, content } = msg.data as { path: string; content: ArrayBuffer; id: number; type: string };
+        const { path, content } = msg.data as {
+          path: string;
+          content: ArrayBuffer;
+          id: number;
+          type: string;
+        };
         try {
           ensureParentDirs(FS, path);
           FS.writeFile(path, new Uint8Array(content));
@@ -153,8 +163,8 @@ self.addEventListener("message", (e: MessageEvent) => {
 });
 
 void worker({
-  async init(options) {
-    const db = await PGlite.create({
+  init(options) {
+    return PGlite.create({
       dataDir: options.dataDir,
       extensions: {
         vector,
@@ -182,17 +192,17 @@ void worker({
         tsm_system_time,
         uuid_ossp,
       },
+    }).then((db) => {
+      // Store for FS sync access and create /workspace mount point
+      pgInstance = db;
+      try {
+        // oxlint-disable-next-line typescript/no-explicit-any -- Module.FS not in public types
+        (db as any).Module.FS.mkdir("/workspace");
+      } catch {
+        // already exists (e.g. after reinitialize)
+      }
+
+      return db;
     });
-
-    // Store for FS sync access and create /workspace mount point
-    pgInstance = db;
-    try {
-      // oxlint-disable-next-line typescript/no-explicit-any -- Module.FS not in public types
-      (db as any).Module.FS.mkdir("/workspace");
-    } catch {
-      // already exists (e.g. after reinitialize)
-    }
-
-    return db;
   },
 });

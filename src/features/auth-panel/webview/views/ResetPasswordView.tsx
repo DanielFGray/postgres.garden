@@ -1,76 +1,65 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, Show } from "solid-js";
 import { apiRequest } from "../api";
+import { runRequest } from "../../../webview/request";
 
-const submittingAtom = Atom.make(false);
-const errorAtom = Atom.make<string | null>(null);
-const successAtom = Atom.make(false);
-
-let _pendingUserId = "";
-let _pendingToken = "";
+// Set by the host's `init-view` message before this view mounts. Signals, not
+// plain variables: the view renders once, so a plain write after mount would
+// never reach the DOM.
+const [resetParams, setParams] = createSignal({ userId: "", token: "" });
 
 export function setResetParams(userId: string, token: string) {
-  _pendingUserId = userId;
-  _pendingToken = token;
+  setParams({ userId, token });
 }
 
-export const ResetPasswordView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const submitting = yield* Atom.get(submittingAtom);
-    const error = yield* Atom.get(errorAtom);
-    const success = yield* Atom.get(successAtom);
+export const ResetPasswordView = (props: { onNavigate: (view: string) => void }) => {
+  const [submitting, setSubmitting] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const [success, setSuccess] = createSignal(false);
 
-    function handleSubmit(e: Event) {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const data = new FormData(form);
-      const password = data.get("password") as string;
-      const confirmPassword = data.get("confirmPassword") as string;
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = new FormData(form);
+    const getText = (name: string) => {
+      const value = data.get(name);
+      return value instanceof File ? "" : (value ?? "");
+    };
+    const password = getText("password");
+    const confirmPassword = getText("confirmPassword");
 
-      registry.set(errorAtom, null);
+    setError(null);
 
-      if (password.length < 8) {
-        registry.set(errorAtom, "Password must be at least 8 characters");
-        return;
-      }
-      if (password !== confirmPassword) {
-        registry.set(errorAtom, "Passwords do not match");
-        return;
-      }
-
-      registry.set(submittingAtom, true);
-
-      void Effect.runFork(
-        apiRequest("/api/resetPassword", "POST", {
-          userId: data.get("userId"),
-          token: data.get("token"),
-          password,
-        }, {
-          action: "auth.reset_password.submit",
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              registry.set(successAtom, true);
-            }),
-          ),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(errorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(submittingAtom, false);
-            }),
-          ),
-        ),
-      );
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
     }
 
-    if (success) {
-      return (
-        <div class="auth-view">
+    setSubmitting(true);
+
+    void runRequest(
+      apiRequest(
+        "/api/resetPassword",
+        "POST",
+        { userId: getText("userId"), token: getText("token"), password },
+        { action: "auth.reset_password.submit" },
+      ),
+    )
+      .then(
+        () => setSuccess(true),
+        (reason: Error) => setError(reason.message),
+      )
+      .finally(() => setSubmitting(false));
+  }
+
+  return (
+    <Show
+      when={!success()}
+      fallback={
+        <div class="auth-view" data-pw="password-reset-success">
           <div class="auth-header">
             <h2>Password Reset</h2>
             <p class="auth-subtitle">Your password has been reset successfully.</p>
@@ -79,42 +68,51 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
           <button
             class="button auth-button-primary"
             onClick={() => {
-              registry.set(successAtom, false);
+              setSuccess(false);
               props.onNavigate("login");
             }}
           >
             Sign In
           </button>
         </div>
-      );
-    }
-
-    return (
+      }
+    >
       <div class="auth-view">
         <div class="auth-header">
           <h2>Reset Password</h2>
           <p class="auth-subtitle">Enter your new password.</p>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          {_pendingUserId ? (
-            <>
-              <input type="hidden" name="userId" value={_pendingUserId} />
-              <input type="hidden" name="token" value={_pendingToken} />
-            </>
-          ) : (
-            <>
-              <div class="auth-field">
-                <label>User ID</label>
-                <input type="text" name="userId" class="setting-input" />
-              </div>
+        <form onSubmit={handleSubmit} data-pw="reset-password-form">
+          <Show
+            when={resetParams().userId}
+            fallback={
+              <>
+                <div class="auth-field">
+                  <label>User ID</label>
+                  <input
+                    type="text"
+                    name="userId"
+                    class="setting-input"
+                    data-pw="reset-userid-input"
+                  />
+                </div>
 
-              <div class="auth-field">
-                <label>Reset Token</label>
-                <input type="text" name="token" class="setting-input" />
-              </div>
-            </>
-          )}
+                <div class="auth-field">
+                  <label>Reset Token</label>
+                  <input
+                    type="text"
+                    name="token"
+                    class="setting-input"
+                    data-pw="reset-token-input"
+                  />
+                </div>
+              </>
+            }
+          >
+            <input type="hidden" name="userId" value={resetParams().userId} />
+            <input type="hidden" name="token" value={resetParams().token} />
+          </Show>
 
           <div class="auth-field">
             <label>New Password</label>
@@ -123,24 +121,37 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
               name="password"
               class="setting-input"
               placeholder="At least 8 characters"
-              autoFocus={!!_pendingUserId}
+              autofocus={!!resetParams().userId}
+              data-pw="reset-password-input"
             />
           </div>
 
           <div class="auth-field">
             <label>Confirm New Password</label>
-            <input type="password" name="confirmPassword" class="setting-input" />
+            <input
+              type="password"
+              name="confirmPassword"
+              class="setting-input"
+              data-pw="reset-confirm-password-input"
+            />
           </div>
 
-          {error && (
-            <div class="auth-error">
-              <i class="codicon codicon-error" />
-              <span>{error}</span>
-            </div>
-          )}
+          <Show when={error()}>
+            {(message) => (
+              <div class="auth-error" data-pw="reset-password-error">
+                <i class="codicon codicon-error" />
+                <span>{message()}</span>
+              </div>
+            )}
+          </Show>
 
-          <button class="button auth-button-primary" type="submit" disabled={submitting}>
-            {submitting ? "Resetting..." : "Reset Password"}
+          <button
+            class="button auth-button-primary"
+            type="submit"
+            disabled={submitting()}
+            data-pw="reset-submit-button"
+          >
+            {submitting() ? "Resetting..." : "Reset Password"}
           </button>
         </form>
 
@@ -150,5 +161,6 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
           </button>
         </div>
       </div>
-    );
-  });
+    </Show>
+  );
+};

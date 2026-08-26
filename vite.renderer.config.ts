@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
 import vue from "@vitejs/plugin-vue";
+import solid from "@solidjs/vite-plugin";
 
 /**
  * Vite plugin that captures extracted CSS and inlines it as a string export
@@ -49,16 +50,10 @@ function inlineCssPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [vue(), inlineCssPlugin()],
+  plugins: [vue(), solid(), inlineCssPlugin()],
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
     __APP_VERSION__: JSON.stringify("vendored"),
-  },
-  esbuild: {
-    jsx: "transform",
-    jsxFactory: "jsx",
-    jsxFragment: "Fragment",
-    jsxInject: `import { jsx, Fragment } from 'fibrae/jsx-runtime'`,
   },
   build: {
     lib: {

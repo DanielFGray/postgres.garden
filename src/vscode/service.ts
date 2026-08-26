@@ -1,7 +1,15 @@
-import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
+import {
+  ExtensionHostKind,
+  registerExtension,
+  type RegisterLocalProcessExtensionResult,
+} from "@codingame/monaco-vscode-api/extensions";
 import { Effect, Scope } from "effect";
 import type * as vscode from "vscode";
 import {
+  AI_CHAT_PARTICIPANT,
+  AI_CLEAR_PROVIDER,
+  AI_CONFIGURE_PROVIDER,
+  AI_MODEL_VENDOR,
   DATABASE_EXPLORER,
   DATABASE_MIGRATE,
   ERD_SHOW,
@@ -33,6 +41,19 @@ import { Workbench } from "../workbench";
 
 type VSCodeApi = typeof vscode;
 
+// The local extension host belongs to the workbench, which deliberately
+// outlives an HMR plugin scope. Removing it during a hot update can leave a
+// newly registered command disconnected from its extension host.
+let registeredExtension = import.meta.hot?.data.registeredExtension as
+  | RegisterLocalProcessExtensionResult
+  | undefined;
+
+if (import.meta.hot) {
+  import.meta.hot.dispose((data) => {
+    data.registeredExtension = registeredExtension;
+  });
+}
+
 const manifest: Parameters<typeof registerExtension>[0] = {
   name: "postgres.garden",
   publisher: "postgres.garden",
@@ -41,7 +62,16 @@ const manifest: Parameters<typeof registerExtension>[0] = {
   engines: { vscode: "*" },
   capabilities: { virtualWorkspaces: true },
   extensionKind: ["workspace"],
-  enabledApiProposals: ["scmActionButton"],
+  // Chat participants and language model providers are still proposed API;
+  // the extension is registered with `system: true` so they resolve.
+  enabledApiProposals: [
+    "scmActionButton",
+    "chatProvider",
+    "defaultChatParticipant",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate",
+    "languageModelThinkingPart",
+  ],
   contributes: {
     languages: [
       {
@@ -54,7 +84,22 @@ const manifest: Parameters<typeof registerExtension>[0] = {
     grammars: [
       { language: "sql", scopeName: "source.sql", path: "./syntaxes/sql.tmLanguage.json" },
     ],
+    chatParticipants: [
+      {
+        id: AI_CHAT_PARTICIPANT,
+        fullName: "postgres.garden",
+        name: "postgres",
+        isDefault: true,
+        modes: ["ask", "agent"],
+        locations: ["panel", "editor"],
+      },
+    ],
+    languageModelChatProviders: [
+      { vendor: AI_MODEL_VENDOR, displayName: "postgres.garden (bring your own key)" },
+    ],
     commands: [
+      { command: AI_CONFIGURE_PROVIDER, title: "AI: Configure Provider", icon: "$(key)" },
+      { command: AI_CLEAR_PROVIDER, title: "AI: Clear Stored Credentials", icon: "$(trash)" },
       { command: PGLITE_RESET, title: "Reset database", icon: "$(trash)" },
       { command: PGLITE_EXECUTE, title: "Execute SQL", icon: "$(notebook-execute)" },
       { command: SERVER_SYNC_COMMIT, title: "Save", icon: "$(cloud-upload)" },
@@ -208,23 +253,25 @@ type VSCodeServiceApi = {
     command: string,
     callback: (...args: readonly unknown[]) => unknown,
   ) => Effect.Effect<void, never, Scope.Scope>;
-  readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, never>;
+  readonly registerFileUrl: (
+    path: string,
+    url: string,
+  ) => Effect.Effect<void, never, Scope.Scope>;
 };
 
 export class VSCodeService extends Effect.Service<VSCodeService>()("app/VSCodeService", {
   dependencies: [Workbench.Default],
-  effect: Effect.gen(function*() {
-    const extension = registerExtension(manifest, ExtensionHostKind.LocalProcess, {
-      system: true,
+  effect: Effect.gen(function* () {
+    const extension = yield* Effect.sync(() => {
+      if (!registeredExtension) {
+        registeredExtension = registerExtension(manifest, ExtensionHostKind.LocalProcess, {
+          system: true,
+        });
+      }
+      return registeredExtension;
     });
 
-    const api = yield* Effect.tryPromise({
-      try: () => extension.getApi(),
-      catch: (error) =>
-        Effect.dieMessage(
-          `Failed to get VSCode API: ${error instanceof Error ? error.message : String(error)}`,
-        ),
-    });
+    const api = yield* Effect.tryPromise(() => extension.getApi()).pipe(Effect.orDie);
 
     const extensionUri = api.Uri.parse(window.location.origin);
 
@@ -237,9 +284,10 @@ export class VSCodeService extends Effect.Service<VSCodeService>()("app/VSCodeSe
       ).pipe(Effect.asVoid);
 
     const registerFileUrl: VSCodeServiceApi["registerFileUrl"] = (path, url) =>
-      Effect.sync(() => {
-        extension.registerFileUrl(path, url);
-      });
+      Effect.acquireRelease(
+        Effect.sync(() => extension.registerFileUrl(path, url)),
+        (disposable) => Effect.sync(() => disposable.dispose()),
+      ).pipe(Effect.asVoid);
 
     return {
       api,
@@ -248,4 +296,4 @@ export class VSCodeService extends Effect.Service<VSCodeService>()("app/VSCodeSe
       registerFileUrl,
     };
   }),
-}) { }
+}) {}

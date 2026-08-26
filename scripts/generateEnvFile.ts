@@ -1,17 +1,16 @@
 #!/usr/bin/env bun
 
-import path from "node:path";
 import crypto from "node:crypto";
 import dotenv from "dotenv";
 import { Prompt } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { FileSystem, Terminal } from "@effect/platform";
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import * as S from "effect/Schema";
 import { envSchema } from "../server/envSchema.js";
 import packageJson from "../package.json" with { type: "json" };
 
-const DOTENV_PATH = path.resolve(".env");
+const DOTENV_PATH = ".env";
 
 const generatePassword = (len: number) =>
   crypto.randomBytes(len).toString("base64").replace(/\W/g, "_");
@@ -39,7 +38,9 @@ interface FieldDef {
 }
 
 // Fields are resolved in declaration order - dependencies must come first
-const fieldDefs: Record<string, FieldDef> = {
+type FieldDefs = Record<string, FieldDef>;
+
+const fieldDefs: FieldDefs = {
   NODE_ENV: { derive: () => "development" },
 
   // Database connection basics
@@ -113,6 +114,9 @@ const resolveField = (
   if (existing[key]) return Effect.succeed(existing[key]);
 
   const def = fieldDefs[key];
+  // @effect-diagnostics effectSucceedWithVoid:off
+  // `Effect.void` is `Effect<void, ...>`, not assignable to this function's
+  // declared `Effect<string | undefined, ...>` return type.
   if (!def) return Effect.succeed(undefined);
 
   // Generated fields (passwords) - always auto-generate
@@ -157,7 +161,10 @@ const readDotenv = Effect.gen(function* () {
 
 const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const interactive = !process.env.NOCONFIRM;
+  const interactive = yield* Config.string("NOCONFIRM").pipe(
+    Effect.map(() => false),
+    Effect.orElseSucceed(() => true),
+  );
 
   const existing = yield* readDotenv;
 

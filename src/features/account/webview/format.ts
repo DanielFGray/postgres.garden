@@ -1,5 +1,7 @@
+import { DateTime } from "effect";
+
 export function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString(undefined, {
+  return DateTime.toDate(DateTime.unsafeMake(dateStr)).toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
     day: "numeric",

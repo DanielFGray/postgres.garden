@@ -2,8 +2,6 @@
   "permissions": {
     "allow": [
       "Bash(bun -e:*)",
-      "Bash(bun cypress run:*)",
-      "Bash(bun cypress:headless:*)",
       "Bash(bun eslint:*)",
       "Bash(bun lint:*)",
       "Bash(bun run build:*)",
@@ -92,7 +90,8 @@
       "WebFetch(domain:frontendmasters.com)",
       "WebFetch(domain:pglite.dev)",
       "mcp__effect-devtui__get_span_stats",
-      "Bash(jj diff:*)"
+      "Bash(jj diff:*)",
+      "Bash(bun playwright:*)"
     ]
   },
   "spinnerTipsEnabled": false,

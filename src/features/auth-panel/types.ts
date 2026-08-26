@@ -1,5 +1,13 @@
 import type { RequestTelemetryContext } from "../webview/requestTelemetry";
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
 /** Webview → Extension host messages */
 export type AuthWebviewMessage =
   | { type: "initialized" }
@@ -8,7 +16,7 @@ export type AuthWebviewMessage =
       id: string;
       endpoint: string;
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-      body?: unknown;
+      body?: JsonValue;
       telemetry?: RequestTelemetryContext;
     }
   | { type: "github-signin" }

@@ -1,0 +1,22 @@
+id: no-unknown-effect-channels
+language: TypeScript
+severity: error
+message: Effect channels must not use any or unknown; use never, a concrete type, or a generic parameter
+rule:
+  any:
+    - pattern: Effect.Effect<$A, unknown, $R>
+    - pattern: Effect.Effect<$A, any, $R>
+    - pattern: Effect.Effect<$A, $E, unknown>
+    - pattern: Effect.Effect<$A, $E, any>
+    - pattern: Stream.Stream<$A, unknown>
+    - pattern: Stream.Stream<$A, any>
+    - pattern: Stream.Stream<$A, $E, unknown>
+    - pattern: Stream.Stream<$A, $E, any>
+    - pattern: Fiber.Fiber<$A, unknown>
+    - pattern: Fiber.Fiber<$A, any>
+    - pattern: Deferred.Deferred<$A, unknown>
+    - pattern: Deferred.Deferred<$A, any>
+    - pattern: FiberMap.FiberMap<$K, $A, unknown>
+    - pattern: FiberMap.FiberMap<$K, $A, any>
+    - pattern: Cause.Cause<unknown>
+    - pattern: Cause.Cause<any>

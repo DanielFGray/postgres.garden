@@ -18,7 +18,7 @@ class WatchError extends Schema.TaggedError<WatchError>()("WatchError", {
 
 // For production builds, we need to explicitly define NODE_ENV
 // because esbuild inlines process.env.NODE_ENV at build time
-const isProductionBuild = process.env.NODE_ENV === "production";
+const isProductionBuild = import.meta.env?.NODE_ENV === "production";
 
 const config: BuildOptions = {
   bundle: true,
@@ -82,7 +82,7 @@ const runWatch = Effect.gen(function* () {
   yield* Effect.log("Watching for changes...");
 
   // Keep the process alive in watch mode
-  yield* Effect.never;
+  return yield* Effect.never;
 });
 
 const program = Effect.gen(function* () {
@@ -100,24 +100,24 @@ program.pipe(
     BuildError: (error) =>
       Effect.gen(function* () {
         yield* Effect.logError(`Build failed: ${error.message}`);
-        yield* Effect.fail(error);
+        return yield* error;
       }),
     ContextError: (error) =>
       Effect.gen(function* () {
         yield* Effect.logError(`Context creation failed: ${error.message}`);
-        yield* Effect.fail(error);
+        return yield* error;
       }),
     WatchError: (error) =>
       Effect.gen(function* () {
         yield* Effect.logError(`Watch mode failed: ${error.message}`);
-        yield* Effect.fail(error);
+        return yield* error;
       }),
   }),
   Effect.catchAll((error) =>
     Effect.gen(function* () {
       yield* Effect.logError("Unexpected error:");
       yield* Effect.logError(String(error));
-      yield* Effect.fail(error);
+      return yield* error;
     }),
   ),
   Effect.runFork,

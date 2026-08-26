@@ -3,6 +3,8 @@ import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { env } from "./assertEnv.js";
+import * as S from "effect/Schema";
+import { Match } from "effect";
 
 if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
   const loggerProvider = new LoggerProvider({
@@ -24,6 +26,10 @@ if (env.OTEL_EXPORTER_OTLP_ENDPOINT) {
 const logger = logs.getLogger("postgres-garden");
 
 type LogAttrs = Record<string, string | number | boolean>;
+const LoggableError = S.Union(
+  S.String,
+  S.Struct({ name: S.optional(S.String), message: S.String }),
+);
 
 export function logInfo(message: string, attrs?: LogAttrs) {
   logger.emit({
@@ -43,18 +49,28 @@ export function logWarn(message: string, attrs?: LogAttrs) {
   });
 }
 
-export function logError(message: string, error?: unknown, attrs?: LogAttrs) {
+export function logError(message: string, cause?: unknown, attrs?: LogAttrs) {
+  const parsed = cause === undefined ? undefined : S.decodeUnknownEither(LoggableError)(cause);
+  const exception =
+    parsed === undefined
+      ? {}
+      : Match.value(parsed).pipe(
+          Match.tags({
+            Left: () => ({ "exception.message": S.encodeSync(S.parseJson(S.Unknown))(cause) }),
+            Right: ({ right }) =>
+              typeof right === "string"
+                ? { "exception.message": right }
+                : { "exception.message": right.message },
+          }),
+          Match.exhaustive,
+        );
   logger.emit({
     severityNumber: SeverityNumber.ERROR,
     severityText: "ERROR",
     body: message,
     attributes: {
       ...attrs,
-      ...(error instanceof Error
-        ? { "exception.type": error.name, "exception.message": error.message }
-        : error != null
-          ? { "exception.message": JSON.stringify(error) }
-          : {}),
+      ...exception,
     },
   });
 }

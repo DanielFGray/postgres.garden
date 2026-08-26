@@ -1,7 +1,7 @@
-import * as Effect from "effect/Effect";
-import { Result } from "@effect-atom/atom";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, refresh, For, Show } from "solid-js";
 import { apiRequest } from "../api";
+import { createRequest, runRequest } from "../../../webview/request";
+import { SectionBoundary } from "../SectionBoundary";
 
 type UserEmail = {
   id: string;
@@ -11,213 +11,205 @@ type UserEmail = {
   created_at: string;
 };
 
-const emailsAtom = Atom.make(
+const loadEmails = () =>
   apiRequest<UserEmail[]>("/api/me/emails", "GET", undefined, {
     action: "account.emails.load",
-  }),
-);
+  });
 
-const addingEmailAtom = Atom.make(false);
-const actionLoadingAtom = Atom.make<string | null>(null);
-const mutationErrorAtom = Atom.make<string | null>(null);
+const testId = (email: string) =>
+  `email-settings-item-${email
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()}`;
 
-export const EmailsSection = () =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const result = yield* Atom.get(emailsAtom);
-    const addingEmail = yield* Atom.get(addingEmailAtom);
-    const actionLoading = yield* Atom.get(actionLoadingAtom);
-    const mutationError = yield* Atom.get(mutationErrorAtom);
+export const EmailsSection = () => {
+  const emails = createRequest(loadEmails);
+  const [addingEmail, setAddingEmail] = createSignal(false);
+  const [actionLoading, setActionLoading] = createSignal<string | null>(null);
+  const [mutationError, setMutationError] = createSignal<string | null>(null);
 
-    function handleMakePrimary(emailId: string) {
-      registry.set(actionLoadingAtom, emailId);
-      registry.set(mutationErrorAtom, null);
-      void Effect.runFork(
-        apiRequest("/api/makeEmailPrimary", "POST", { emailId }, {
-          action: "account.emails.make_primary",
-        }).pipe(
-          Effect.tap(() => Effect.sync(() => registry.refresh(emailsAtom))),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(mutationErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(actionLoadingAtom, null);
-            }),
-          ),
-        ),
-      );
-    }
+  const runAction = (
+    emailId: string,
+    request: ReturnType<typeof apiRequest>,
+    refreshAfter = false,
+  ) => {
+    setActionLoading(emailId);
+    setMutationError(null);
+    void runRequest(request)
+      .then(
+        () => refreshAfter && refresh(emails),
+        (error: Error) => setMutationError(error.message),
+      )
+      .finally(() => setActionLoading(null));
+  };
 
-    function handleResendVerification(emailId: string) {
-      registry.set(actionLoadingAtom, emailId);
-      registry.set(mutationErrorAtom, null);
-      void Effect.runFork(
-        apiRequest("/api/resendEmailVerificationCode", "POST", { emailId }, {
-          action: "account.emails.resend_verification",
-        }).pipe(
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(mutationErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(actionLoadingAtom, null);
-            }),
-          ),
-        ),
-      );
-    }
+  function handleMakePrimary(emailId: string) {
+    runAction(
+      emailId,
+      apiRequest(
+        "/api/makeEmailPrimary",
+        "POST",
+        { emailId },
+        { action: "account.emails.make_primary" },
+      ),
+      true,
+    );
+  }
 
-    function handleRemove(emailId: string) {
-      registry.set(actionLoadingAtom, emailId);
-      registry.set(mutationErrorAtom, null);
-      void Effect.runFork(
-        apiRequest("/api/me/emails/" + emailId, "DELETE", undefined, {
-          action: "account.emails.remove",
-        }).pipe(
-          Effect.tap(() => Effect.sync(() => registry.refresh(emailsAtom))),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(mutationErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(actionLoadingAtom, null);
-            }),
-          ),
-        ),
-      );
-    }
+  function handleResendVerification(emailId: string) {
+    runAction(
+      emailId,
+      apiRequest(
+        "/api/resendEmailVerificationCode",
+        "POST",
+        { emailId },
+        { action: "account.emails.resend_verification" },
+      ),
+    );
+  }
 
-    function handleAddEmail(e: Event) {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const data = new FormData(form);
-      const emailValue = (data.get("email") as string | null)?.trim();
-      if (!emailValue) return;
+  function handleRemove(emailId: string) {
+    runAction(
+      emailId,
+      apiRequest("/api/me/emails/" + emailId, "DELETE", undefined, {
+        action: "account.emails.remove",
+      }),
+      true,
+    );
+  }
 
-      registry.set(addingEmailAtom, true);
-      registry.set(mutationErrorAtom, null);
-      void Effect.runFork(
-        apiRequest("/api/me/emails", "POST", { email: emailValue }, {
-          action: "account.emails.add",
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              form.reset();
-              registry.refresh(emailsAtom);
-            }),
-          ),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(mutationErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(addingEmailAtom, false);
-            }),
-          ),
-        ),
-      );
-    }
+  function handleAddEmail(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = new FormData(form);
+    const emailValue = (data.get("email") as string | null)?.trim();
+    if (!emailValue) return;
 
-    return Result.builder(result)
-      .onInitial(() => <div class="section-loading">Loading emails...</div>)
-      .onError((error) => (
-        <div class="section-error">
-          <i class="codicon codicon-error" />
-          <span>{error.message}</span>
-          <button class="button" onClick={() => registry.refresh(emailsAtom)}>
-            Retry
-          </button>
+    setAddingEmail(true);
+    setMutationError(null);
+    void runRequest(
+      apiRequest("/api/me/emails", "POST", { email: emailValue }, { action: "account.emails.add" }),
+    )
+      .then(
+        () => {
+          form.reset();
+          refresh(emails);
+        },
+        (error: Error) => setMutationError(error.message),
+      )
+      .finally(() => setAddingEmail(false));
+  }
+
+  return (
+    <SectionBoundary loading="Loading emails..." retry={() => refresh(emails)}>
+      <div class="emails-section" data-pw="emails-section">
+        <div class="section-header">
+          <h2>Email Addresses</h2>
         </div>
-      ))
-      .onSuccess((emails) => (
-        <div class="emails-section">
-          <div class="section-header">
-            <h2>Email Addresses</h2>
-          </div>
 
-          {mutationError && (
-            <div class="section-error" style={{ marginBottom: "12px" }}>
+        <Show when={mutationError()}>
+          {(message) => (
+            <div
+              class="section-error"
+              style={{ "margin-bottom": "12px" }}
+              data-pw="email-settings-error"
+            >
               <i class="codicon codicon-error" />
-              <span>{mutationError}</span>
+              <span>{message()}</span>
             </div>
           )}
+        </Show>
 
-          <div class="email-list">
-            {emails.map((email) => (
-              <div class="field" key={email.id}>
+        <div class="email-list" data-pw="email-settings-list">
+          <For each={emails()}>
+            {(email) => (
+              <div class="field" data-pw={testId(email.email)}>
                 <div class="field-value email-row">
                   <span class="email-address">{email.email}</span>
                   <span class="email-badges">
-                    {email.is_primary && <span class="badge badge-primary">Primary</span>}
-                    {email.is_verified ? (
+                    <Show when={email.is_primary}>
+                      <span class="badge badge-primary" data-pw="email-settings-indicator-primary">
+                        Primary
+                      </span>
+                    </Show>
+                    <Show
+                      when={email.is_verified}
+                      fallback={
+                        <span
+                          class="badge badge-unverified"
+                          data-pw="email-settings-indicator-unverified"
+                        >
+                          Unverified
+                        </span>
+                      }
+                    >
                       <span class="badge badge-verified">
                         <i class="codicon codicon-verified-filled" /> Verified
                       </span>
-                    ) : (
-                      <span class="badge badge-unverified">Unverified</span>
-                    )}
+                    </Show>
                   </span>
                   <span class="email-actions">
-                    {email.is_verified && !email.is_primary && (
+                    <Show when={email.is_verified && !email.is_primary}>
                       <button
                         class="button"
-                        disabled={actionLoading === email.id}
+                        disabled={actionLoading() === email.id}
                         onClick={() => handleMakePrimary(email.id)}
+                        data-pw="email-settings-button-makeprimary"
                       >
                         Make Primary
                       </button>
-                    )}
-                    {!email.is_verified && (
+                    </Show>
+                    <Show when={!email.is_verified}>
                       <button
                         class="button"
-                        disabled={actionLoading === email.id}
+                        disabled={actionLoading() === email.id}
                         onClick={() => handleResendVerification(email.id)}
+                        data-pw="email-settings-button-resendverification"
                       >
                         Resend Verification
                       </button>
-                    )}
-                    {!email.is_primary && (
+                    </Show>
+                    <Show when={!email.is_primary}>
                       <button
                         class="button"
-                        disabled={actionLoading === email.id}
+                        disabled={actionLoading() === email.id}
                         onClick={() => handleRemove(email.id)}
+                        data-pw="email-settings-button-delete"
                       >
                         Remove
                       </button>
-                    )}
+                    </Show>
                   </span>
                 </div>
               </div>
-            ))}
-          </div>
-
-          <form class="add-email-form" onSubmit={handleAddEmail}>
-            <div class="field">
-              <label>Add Email Address</label>
-              <div class="add-email-row">
-                <input
-                  type="email"
-                  name="email"
-                  class="email-input"
-                  placeholder="email@example.com"
-                  disabled={addingEmail}
-                />
-                <button type="submit" class="button" disabled={addingEmail}>
-                  Add
-                </button>
-              </div>
-            </div>
-          </form>
+            )}
+          </For>
         </div>
-      ))
-      .render();
-  });
+
+        <form class="add-email-form" onSubmit={handleAddEmail} data-pw="settings-email-form">
+          <div class="field">
+            <label>Add Email Address</label>
+            <div class="add-email-row">
+              <input
+                type="email"
+                name="email"
+                class="email-input"
+                placeholder="email@example.com"
+                disabled={addingEmail()}
+                data-pw="settings-email-input"
+              />
+              <button
+                type="submit"
+                class="button"
+                disabled={addingEmail()}
+                data-pw="settings-email-submit"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </SectionBoundary>
+  );
+};

@@ -1,75 +1,49 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, Match, Switch } from "solid-js";
 import { apiRequest } from "../api";
+import { runRequest } from "../../../webview/request";
 
-const verifyingAtom = Atom.make(false);
-const errorAtom = Atom.make<string | null>(null);
-const successAtom = Atom.make(false);
-const autoVerifiedAtom = Atom.make(false);
-
-export function triggerVerification(emailId: string, token: string) {
-  pendingEmailId = emailId;
-  pendingToken = token;
-}
-
-let pendingEmailId = "";
-let pendingToken = "";
+// Set by the host's `init-view` message before this view mounts. A signal, not
+// a plain variable: the view renders once, so a plain write after mount would
+// never reach the DOM.
+const [pending, setPending] = createSignal<{ emailId: string; token: string } | null>(null);
 let autoVerifyAttempted = false;
 
-export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const verifying = yield* Atom.get(verifyingAtom);
-    const error = yield* Atom.get(errorAtom);
-    const success = yield* Atom.get(successAtom);
-    yield* Atom.get(autoVerifiedAtom);
+export function triggerVerification(emailId: string, token: string) {
+  setPending({ emailId, token });
+}
 
-    // Auto-verify if we have params from URL
-    if (!autoVerifyAttempted && pendingEmailId && pendingToken) {
-      autoVerifyAttempted = true;
-      registry.set(verifyingAtom, true);
+export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) => {
+  const [verifying, setVerifying] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const [success, setSuccess] = createSignal(false);
 
-      void Effect.runFork(
-        apiRequest("/api/verifyEmail", "POST", {
-          emailId: pendingEmailId,
-          token: pendingToken,
-        }, {
-          action: "auth.verify_email.auto",
-        }).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              registry.set(successAtom, true);
-              registry.set(autoVerifiedAtom, true);
-            })
-          ),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(errorAtom, err.message);
-            })
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(verifyingAtom, false);
-            })
-          ),
-        ),
-      );
-    }
+  const params = pending();
+  if (!autoVerifyAttempted && params) {
+    autoVerifyAttempted = true;
+    setVerifying(true);
+    void runRequest(
+      apiRequest("/api/verifyEmail", "POST", params, { action: "auth.verify_email.auto" }),
+    )
+      .then(
+        () => setSuccess(true),
+        (reason: Error) => setError(reason.message),
+      )
+      .finally(() => setVerifying(false));
+  }
 
-    if (verifying) {
-      return (
+  return (
+    <Switch>
+      <Match when={verifying()}>
         <div class="auth-view">
           <div class="auth-header">
             <h2>Verifying Email</h2>
             <p class="auth-subtitle">Please wait...</p>
           </div>
         </div>
-      );
-    }
+      </Match>
 
-    if (success) {
-      return (
-        <div class="auth-view">
+      <Match when={success()}>
+        <div class="auth-view" data-pw="email-verified">
           <div class="auth-header">
             <h2>Email Verified</h2>
             <p class="auth-subtitle">Your email address has been verified successfully.</p>
@@ -79,19 +53,34 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
             Continue
           </button>
         </div>
-      );
-    }
+      </Match>
 
-    if (error) {
-      return (
+      <Match when={error()}>
+        {(message) => (
+          <div class="auth-view">
+            <div class="auth-header">
+              <h2>Verification Failed</h2>
+            </div>
+
+            <div class="auth-error">
+              <i class="codicon codicon-error" />
+              <span>{message()}</span>
+            </div>
+
+            <div class="auth-links">
+              <button class="auth-link" onClick={() => props.onNavigate("login")}>
+                Back to sign in
+              </button>
+            </div>
+          </div>
+        )}
+      </Match>
+
+      <Match when={true}>
         <div class="auth-view">
           <div class="auth-header">
-            <h2>Verification Failed</h2>
-          </div>
-
-          <div class="auth-error">
-            <i class="codicon codicon-error" />
-            <span>{error}</span>
+            <h2>Verify Email</h2>
+            <p class="auth-subtitle">Check your inbox for a verification link.</p>
           </div>
 
           <div class="auth-links">
@@ -100,21 +89,7 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
             </button>
           </div>
         </div>
-      );
-    }
-
-    return (
-      <div class="auth-view">
-        <div class="auth-header">
-          <h2>Verify Email</h2>
-          <p class="auth-subtitle">Check your inbox for a verification link.</p>
-        </div>
-
-        <div class="auth-links">
-          <button class="auth-link" onClick={() => props.onNavigate("login")}>
-            Back to sign in
-          </button>
-        </div>
-      </div>
-    );
-  });
+      </Match>
+    </Switch>
+  );
+};

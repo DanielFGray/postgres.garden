@@ -1,154 +1,142 @@
+import { createSignal, refresh, Show } from "solid-js";
 import * as Effect from "effect/Effect";
-import { Result } from "@effect-atom/atom";
-import { Atom, AtomRegistry } from "fibrae";
 import type { UserProfile } from "../../types";
+import { createRequest, runRequest } from "../../../webview/request";
+import { SectionBoundary } from "../SectionBoundary";
 import { apiRequest } from "../api";
 import { formatDate } from "../format";
+import { WebviewRequestError } from "../../../webview/apiBridge";
 
-const profileAtom = Atom.make(
+const loadProfile = () =>
   apiRequest<{ user: UserProfile | null }>("/api/me", "GET", undefined, {
     action: "account.profile.load",
   }).pipe(
     Effect.flatMap((data) =>
       data.user
         ? Effect.succeed(data.user)
-        : Effect.fail(new Error("Unauthorized")),
+        : Effect.fail(new WebviewRequestError({ message: "Unauthorized", code: "UNAUTHORIZED" })),
     ),
-  ),
-);
+  );
 
-const bioLengthAtom = Atom.make(0);
-const savingAtom = Atom.make(false);
-const saveErrorAtom = Atom.make<string | null>(null);
+export const ProfileSection = () => {
+  const profile = createRequest(loadProfile);
+  const [bioLength, setBioLength] = createSignal(0);
+  const [saving, setSaving] = createSignal(false);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
 
-export const ProfileSection = () =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const result = yield* Atom.get(profileAtom);
-    const bioLength = yield* Atom.get(bioLengthAtom);
-    const saving = yield* Atom.get(savingAtom);
-    const saveError = yield* Atom.get(saveErrorAtom);
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = new FormData(form);
+    const getText = (name: string) => {
+      const value = data.get(name);
+      return value instanceof File ? "" : (value ?? "");
+    };
+    setSaving(true);
+    setSaveError(null);
+    void runRequest(
+      apiRequest(
+        "/api/me",
+        "PATCH",
+        {
+          username: getText("username"),
+          name: getText("name"),
+          bio: getText("bio"),
+          avatar_url: getText("avatar_url"),
+        },
+        { action: "account.profile.save" },
+      ),
+    )
+      .then(
+        () => refresh(profile),
+        (error: Error) => setSaveError(error.message),
+      )
+      .finally(() => setSaving(false));
+  }
 
-    function handleSubmit(e: Event) {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const data = new FormData(form);
-      registry.set(savingAtom, true);
-      registry.set(saveErrorAtom, null);
-      void Effect.runFork(
-        apiRequest(
-          "/api/me",
-          "PATCH",
-          {
-            username: data.get("username"),
-            name: data.get("name"),
-            bio: data.get("bio"),
-            avatar_url: data.get("avatar_url"),
-          },
-          { action: "account.profile.save" },
-        ).pipe(
-          Effect.tap(() => Effect.sync(() => registry.refresh(profileAtom))),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(saveErrorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(savingAtom, false);
-            }),
-          ),
-        ),
-      );
-    }
-
-    return Result.builder(result)
-      .onInitial(() => <div class="section-loading">Loading profile...</div>)
-      .onError((error) => (
-        <div class="section-error">
-          <i class="codicon codicon-error" />
-          <span>{error.message}</span>
-          <button class="button" onClick={() => registry.refresh(profileAtom)}>
-            Retry
-          </button>
+  return (
+    <SectionBoundary loading="Loading profile..." retry={() => refresh(profile)}>
+      <div class="profile-section">
+        <div class="section-header">
+          <h2>Profile</h2>
         </div>
-      ))
-      .onSuccess((p) => (
-        <div class="profile-section">
-          <div class="section-header">
-            <h2>Profile</h2>
+
+        <form class="profile-fields" onSubmit={handleSubmit}>
+          <div class="field">
+            <label>Username</label>
+            <input type="text" name="username" class="setting-input" value={profile().username} />
           </div>
 
-          <form class="profile-fields" onSubmit={handleSubmit}>
-            <div class="field">
-              <label>Username</label>
-              <input type="text" name="username" class="setting-input" defaultValue={p.username} />
-            </div>
+          <div class="field">
+            <label>Display Name</label>
+            <input type="text" name="name" class="setting-input" value={profile().name ?? ""} />
+          </div>
 
-            <div class="field">
-              <label>Display Name</label>
-              <input type="text" name="name" class="setting-input" defaultValue={p.name ?? ""} />
+          <div class="field">
+            <label>Bio</label>
+            <textarea
+              name="bio"
+              class="setting-input setting-textarea"
+              maxlength={2000}
+              value={profile().bio ?? ""}
+              onInput={(e) => setBioLength(e.currentTarget.value.length)}
+            />
+            <div class="field-hint" style={{ "text-align": "right" }}>
+              {bioLength()}/2000
             </div>
+          </div>
 
-            <div class="field">
-              <label>Bio</label>
-              <textarea
-                name="bio"
-                class="setting-input setting-textarea"
-                maxLength={2000}
-                defaultValue={p.bio ?? ""}
-                onInput={(e: Event) => {
-                  registry.set(bioLengthAtom, (e.target as HTMLTextAreaElement).value.length);
-                }}
-              />
-              <div class="field-hint" style={{ textAlign: "right" }}>
-                {bioLength}/2000
-              </div>
+          <div class="field">
+            <label>Avatar URL</label>
+            <input
+              type="text"
+              name="avatar_url"
+              class="setting-input"
+              value={profile().avatar_url ?? ""}
+            />
+          </div>
+
+          <div class="field">
+            <label>Role</label>
+            <div class="field-value">
+              <span class={`badge badge-${profile().role}`}>{profile().role}</span>
             </div>
+          </div>
 
-            <div class="field">
-              <label>Avatar URL</label>
-              <input type="text" name="avatar_url" class="setting-input" defaultValue={p.avatar_url ?? ""} />
+          <div class="field">
+            <label>Verified</label>
+            <div class="field-value">
+              <Show
+                when={profile().is_verified}
+                fallback={<span class="badge badge-unverified">Unverified</span>}
+              >
+                <span class="badge badge-verified">
+                  <i class="codicon codicon-verified-filled" /> Verified
+                </span>
+              </Show>
             </div>
+          </div>
 
-            <div class="field">
-              <label>Role</label>
-              <div class="field-value">
-                <span class={`badge badge-${p.role}`}>{p.role}</span>
-              </div>
-            </div>
+          <div class="field">
+            <label>Member Since</label>
+            <div class="field-value">{formatDate(String(profile().created_at))}</div>
+          </div>
 
-            <div class="field">
-              <label>Verified</label>
-              <div class="field-value">
-                {p.is_verified ? (
-                  <span class="badge badge-verified">
-                    <i class="codicon codicon-verified-filled" /> Verified
-                  </span>
-                ) : (
-                  <span class="badge badge-unverified">Unverified</span>
-                )}
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Member Since</label>
-              <div class="field-value">{formatDate(String(p.created_at))}</div>
-            </div>
-
-            {saveError && (
-              <div class="section-error" style={{ marginBottom: "8px" }}>
+          <Show when={saveError()}>
+            {(message) => (
+              <div class="section-error" style={{ "margin-bottom": "8px" }}>
                 <i class="codicon codicon-error" />
-                <span>{saveError}</span>
+                <span>{message()}</span>
               </div>
             )}
-            <div style={{ marginTop: "12px" }}>
-              <button type="submit" class="button button-primary" disabled={saving}>
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
-          </form>
-        </div>
-      ))
-      .render();
-  });
+          </Show>
+          <div style={{ "margin-top": "12px" }}>
+            <button type="submit" class="button button-primary" disabled={saving()}>
+              {saving() ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </SectionBoundary>
+  );
+};

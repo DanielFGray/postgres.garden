@@ -1,0 +1,156 @@
+- application [ref=f8e5]:
+    - generic [ref=f8e9]:
+        - generic [ref=f8e11]:
+            - menubar [ref=f8e15]:
+                - menuitem "File" [ref=f8e16]
+                - menuitem "Edit" [ref=f8e18]
+                - menuitem "Selection" [ref=f8e20]
+                - menuitem "View" [ref=f8e22]
+                - menuitem "Go" [ref=f8e24]
+                - menuitem "Run" [ref=f8e26]
+                - menuitem "Terminal" [ref=f8e28]
+                - menuitem "Help" [ref=f8e30]
+            - toolbar [ref=f8e37]:
+                - button "Go Back (Ctrl+Alt+-)" [disabled] [ref=f8e38]: 
+                - button "Go Forward (Ctrl+Shift+-)" [disabled] [ref=f8e39]: 
+                - listitem [ref=f8e40] [cursor=pointer]:
+                    - toolbar [ref=f8e43]:
+                        - button "postgres.garden - example.md" [ref=f8e44]:
+                            - generic [ref=f8e45]: 
+            - toolbar "Title actions" [ref=f8e51]:
+                - button "Create Playground" [ref=f8e52] [cursor=pointer]: 
+                - button "Browse Playgrounds" [ref=f8e53] [cursor=pointer]: 
+                - button "Save" [ref=f8e54] [cursor=pointer]: 
+                - button "Show ERD" [ref=f8e55] [cursor=pointer]: 
+                - button "Download Workspace" [ref=f8e56] [cursor=pointer]: 
+                - button "Accounts" [ref=f8e57] [cursor=pointer]:
+                    - generic "Accounts" [ref=f8e58]: 
+                - button "Manage" [ref=f8e59] [cursor=pointer]:
+                    - generic "Manage" [ref=f8e60]: 
+        - generic [ref=f8e65]:
+            - main [ref=f8e73]:
+                - generic [ref=f8e81]:
+                    - progressbar "Progress" [ref=f8e82]
+                    - generic [ref=f8e83] [cursor=pointer]:
+                        - generic [ref=f8e84]:
+                            - tablist [ref=f8e85]:
+                                - tab "example.md, preview" [selected] [ref=f8e86]:
+                                    - generic "example.md" [ref=f8e87]: 
+                                    - toolbar "Tab actions" [ref=f8e92]:
+                                        - button "Close (Ctrl+W)" [ref=f8e93]: 
+                                - text: 
+                            - toolbar "Editor actions" [ref=f8e97]:
+                                - button "Split Editor Right (Ctrl+\\) [Alt] Split Editor Down" [ref=f8e98]: 
+                                - button "More Actions..." [ref=f8e101]: 
+                        - list [ref=f8e104]:
+                            - listitem [ref=f8e105]:
+                                - generic "/workspace" [ref=f8e106]: workspace
+                                - generic [ref=f8e109]: 
+                            - listitem [ref=f8e110]:
+                                - generic "~/example.md" [ref=f8e111]:
+                                    - text: 
+                                    - generic [ref=f8e112]: example.md
+                                - text: 
+            - generic [ref=f8e117]:
+                - tablist "Active View Switcher" [ref=f8e122]:
+                    - tab "Explorer (Ctrl+Shift+E)" [expanded] [selected] [ref=f8e123] [cursor=pointer]:
+                        - generic "Explorer (Ctrl+Shift+E)" [ref=f8e124]: 
+                    - tab "Search (Ctrl+Shift+F)" [ref=f8e125] [cursor=pointer]:
+                        - generic "Search (Ctrl+Shift+F)" [ref=f8e126]: 
+                    - tab "Source Control (Ctrl+Shift+G)" [ref=f8e127] [cursor=pointer]:
+                        - generic "Source Control (Ctrl+Shift+G)" [ref=f8e128]: 
+                    - tab "Run and Debug (Ctrl+Shift+D)" [ref=f8e129] [cursor=pointer]:
+                        - generic "Run and Debug (Ctrl+Shift+D)" [ref=f8e130]: 
+                    - tab "Extensions (Ctrl+Shift+X)" [ref=f8e131] [cursor=pointer]:
+                        - generic "Extensions (Ctrl+Shift+X)" [ref=f8e132]: 
+                - generic [ref=f8e133]:
+                    - heading "Explorer" [level=2] [ref=f8e135]
+                    - toolbar "Explorer actions" [ref=f8e139]:
+                        - button "Views and More Actions..." [ref=f8e142] [cursor=pointer]: 
+                    - generic:
+                        - generic:
+                            - generic:
+                                - toolbar
+                - generic [ref=f8e147]:
+                    - generic [ref=f8e149]:
+                        - 'button "Explorer Section: workspace (Workspace)" [expanded] [ref=f8e150] [cursor=pointer]':
+                            - generic [ref=f8e151]: 
+                            - text: 
+                            - 'heading "Explorer Section: workspace (Workspace)" [level=3] [ref=f8e152]': workspace (Workspace)
+                            - text:    
+                        - tree "Files Explorer" [ref=f8e155]:
+                            - generic [ref=f8e156]:
+                                - treeitem "workspace" [expanded] [level=1] [ref=f8e157] [cursor=pointer]:
+                                    - generic [ref=f8e158]:
+                                        - generic [ref=f8e159]: 
+                                        - generic "/workspace" [ref=f8e161]: workspace
+                                - treeitem "00010-graphile-starter.sql" [level=2] [ref=f8e165] [cursor=pointer]:
+                                    - generic "~/00010-graphile-starter.sql" [ref=f8e168]:
+                                        - text: 
+                                        - generic [ref=f8e169]: 00010-graphile-starter.sql
+                                - treeitem "00100-posts.sql" [level=2] [ref=f8e172] [cursor=pointer]:
+                                    - generic "~/00100-posts.sql" [ref=f8e175]:
+                                        - text: 
+                                        - generic [ref=f8e176]: 00100-posts.sql
+                                - treeitem "99999-fixtures.sql" [level=2] [ref=f8e179] [cursor=pointer]:
+                                    - generic "~/99999-fixtures.sql" [ref=f8e182]:
+                                        - text: 
+                                        - generic [ref=f8e183]: 99999-fixtures.sql
+                                - treeitem "example.md" [level=2] [ref=f8e186] [cursor=pointer]:
+                                    - generic "~/example.md" [ref=f8e189]:
+                                        - text: 
+                                        - generic [ref=f8e190]: example.md
+                    - button "Outline Section" [ref=f8e195] [cursor=pointer]:
+                        - generic [ref=f8e196]: 
+                        - text: 
+                        - heading "Outline" [level=3] [ref=f8e197]
+                        - text:  
+                    - button "Database Section" [ref=f8e200] [cursor=pointer]:
+                        - generic [ref=f8e201]: 
+                        - text: 
+                        - heading "Database" [level=3] [ref=f8e202]
+                        - text:  
+                    - button "Playground Info Section" [ref=f8e205] [cursor=pointer]:
+                        - generic [ref=f8e206]: 
+                        - text: 
+                        - heading "Playground Info" [level=3] [ref=f8e207]
+                        - text:  
+        - status [ref=f8e209]:
+            - generic [ref=f8e210]:
+                - generic "remote postgres.garden" [ref=f8e211]:
+                    - button "remote postgres.garden" [ref=f8e212]:
+                        - generic [ref=f8e213]: 
+                        - text: postgres.garden
+                - generic "No Problems" [ref=f8e214]:
+                    - button "No Problems" [ref=f8e215] [cursor=pointer]:
+                        - generic [ref=f8e216]: 
+                        - text: "0"
+                        - generic [ref=f8e217]: 
+                        - text: "0"
+            - generic [ref=f8e218]:
+                - generic "Notifications" [ref=f8e219]:
+                    - button "Notifications" [ref=f8e220] [cursor=pointer]:
+                        - generic [ref=f8e221]: 
+                - 'generic "Layout: us" [ref=f8e222]':
+                    - 'button "Layout: us" [ref=f8e223] [cursor=pointer]'
+                - generic "account Sign In, Click to sign in" [ref=f8e224]:
+                    - button "account Sign In, Click to sign in" [ref=f8e225] [cursor=pointer]:
+                        - generic [ref=f8e226]: 
+                        - text: Sign In
+    - generic [ref=f8e227]:
+        - alert
+        - alert
+    - dialog "Warning Do you trust the authors of this notebook?" [ref=f8e230]:
+        - generic [ref=f8e232]:
+            - button "Cancel" [ref=f8e233] [cursor=pointer]
+            - button "Open Notebook" [active] [ref=f8e234] [cursor=pointer]
+        - generic [ref=f8e235]:
+            - generic "Warning" [ref=f8e236]: 
+            - generic [ref=f8e237]:
+                - generic [ref=f8e238]: Do you trust the authors of this notebook?
+                - generic [ref=f8e240]: Notebooks can run code that has access to your browser session, including any signed-in accounts. Only open notebooks from authors you trust.
+                - generic [ref=f8e241]:
+                    - checkbox "Don't ask me again" [ref=f8e242] [cursor=pointer]
+                    - generic [ref=f8e243] [cursor=pointer]: Don't ask me again
+        - toolbar [ref=f8e247]:
+            - button "Close Dialog" [ref=f8e248] [cursor=pointer]: 

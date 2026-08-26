@@ -1,29 +1,19 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
+import solid from "@solidjs/vite-plugin";
 
 export default defineConfig({
+  plugins: [solid()],
   resolve: {
     alias: {
       lib: resolve(__dirname, "lib"),
     },
   },
-  esbuild: {
-    jsx: "transform",
-    jsxFactory: "jsx",
-    jsxFragment: "Fragment",
-    jsxInject: `import { jsx, Fragment } from 'fibrae/jsx-runtime'`,
-  },
   build: {
     lib: {
       entry: {
-        "playground-view": resolve(
-          __dirname,
-          "src/features/playground/webview/view-preact/index.tsx",
-        ),
-        "playground-panel": resolve(
-          __dirname,
-          "src/features/playground/webview/panel-preact/index.tsx",
-        ),
+        "playground-view": resolve(__dirname, "src/features/playground/webview/view/index.tsx"),
+        "playground-panel": resolve(__dirname, "src/features/playground/webview/panel/index.tsx"),
         "erd-viewer": resolve(__dirname, "src/features/erd/webview/entry.tsx"),
         "account-settings": resolve(__dirname, "src/features/account/webview/index.tsx"),
         "auth-panel": resolve(__dirname, "src/features/auth-panel/webview/index.tsx"),

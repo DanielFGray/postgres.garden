@@ -1,6 +1,0 @@
-{
-  "example": {
-    "name": "Example Fixture",
-    "description": "This is an example fixture file for Cypress tests"
-  }
-}

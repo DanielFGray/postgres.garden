@@ -1,81 +1,91 @@
 import { FetchHttpClient, HttpApiClient } from "@effect/platform";
-import { Effect, Option, pipe } from "effect";
-import { PgGardenContract } from "../server/httpapi/contract";
+import type * as HttpClientError from "@effect/platform/HttpClientError";
+import type { HttpApiDecodeError } from "@effect/platform/HttpApiError";
+import { Effect, Match } from "effect";
+import type * as ParseResult from "effect/ParseResult";
+import * as S from "effect/Schema";
+import { PgGardenApi } from "../server/apiSchema";
+import {
+  ApiError,
+  Conflict,
+  Forbidden,
+  Locked,
+  NotFound,
+  ServerError,
+  Unauthorized,
+} from "../server/errors";
 
-const client = HttpApiClient.make(PgGardenContract, {
+type HttpApiClientFailure =
+  | ApiError
+  | Conflict
+  | Forbidden
+  | HttpApiDecodeError
+  | HttpClientError.HttpClientError
+  | Locked
+  | NotFound
+  | ParseResult.ParseError
+  | ServerError
+  | Unauthorized;
+
+const client = HttpApiClient.make(PgGardenApi, {
   baseUrl: window.location.origin,
 }).pipe(Effect.provide(FetchHttpClient.layer));
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const ApiErrorPayload = S.Struct({
+  status: S.optional(S.Number),
+  body: S.optional(S.Unknown),
+  response: S.optional(
+    S.Struct({
+      status: S.optional(S.Number),
+      body: S.optional(S.Unknown),
+    }),
+  ),
+});
 
-const readNumber = (value: unknown): number | undefined =>
-  typeof value === "number" ? value : undefined;
-
-const readStatus = (error: unknown): number =>
-  pipe(
-    Option.liftPredicate(error, isRecord),
-    Option.flatMap((e) =>
-      Option.orElse(
-        Option.fromNullable(readNumber(e.status)),
-        () =>
-          pipe(
-            Option.fromNullable(e.response),
-            Option.filter(isRecord),
-            Option.flatMap((r) => Option.fromNullable(readNumber(r.status))),
-          ),
-      ),
-    ),
-    Option.getOrElse(() => 500),
+const readStatus = (error: HttpApiClientFailure): number => {
+  const decoded = S.decodeUnknownEither(ApiErrorPayload)(error);
+  return Match.value(decoded).pipe(
+    Match.tags({
+      Left: () => 500,
+      Right: ({ right }) => right.status ?? right.response?.status ?? 500,
+    }),
+    Match.exhaustive,
   );
+};
 
-const readBody = (error: unknown): unknown =>
-  pipe(
-    Option.liftPredicate(error, isRecord),
-    Option.flatMap((e) =>
-      Option.orElse(
-        pipe(
-          Option.some(e),
-          Option.filter((r): r is Record<string, unknown> & { body: unknown } => "body" in r),
-          Option.map((r) => r.body),
-        ),
-        () =>
-          pipe(
-            Option.fromNullable(e.response),
-            Option.filter(isRecord),
-            Option.filter((r): r is Record<string, unknown> & { body: unknown } => "body" in r),
-            Option.map((r) => r.body),
-          ),
-      ),
-    ),
-    Option.getOrElse(() => error),
+const readBody = (error: HttpApiClientFailure): unknown => {
+  const decoded = S.decodeUnknownEither(ApiErrorPayload)(error);
+  return Match.value(decoded).pipe(
+    Match.tags({
+      Left: () => error,
+      Right: ({ right }) => right.body ?? right.response?.body ?? error,
+    }),
+    Match.exhaustive,
   );
+};
 
-export class ApiRequestError extends Error {
-  readonly status: number;
-  readonly value: unknown;
-
-  constructor(error: unknown) {
-    super("HTTP API request failed");
-    this.name = "ApiRequestError";
-    this.status = readStatus(error);
-    this.value = readBody(error);
+export class ApiRequestError extends S.TaggedError<ApiRequestError>()("ApiRequestError", {
+  status: S.Number,
+  value: S.Unknown,
+}) {
+  static from(error: HttpApiClientFailure): ApiRequestError {
+    return new ApiRequestError({ status: readStatus(error), value: readBody(error) });
   }
 }
 
-const request = <A, E>(
+const request = <A, E extends HttpApiClientFailure>(
   spanName: string,
   run: (httpApiClient: Effect.Effect.Success<typeof client>) => Effect.Effect<A, E, never>,
 ): Effect.Effect<A, ApiRequestError, never> =>
   client.pipe(
     Effect.flatMap(run),
     Effect.withSpan(spanName),
-    Effect.mapError((error) => new ApiRequestError(error)),
+    Effect.mapError((error) => ApiRequestError.from(error)),
   );
 
-export const httpApiMe = request("httpapi.me", (api) => api.apiUsers.apiMe({}));
+export const httpApiMe = request("httpapi.me", (api) => api.apiUsers.me({}));
 
-export const httpApiLogout = request("httpapi.logout", (api) => api.apiUsers.apiLogout({}));
+export const httpApiLogout = request("httpapi.logout", (api) => api.auth.logout({}));
 
 export const httpApiListPlaygrounds = (options?: {
   sort?: "created_at" | "stars";
@@ -83,7 +93,7 @@ export const httpApiListPlaygrounds = (options?: {
   limit?: number;
 }) =>
   request("httpapi.playgrounds.list", (api) =>
-    api.apiPlaygrounds.apiListPlaygrounds({
+    api.apiPlaygrounds.playgrounds({
       urlParams: {
         sort: options?.sort,
         offset: options?.offset,
@@ -93,7 +103,9 @@ export const httpApiListPlaygrounds = (options?: {
   );
 
 export const httpApiGetPlayground = (hash: string) =>
-  request("httpapi.playgrounds.get", (api) => api.apiPlaygrounds.apiGetPlayground({ path: { hash } }));
+  request("httpapi.playgrounds.get", (api) =>
+    api.apiPlaygrounds.playgroundByHash({ path: { hash } }),
+  );
 
 export const httpApiCreatePlayground = (payload: {
   name?: string | null;
@@ -102,7 +114,7 @@ export const httpApiCreatePlayground = (payload: {
   files: Array<{ path: string; content: string }>;
   activeFile?: string | null;
 }) =>
-  request("httpapi.playgrounds.create", (api) => api.apiPlaygrounds.apiCreatePlayground({ payload }));
+  request("httpapi.playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
 export const httpApiUpdatePlayground = (
   hash: string,
@@ -113,22 +125,22 @@ export const httpApiUpdatePlayground = (
   },
 ) =>
   request("httpapi.playgrounds.update", (api) =>
-    api.apiPlaygrounds.apiUpdatePlayground({ path: { hash }, payload }),
+    api.apiPlaygrounds.updatePlayground({ path: { hash }, payload }),
   );
 
 export const httpApiDeletePlayground = (hash: string) =>
   request("httpapi.playgrounds.delete", (api) =>
-    api.apiPlaygrounds.apiDeletePlayground({ path: { hash } }),
+    api.apiPlaygrounds.deletePlayground({ path: { hash } }),
   );
 
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   request("httpapi.playgrounds.star", (api) =>
-    api.apiPlaygrounds.apiTogglePlaygroundStar({ path: { hash } }),
+    api.apiPlaygrounds.togglePlaygroundStar({ path: { hash } }),
   );
 
 export const httpApiForkPlayground = (hash: string, payload: { name?: string | null }) =>
   request("httpapi.playgrounds.fork", (api) =>
-    api.apiPlaygrounds.apiForkPlayground({ path: { hash }, payload }),
+    api.apiPlaygrounds.forkPlayground({ path: { hash }, payload }),
   );
 
 export const httpApiCreatePlaygroundCommit = (
@@ -140,20 +152,20 @@ export const httpApiCreatePlaygroundCommit = (
   },
 ) =>
   request("httpapi.playgrounds.commits.create", (api) =>
-    api.apiPlaygrounds.apiCreatePlaygroundCommit({ path: { hash }, payload }),
+    api.apiPlaygrounds.createCommit({ path: { hash }, payload }),
   );
 
 export const httpApiListPlaygroundCommits = (hash: string) =>
   request("httpapi.playgrounds.commits.list", (api) =>
-    api.apiPlaygrounds.apiListPlaygroundCommits({ path: { hash } }),
+    api.apiPlaygrounds.listCommits({ path: { hash } }),
   );
 
 export const httpApiGetPlaygroundCommit = (hash: string, commit_id: string) =>
   request("httpapi.playgrounds.commits.get", (api) =>
-    api.apiPlaygrounds.apiGetPlaygroundCommit({ path: { hash, commit_id } }),
+    api.apiPlaygrounds.getCommit({ path: { hash, commit_id } }),
   );
 
 export const httpApiGetPlaygroundCommitDiff = (hash: string, commit_id: string) =>
   request("httpapi.playgrounds.commits.diff", (api) =>
-    api.apiPlaygrounds.apiGetPlaygroundCommitDiff({ path: { hash, commit_id } }),
+    api.apiPlaygrounds.getCommitDiff({ path: { hash, commit_id } }),
   );

@@ -37,8 +37,11 @@ import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override";
 import getLanguageDetectionWorkerServiceOverride from "@codingame/monaco-vscode-language-detection-worker-service-override";
 import getStorageServiceOverride, {
+  JsonFileStorageDatabase,
   StorageScope,
 } from "@codingame/monaco-vscode-storage-service-override";
+import { IFileService } from "@codingame/monaco-vscode-api/services";
+import type { ServicesAccessor } from "@codingame/monaco-vscode-api/vscode/vs/platform/instantiation/common/instantiation";
 import { InMemoryStorageDatabase } from "@codingame/monaco-vscode-api/vscode/vs/base/parts/storage/common/storage";
 import getExtensionServiceOverride from "@codingame/monaco-vscode-extensions-service-override";
 import getRemoteAgentServiceOverride from "@codingame/monaco-vscode-remote-agent-service-override";
@@ -48,7 +51,9 @@ import getLifecycleServiceOverride from "@codingame/monaco-vscode-lifecycle-serv
 import getLogServiceOverride from "@codingame/monaco-vscode-log-service-override";
 import getWorkingCopyServiceOverride from "@codingame/monaco-vscode-working-copy-service-override";
 import getTestingServiceOverride from "@codingame/monaco-vscode-testing-service-override";
-import getChatServiceOverride from "@codingame/monaco-vscode-chat-service-override";
+import getChatServiceOverride, {
+  ChatEntitlement,
+} from "@codingame/monaco-vscode-chat-service-override";
 import getNotebookServiceOverride from "@codingame/monaco-vscode-notebook-service-override";
 // import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
 // import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
@@ -80,6 +85,7 @@ import getMcpServiceOverride from "@codingame/monaco-vscode-mcp-service-override
 // import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
 import { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
 import { Effect } from "effect";
+import * as Schema from "effect/Schema";
 import { Worker } from "./tools/fakeWorker";
 import defaultKeybindings from "./user/keybindings.json?raw";
 import defaultConfiguration from "./user/configuration.json?raw";
@@ -103,7 +109,9 @@ import { fileSystemProvider } from "./filesystemProvider";
 export const workspaceFile = monaco.Uri.file("/workspace.code-workspace");
 
 // Workers
-const workers: Partial<Record<string, Worker>> = {
+type Workers = Partial<Record<string, Worker>>;
+
+const workers: Workers = {
   editorWorkerService: new Worker(
     new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url),
     { type: "module" },
@@ -147,37 +155,56 @@ window.MonacoEnvironment = {
 
 let commonInitialized = false;
 
+class CommonInitializationError extends Schema.TaggedError<CommonInitializationError>()(
+  "CommonInitializationError",
+  { message: Schema.String, cause: Schema.Unknown },
+) {}
+
 export const initializeCommon = Effect.suspend(() =>
   commonInitialized
     ? Effect.void
     : Effect.gen(function* () {
         yield* Effect.tryPromise({
           try: () => createIndexedDBProviders(),
-          catch: (error) =>
-            new Error(
-              `Failed to create IndexedDB providers: ${error instanceof Error ? error.message : String(error)}`,
-            ),
+          catch: (cause) =>
+            new CommonInitializationError({
+              message: `Failed to create IndexedDB providers: ${cause instanceof Error ? cause.message : String(cause)}`,
+              cause,
+            }),
         });
 
         registerFileSystemOverlay(1, fileSystemProvider);
 
         yield* Effect.tryPromise({
-          try: () => Promise.all([initUserConfiguration(defaultConfiguration), initUserKeybindings(defaultKeybindings)]),
-          catch: (error) =>
-            new Error(
-              `Failed to initialize user configuration: ${error instanceof Error ? error.message : String(error)}`,
-            ),
+          try: () =>
+            Promise.all([
+              initUserConfiguration(defaultConfiguration),
+              initUserKeybindings(defaultKeybindings),
+            ]),
+          catch: (cause) =>
+            new CommonInitializationError({
+              message: `Failed to initialize user configuration: ${cause instanceof Error ? cause.message : String(cause)}`,
+              cause,
+            }),
         });
 
         commonInitialized = true;
       }),
 );
 
-// Ephemeral storage — prevents VS Code from restoring previous session state.
-// All workbench state (open editors, layout, sidebar) starts fresh on every page load.
-// User configuration and keybindings are still applied via initUserConfiguration above.
-const ephemeralDatabaseFactories = {
-  [StorageScope.APPLICATION]: () => new InMemoryStorageDatabase(),
+// Session state — open editors, layout, sidebar — is WORKSPACE scoped, and we
+// keep it in memory so every page load starts fresh.
+//
+// APPLICATION scope is different: it is where ISecretStorageService keeps the
+// user's own LLM API keys, which have to outlive a reload to be worth entering.
+// It is persisted to the IndexedDB-backed user data filesystem that
+// createIndexedDBProviders() installs above.
+const databaseFactories = {
+  [StorageScope.APPLICATION]: (accessor: ServicesAccessor) =>
+    new JsonFileStorageDatabase(
+      monaco.Uri.from({ scheme: "vscode-userdata", path: "/User/globalStorage.json" }),
+      accessor.get(IFileService),
+    ),
   [StorageScope.PROFILE]: () => new InMemoryStorageDatabase(),
   [StorageScope.WORKSPACE]: () => new InMemoryStorageDatabase(),
 };
@@ -266,9 +293,25 @@ export const commonServices: IEditorOverrideServices = {
   ...getAccessibilityServiceOverride(),
   ...getLanguageDetectionWorkerServiceOverride(),
   ...getStorageServiceOverride({
-    databaseFactories: ephemeralDatabaseFactories,
+    databaseFactories,
     fallbackOverride: {
       "workbench.activity.showAccounts": true,
+      // Serverless-web VSCode asks "Do you trust the authors of this notebook?"
+      // before opening any notebook. It is gated on storage rather than config,
+      // and our storage is ephemeral, so the prompt returns on every load.
+      // Every notebook here is one the user authored or opened deliberately.
+      "notebook.webHost.openConfirmed": true,
+      // Chat setup state lives in storage, not configuration, so the only way
+      // to start already-set-up is to write the finished state directly.
+      "chat.setupContext": {
+        entitlement: ChatEntitlement.Enterprise,
+        organisations: undefined,
+        sku: undefined,
+        copilotTrackingId: undefined,
+        registered: true,
+        completed: true,
+        installed: true,
+      },
     },
   }),
   ...getRemoteAgentServiceOverride({ scanRemoteExtensions: true }),
@@ -278,7 +321,27 @@ export const commonServices: IEditorOverrideServices = {
   ...getWorkingCopyServiceOverride(),
   ...getScmServiceOverride(),
   ...getTestingServiceOverride(),
-  ...getChatServiceOverride(),
+  // VSCode gates chat behind a Copilot sign-in whose setup flow is stripped out
+  // of monaco-vscode-api, and which would install a proprietary extension that
+  // is not on Open VSX. We supply our own models instead (see features/ai), so
+  // we satisfy the entitlement check directly rather than sign in.
+  ...getChatServiceOverride({
+    defaultAccount: {
+      entitlementsData: {
+        access_type_sku: "unused",
+        assigned_date: "unused",
+        can_signup_for_limited: false,
+        copilot_plan: "enterprise",
+        organization_login_list: [],
+        analytics_tracking_id: "unused",
+        chat_enabled: true,
+      },
+      accountName: "unused",
+      authenticationProvider: { id: "unused", name: "unused", enterprise: true },
+      enterprise: true,
+      sessionId: "unused",
+    },
+  }),
   ...getNotebookServiceOverride(),
   // ...getWelcomeServiceOverride(),
   // ...getWalkThroughServiceOverride(),

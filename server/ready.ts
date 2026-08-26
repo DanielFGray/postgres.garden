@@ -1,14 +1,15 @@
-import { Effect, Schedule, pipe, Duration, Schema } from "effect";
+import { Effect, Schedule, pipe, Duration, Schema as S } from "effect";
 import { sql } from "kysely";
-import { PgRootDB, PgAuthDB, type KyselyDB } from "./db.js";
+import { asRoot, asVisitor, type KyselyDB } from "./db.js";
+import { CurrentSession } from "./apiSchema.js";
 import { valkey } from "./valkey.js";
 
-class PostgresNotReady extends Schema.TaggedError<PostgresNotReady>()("PostgresNotReady", {
-  message: Schema.String,
+class PostgresNotReady extends S.TaggedError<PostgresNotReady>()("PostgresNotReady", {
+  message: S.String,
 }) {}
 
-class ValkeyNotReady extends Schema.TaggedError<ValkeyNotReady>()("ValkeyNotReady", {
-  message: Schema.String,
+class ValkeyNotReady extends S.TaggedError<ValkeyNotReady>()("ValkeyNotReady", {
+  message: S.String,
 }) {}
 
 const retrySchedule = pipe(
@@ -17,9 +18,9 @@ const retrySchedule = pipe(
   Schedule.compose(Schedule.recurs(20)),
 );
 
-const testDb = (db: KyselyDB, name: string) =>
+const testDb = <A, E, R>(probe: Effect.Effect<A, E, R>, name: string) =>
   pipe(
-    db.selectNoFrom([sql.lit(1).as("ready")]),
+    probe,
     Effect.asVoid,
     Effect.mapError(
       (e) =>
@@ -33,14 +34,18 @@ const testDb = (db: KyselyDB, name: string) =>
     ),
   );
 
+const ping = (db: KyselyDB) => db.selectNoFrom([sql.lit(1).as("ready")]);
+
+/**
+ * Probes both pools. The visitor probe runs as an anonymous visitor, which
+ * exercises the role switch as well as connectivity.
+ */
 const waitForPostgres = Effect.gen(function* () {
-  const rootDb = yield* PgRootDB;
-  const authDb = yield* PgAuthDB;
-  yield* Effect.all([testDb(rootDb, "rootDb"), testDb(authDb, "authDb")], {
+  yield* Effect.all([testDb(asRoot(ping), "rootDb"), testDb(asVisitor(ping), "authDb")], {
     concurrency: "unbounded",
   });
   yield* Effect.log("Postgres is ready");
-});
+}).pipe(Effect.provideService(CurrentSession, { user: null, session: null }));
 
 const waitForValkey = pipe(
   Effect.tryPromise({

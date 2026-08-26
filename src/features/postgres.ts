@@ -1,6 +1,8 @@
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer, Runtime, Scope } from "effect";
+import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { getCurrentPlaygroundId } from "../shared/routes.js";
+import { toError } from "../shared/index.js";
 import { VSCodeService } from "../vscode/service";
 import {
   DATABASE_EXPLORER,
@@ -15,9 +17,9 @@ import {
   WORKSPACE_DOWNLOAD,
 } from "./constants.js";
 import {
-	MenuId,
-	registerAction2,
-	Action2,
+  MenuId,
+  registerAction2,
+  Action2,
 } from "@codingame/monaco-vscode-api/vscode/vs/platform/actions/common/actions";
 import { Codicon } from "@codingame/monaco-vscode-api/vscode/vs/base/common/codicons";
 import { ICommandService } from "@codingame/monaco-vscode-api/vscode/vs/platform/commands/common/commands.service";
@@ -31,26 +33,29 @@ import { SQLSerializer } from "./notebook/sql.js";
 import { PGlite } from "./pglite";
 import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
 
-const toError = (error: unknown): Error =>
-  new Error(error instanceof Error ? error.message : String(error));
-
 const fromPromise = <A>(run: () => PromiseLike<A>) =>
   Effect.tryPromise({
     try: run,
-    catch: toError,
+    catch: (cause) => PromiseError.new({ cause }),
   });
+
+class PromiseError extends S.TaggedError<PromiseError>()("PromiseError", {
+  cause: S.optional(S.Unknown),
+  message: S.String,
+}) {
+  static new = (args: { readonly cause?: unknown }) =>
+    new PromiseError({ ...args, message: toError(args.cause).message });
+}
 
 const acquireDisposable = <A extends { dispose: () => void | Promise<void> }>(
   acquire: Effect.Effect<A, Error, never>,
 ) =>
   Effect.acquireRelease(acquire, (resource) =>
-    Effect.promise(async () => {
-      await Promise.resolve(resource.dispose());
-    }),
+    Effect.promise(() => Promise.resolve(resource.dispose())),
   );
 
 const registerFeatureAssets = (vscodeService: {
-  readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, never>;
+  readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, Scope.Scope>;
 }) =>
   Effect.all([
     vscodeService.registerFileUrl(
@@ -100,13 +105,17 @@ const findFiles = (
     return nested.flat();
   });
 
-const runCommand = (
-  effect: Effect.Effect<void, Error, never>,
-  label: string,
-): Promise<void> =>
+const MIGRATION_FILE_PATTERN = /^\d+-.*\.sql$/;
+
+const basename = (uri: vscode.Uri): string => uri.path.slice(uri.path.lastIndexOf("/") + 1);
+const dirname = (uri: vscode.Uri): string => uri.path.slice(0, uri.path.lastIndexOf("/"));
+
+const numericPrefix = (uri: vscode.Uri): number => Number(/^(\d+)-/.exec(basename(uri))?.[1]);
+
+const runCommand = (effect: Effect.Effect<void, Error, never>, label: string): Promise<void> =>
   Effect.runPromise(
     effect.pipe(
-      Effect.tapError((error) => Effect.sync(() => console.error(label, error))),
+      Effect.tapError((error) => Effect.logError(label, error)),
       Effect.catchAll(() => Effect.void),
     ),
   );
@@ -114,6 +123,7 @@ const runCommand = (
 const activatePostgresFeature = Effect.gen(function* () {
   const vscodeService = yield* VSCodeService;
   const vscodeApi = vscodeService.api;
+  const runtime = yield* Effect.runtime<never>();
 
   yield* registerFeatureAssets(vscodeService);
 
@@ -125,12 +135,18 @@ const activatePostgresFeature = Effect.gen(function* () {
       vscodeApi.workspace.registerNotebookSerializer("markdown-notebook", new MarkdownSerializer()),
     ),
   );
-  yield* acquireDisposable(Effect.sync(() => new SQLNotebookExecutionController("markdown-notebook")));
+  yield* acquireDisposable(
+    Effect.sync(() => new SQLNotebookExecutionController("markdown-notebook")),
+  );
 
   yield* acquireDisposable(
-    Effect.sync(() => vscodeApi.workspace.registerNotebookSerializer("sql-notebook", new SQLSerializer())),
+    Effect.sync(() =>
+      vscodeApi.workspace.registerNotebookSerializer("sql-notebook", new SQLSerializer()),
+    ),
   );
-  yield* acquireDisposable(Effect.sync(() => new SQLNotebookExecutionController("sql-notebook")));
+  const sqlNotebookController = yield* acquireDisposable(
+    Effect.sync(() => new SQLNotebookExecutionController("sql-notebook")),
+  );
 
   const pglite = yield* PGlite;
 
@@ -138,15 +154,13 @@ const activatePostgresFeature = Effect.gen(function* () {
     loadWorkspaceFromInitialData.pipe(
       Effect.tapError((error) =>
         Effect.annotateCurrentSpan({
-          "error": true,
+          error: true,
           "error.message": error instanceof Error ? error.message : String(error),
           "error.type": "initial_data",
         }),
       ),
       Effect.tapError((error) =>
-        Effect.sync(() => {
-          console.error("[Postgres] loadWorkspaceFromInitialData failed", error);
-        }),
+        Effect.logError("[Postgres] loadWorkspaceFromInitialData failed", error),
       ),
       Effect.catchAll(() => Effect.void),
     ),
@@ -158,29 +172,24 @@ const activatePostgresFeature = Effect.gen(function* () {
 
   // Fork: don't block command registrations while PGlite initializes
   yield* Effect.forkScoped(
-    pglite.query<{ version: string }>("select version()")
-      .pipe(
-        Effect.tap(({ rows }) =>
-          Effect.sync(() => {
-            pgliteOutputChannel.appendLine("starting postgres");
-            pgliteOutputChannel.appendLine(rows[0]?.version ?? "");
-            pgliteOutputChannel.appendLine("Powered by @electric-sql/pglite");
-          }),
-        ),
-        Effect.tapError((error) =>
-          Effect.annotateCurrentSpan({
-            "error": true,
-            "error.message": error instanceof Error ? error.message : String(error),
-            "error.type": "pglite_startup",
-          }),
-        ),
-        Effect.tapError((error) =>
-          Effect.sync(() => {
-            console.error("[PGlite] startup query failed", error);
-          }),
-        ),
-        Effect.catchAll(() => Effect.void),
+    pglite.query<{ version: string }>("select version()").pipe(
+      Effect.tap(({ rows }) =>
+        Effect.sync(() => {
+          pgliteOutputChannel.appendLine("starting postgres");
+          pgliteOutputChannel.appendLine(rows[0]?.version ?? "");
+          pgliteOutputChannel.appendLine("Powered by @electric-sql/pglite");
+        }),
       ),
+      Effect.tapError((error) =>
+        Effect.annotateCurrentSpan({
+          error: true,
+          "error.message": error instanceof Error ? error.message : String(error),
+          "error.type": "pglite_startup",
+        }),
+      ),
+      Effect.tapError((error) => Effect.logError("[PGlite] startup query failed", error)),
+      Effect.catchAll(() => Effect.void),
+    ),
   );
 
   const queryOpts = {};
@@ -193,36 +202,67 @@ const activatePostgresFeature = Effect.gen(function* () {
           return;
         }
 
-        const uris = (
-          yield* findFiles(vscodeApi, folder.uri, ([file]) => /\/\d+[^/]+\.sql$/.test(file.path))
-        ).toSorted((a, b) => a.path.localeCompare(b.path));
+        const uris = yield* findFiles(vscodeApi, folder.uri, ([file]) =>
+          MIGRATION_FILE_PATTERN.test(basename(file)),
+        );
 
         if (uris.length === 0) {
-          yield* fromPromise(() => vscodeApi.window.showInformationMessage("No migration files detected"));
+          yield* fromPromise(() =>
+            vscodeApi.window.showInformationMessage("No migration files detected"),
+          );
           return;
         }
 
-        const files = yield* Effect.forEach(
-          uris,
-          (uri) =>
-            fromPromise(() => vscodeApi.workspace.fs.readFile(uri)).pipe(
-              Effect.map((raw) => new TextDecoder().decode(raw)),
-            ),
-          { concurrency: 1 },
+        const filesByFolder = new Map<string, readonly vscode.Uri[]>();
+        for (const uri of uris) {
+          const dir = dirname(uri);
+          filesByFolder.set(dir, [...(filesByFolder.get(dir) ?? []), uri]);
+        }
+        const folderEntries = [...filesByFolder.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+        const chosenFiles =
+          folderEntries.length === 1
+            ? folderEntries[0]![1]
+            : yield* fromPromise(() =>
+                vscodeApi.window.showQuickPick(
+                  folderEntries.map(([dir, files]) => ({
+                    label: vscodeApi.workspace.asRelativePath(files[0]!.with({ path: dir })),
+                    files,
+                  })),
+                  { placeHolder: "Select a migrations folder to run" },
+                ),
+              ).pipe(Effect.map((picked) => picked?.files));
+
+        if (!chosenFiles) {
+          return;
+        }
+
+        const migrationUris = chosenFiles.toSorted((a, b) => numericPrefix(a) - numericPrefix(b));
+
+        for (const uri of migrationUris) {
+          const notebook = yield* fromPromise(() => vscodeApi.workspace.openNotebookDocument(uri));
+          yield* fromPromise(() => vscodeApi.window.showNotebookDocument(notebook));
+
+          const cells = notebook
+            .getCells()
+            .filter((cell) => cell.kind === vscodeApi.NotebookCellKind.Code);
+          const success = yield* fromPromise(() => sqlNotebookController.runAll(cells));
+
+          if (!success) {
+            yield* fromPromise(() =>
+              vscodeApi.window.showErrorMessage(
+                `Migration failed: ${vscodeApi.workspace.asRelativePath(uri)}`,
+              ),
+            ).pipe(Effect.asVoid);
+            return;
+          }
+        }
+
+        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(
+          Effect.asVoid,
         );
-
-        yield* Effect.forEach(
-          files,
-          (sql) =>
-            fromPromise(() =>
-              vscodeApi.commands.executeCommand(PGLITE_EXECUTE, sql),
-            ).pipe(Effect.asVoid),
-          { concurrency: 1 },
-        ).pipe(Effect.asVoid);
-
-        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(Effect.asVoid);
         yield* fromPromise(() =>
-          vscodeApi.window.showInformationMessage(`finished ${uris.length} migrations`),
+          vscodeApi.window.showInformationMessage(`finished ${migrationUris.length} migrations`),
         ).pipe(Effect.asVoid);
       }),
       "[Postgres] migrate command failed",
@@ -231,7 +271,7 @@ const activatePostgresFeature = Effect.gen(function* () {
 
   yield* vscodeService.registerCommand(PGLITE_EXECUTE, (...args) => {
     const sql = typeof args[0] === "string" ? args[0] : "";
-    return Effect.runPromise(
+    return Runtime.runPromise(runtime)(
       Effect.gen(function* () {
         const usesCopy = /\bCOPY\b/i.test(sql);
 
@@ -240,13 +280,13 @@ const activatePostgresFeature = Effect.gen(function* () {
           yield* syncWorkspaceToEmscriptenFs(vscodeApi, pglite).pipe(
             Effect.tapError((err) =>
               Effect.annotateCurrentSpan({
-                "error": true,
+                error: true,
                 "error.message": err instanceof Error ? err.message : String(err),
                 "error.type": "fs_sync",
               }),
             ),
             Effect.tapError((err) =>
-              Effect.sync(() => console.warn("[Postgres] workspace→emscripten sync failed", err)),
+              Effect.logWarning("[Postgres] workspace→emscripten sync failed", err),
             ),
             Effect.catchAll(() => Effect.void),
           );
@@ -265,20 +305,22 @@ const activatePostgresFeature = Effect.gen(function* () {
           yield* syncEmscriptenFsToWorkspace(vscodeApi, pglite).pipe(
             Effect.tapError((err) =>
               Effect.annotateCurrentSpan({
-                "error": true,
+                error: true,
                 "error.message": err instanceof Error ? err.message : String(err),
                 "error.type": "fs_sync",
               }),
             ),
             Effect.tapError((err) =>
-              Effect.sync(() => console.warn("[Postgres] emscripten→workspace sync failed", err)),
+              Effect.logWarning("[Postgres] emscripten→workspace sync failed", err),
             ),
             Effect.catchAll(() => Effect.void),
           );
         }
 
         const didMutateSchema = result.some((statementResult) =>
-          ["CREATE", "ALTER", "DROP"].some((prefix) => statementResult.statement.startsWith(prefix)),
+          ["CREATE", "ALTER", "DROP"].some((prefix) =>
+            statementResult.statement.startsWith(prefix),
+          ),
         );
 
         if (didMutateSchema) {
@@ -294,9 +336,7 @@ const activatePostgresFeature = Effect.gen(function* () {
             pgliteOutputChannel.appendLine(`Error: ${error.message}`);
           }),
         ),
-        Effect.catchAll((error) =>
-          Effect.succeed([{ error, statement: sql }]),
-        ),
+        Effect.catchAll((error) => Effect.succeed([{ error, statement: sql }])),
       ),
     );
   });
@@ -308,7 +348,9 @@ const activatePostgresFeature = Effect.gen(function* () {
           pgliteOutputChannel.replace("restarting postgres\n");
         });
         yield* pglite.reset;
-        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(Effect.asVoid);
+        yield* fromPromise(() => vscodeApi.commands.executeCommand(PGLITE_INTROSPECT)).pipe(
+          Effect.asVoid,
+        );
         const { rows } = yield* pglite.query<{ version: string }>("select version()");
         yield* Effect.sync(() => {
           pgliteOutputChannel.appendLine(rows[0]?.version ?? "failed fetching version");
@@ -369,21 +411,19 @@ const activatePostgresFeature = Effect.gen(function* () {
 
         const uris = yield* findFiles(vscodeApi, folder.uri);
         if (uris.length === 0) {
-          yield* fromPromise(() => vscodeApi.window.showInformationMessage("No files to download.")).pipe(
-            Effect.asVoid,
-          );
+          yield* fromPromise(() =>
+            vscodeApi.window.showInformationMessage("No files to download."),
+          ).pipe(Effect.asVoid);
           return;
         }
 
-        const entries = yield* Effect.forEach(
-          uris,
-          (uri) =>
-            fromPromise(() => vscodeApi.workspace.fs.readFile(uri)).pipe(
-              Effect.map((content) => ({
-                name: uri.path.replace(/^\/workspace\//, ""),
-                input: content,
-              })),
-            ),
+        const entries = yield* Effect.forEach(uris, (uri) =>
+          fromPromise(() => vscodeApi.workspace.fs.readFile(uri)).pipe(
+            Effect.map((content) => ({
+              name: uri.path.replace(/^\/workspace\//, ""),
+              input: content,
+            })),
+          ),
         );
 
         const { downloadZip } = yield* fromPromise(() => import("client-zip"));
@@ -408,7 +448,8 @@ const activatePostgresFeature = Effect.gen(function* () {
     runCommand(
       Effect.sync(() => {
         ERDPanelProvider.createOrShow(vscodeApi.Uri.parse(window.location.origin), {
-          query: <T>(sql: string, params?: unknown[]) => Effect.runPromise(pglite.query<T>(sql, params)),
+          query: <T>(sql: string, params?: unknown[]) =>
+            Runtime.runPromise(runtime)(pglite.query<T>(sql, params)),
         });
       }),
       "[Postgres] ERD command failed",
@@ -478,7 +519,7 @@ const syncWorkspaceToEmscriptenFs = (
       { concurrency: "unbounded" },
     );
 
-    console.log(`[Postgres] synced ${uris.length} workspace files → emscripten FS`);
+    yield* Effect.log(`[Postgres] synced ${uris.length} workspace files → emscripten FS`);
   }).pipe(Effect.withSpan("postgres.syncWorkspaceToEmscriptenFs"));
 
 /** Pull files from PGlite's Emscripten FS /workspace → VSCode FS (only new/changed) */
@@ -511,7 +552,9 @@ const syncEmscriptenFsToWorkspace = (
           const lastSlash = path.lastIndexOf("/");
           if (lastSlash > 0) {
             yield* fromPromise(() =>
-              vscodeApi.workspace.fs.createDirectory(vscodeApi.Uri.file(path.substring(0, lastSlash))),
+              vscodeApi.workspace.fs.createDirectory(
+                vscodeApi.Uri.file(path.substring(0, lastSlash)),
+              ),
             ).pipe(Effect.catchAll(() => Effect.void));
           }
           yield* fromPromise(() => vscodeApi.workspace.fs.writeFile(uri, content));
@@ -519,7 +562,7 @@ const syncEmscriptenFsToWorkspace = (
       { concurrency: 1 },
     );
 
-    console.log(`[Postgres] synced ${newPaths.length} new files emscripten FS → workspace`);
+    yield* Effect.log(`[Postgres] synced ${newPaths.length} new files emscripten FS → workspace`);
   }).pipe(Effect.withSpan("postgres.syncEmscriptenFsToWorkspace"));
 
 // oxlint-disable-next-line typescript/no-explicit-any -- generic constraint requires any for proper variance
@@ -527,7 +570,7 @@ function throttle<F extends (...args: any[]) => unknown>(
   fn: F,
   wait: number,
 ): readonly [throttled: (...args: Parameters<F>) => void, cancel: () => void] {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let timeout: ReturnType<typeof Effect.runFork> | null = null;
   let latestArgs: Parameters<F> | null = null;
 
   const throttled = (...args: Parameters<F>) => {
@@ -539,17 +582,21 @@ function throttle<F extends (...args: any[]) => unknown>(
     fn(...latestArgs);
     latestArgs = null;
 
-    timeout = setTimeout(() => {
-      timeout = null;
-      if (latestArgs) {
-        throttled(...latestArgs);
-      }
-    }, wait);
+    timeout = Effect.runFork(
+      Effect.sleep(wait).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            timeout = null;
+            if (latestArgs) throttled(...latestArgs);
+          }),
+        ),
+      ),
+    );
   };
 
   const cancel = () => {
     if (timeout !== null) {
-      clearTimeout(timeout);
+      Effect.runSync(Fiber.interrupt(timeout));
       timeout = null;
     }
     latestArgs = null;

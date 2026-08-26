@@ -1,4 +1,4 @@
-import { Effect, Schedule, pipe, Duration, Schema } from "effect";
+import { Config, Effect, Match, Schedule, pipe, Duration, Schema } from "effect";
 import { Prompt } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Terminal } from "@effect/platform";
@@ -53,7 +53,7 @@ const executeQuery = (pool: pg.PoolClient | pg.Pool, query: string) =>
 const testConnection = (pool: pg.Pool) =>
   Effect.tryPromise({
     try: () => pool.query('select true as "Connection test"'),
-    catch: (error: unknown) => {
+    catch: (error) => {
       const pgError = error as { code?: string; message?: string };
       if (pgError.code === "28P01") {
         return new DatabaseAuthError({ message: pgError.message ?? "Auth failed" });
@@ -71,20 +71,24 @@ const waitForDatabase = (pool: pg.Pool) =>
       while: (error) => error._tag === "DatabaseConnectionError",
     }),
     Effect.tapError((error) => {
-      if (error._tag === "DatabaseConnectionError") {
-        return Effect.log(`Database is not ready yet: ${error.message}`);
-      }
-      return Effect.void;
+      return Match.value(error).pipe(
+        Match.tags({
+          DatabaseAuthError: () => Effect.void,
+          DatabaseConnectionError: (connectionError) =>
+            Effect.log(`Database is not ready yet: ${connectionError.message}`),
+        }),
+        Match.exhaustive,
+      );
     }),
-    Effect.catchTag("DatabaseAuthError", (error) =>
-      Effect.die(new Error(`Database authentication failed: ${error.message}`)),
-    ),
-    Effect.catchTag("DatabaseConnectionError", () =>
-      Effect.gen(function* () {
-        yield* Effect.logError("Database never came up, aborting :(");
-        yield* Effect.sync(() => process.exit(1));
-      }),
-    ),
+    Effect.catchTags({
+      DatabaseAuthError: (error) =>
+        Effect.dieMessage(`Database authentication failed: ${error.message}`),
+      DatabaseConnectionError: () =>
+        Effect.gen(function* () {
+          yield* Effect.logError("Database never came up, aborting :(");
+          return yield* Effect.sync(() => process.exit(1));
+        }),
+    }),
   );
 
 // Acquire a pool connection with resource management
@@ -102,7 +106,7 @@ const acquireConnection = (pool: pg.Pool) =>
 
 // Prompt user for confirmation
 const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.gen(function* () {
-  if (process.env.NOCONFIRM) {
+  if (yield* Config.string("NOCONFIRM").pipe(Effect.isSuccess)) {
     return true;
   }
 
@@ -112,78 +116,82 @@ const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.g
   }).pipe(Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))));
 
   if (!result) {
-    yield* Effect.sync(() => process.exit(0));
+    return yield* Effect.sync(() => process.exit(0));
   }
 
   return result;
 });
 
 // Execute all database setup queries
-const executeDatabaseSetup = (rootPgPool: pg.PoolClient) =>
-  Effect.gen(function* () {
-    // Drop existing databases and roles
-    yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}`);
-    yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_shadow`);
-    yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_test`);
-    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_VISITOR}`);
-    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_AUTHENTICATOR}`);
-    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_OWNER}`);
-    yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_NAME}_shadow`);
+const executeDatabaseSetup = Effect.fnUntraced(function* (rootPgPool: pg.PoolClient) {
+  // Drop existing databases and roles
+  yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}`);
+  yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_shadow`);
+  yield* executeQuery(rootPgPool, `drop database if exists ${DATABASE_NAME}_test`);
+  yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_VISITOR}`);
+  yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_AUTHENTICATOR}`);
+  yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_OWNER}`);
+  yield* executeQuery(rootPgPool, `drop role if exists ${DATABASE_NAME}_shadow`);
 
-    // Create databases
-    yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}`);
-    yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}`);
+  // Create databases
+  yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}`);
+  yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}`);
 
-    yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}_shadow`);
-    yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}_shadow`);
+  yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}_shadow`);
+  yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}_shadow`);
 
-    yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}_test`);
-    yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}_test`);
+  yield* executeQuery(rootPgPool, `create database ${DATABASE_NAME}_test`);
+  yield* Effect.log(`CREATE DATABASE ${DATABASE_NAME}_test`);
 
-    // Create owner role
-    if (process.env.NODE_ENV === "production") {
-      yield* executeQuery(
-        rootPgPool,
-        `create role ${DATABASE_OWNER} with login password '${DATABASE_OWNER_PASSWORD}' noinherit`,
-      );
-      yield* Effect.log(`CREATE ROLE ${DATABASE_OWNER}`);
-    } else {
-      yield* executeQuery(
-        rootPgPool,
-        `create role ${DATABASE_OWNER} with login password '${DATABASE_OWNER_PASSWORD}' superuser`,
-      );
-      yield* Effect.log(`CREATE ROLE ${DATABASE_OWNER} SUPERUSER`);
-    }
-
-    // Grant privileges
+  // Create owner role
+  if (
+    yield* Config.string("NODE_ENV").pipe(
+      Effect.map((value) => value === "production"),
+      Effect.orElseSucceed(() => false),
+    )
+  ) {
     yield* executeQuery(
       rootPgPool,
-      `grant all privileges on database ${DATABASE_NAME} to ${DATABASE_OWNER}`,
+      `create role ${DATABASE_OWNER} with login password '${DATABASE_OWNER_PASSWORD}' noinherit`,
     );
-    yield* Effect.log(`GRANT ${DATABASE_OWNER}`);
-
-    // Create authenticator role
+    yield* Effect.log(`CREATE ROLE ${DATABASE_OWNER}`);
+  } else {
     yield* executeQuery(
       rootPgPool,
-      `create role ${DATABASE_AUTHENTICATOR} with login password '${DATABASE_AUTHENTICATOR_PASSWORD}' noinherit`,
+      `create role ${DATABASE_OWNER} with login password '${DATABASE_OWNER_PASSWORD}' superuser`,
     );
-    yield* Effect.log(`CREATE ROLE ${DATABASE_AUTHENTICATOR}`);
+    yield* Effect.log(`CREATE ROLE ${DATABASE_OWNER} SUPERUSER`);
+  }
 
-    // Create visitor role
-    yield* executeQuery(rootPgPool, `create role ${DATABASE_VISITOR}`);
-    yield* Effect.log(`CREATE ROLE ${DATABASE_VISITOR}`);
+  // Grant privileges
+  yield* executeQuery(
+    rootPgPool,
+    `grant all privileges on database ${DATABASE_NAME} to ${DATABASE_OWNER}`,
+  );
+  yield* Effect.log(`GRANT ${DATABASE_OWNER}`);
 
-    // Grant visitor to authenticator
-    yield* executeQuery(rootPgPool, `grant ${DATABASE_VISITOR} to ${DATABASE_AUTHENTICATOR}`);
-    yield* Effect.log(`GRANT ${DATABASE_VISITOR} TO ${DATABASE_AUTHENTICATOR}`);
+  // Create authenticator role
+  yield* executeQuery(
+    rootPgPool,
+    `create role ${DATABASE_AUTHENTICATOR} with login password '${DATABASE_AUTHENTICATOR_PASSWORD}' noinherit`,
+  );
+  yield* Effect.log(`CREATE ROLE ${DATABASE_AUTHENTICATOR}`);
 
-    // Create shadow role for graphile-migrate
-    yield* executeQuery(
-      rootPgPool,
-      `create role ${DATABASE_NAME}_shadow with login password '${SHADOW_DATABASE_PASSWORD}' superuser`,
-    );
-    yield* Effect.log(`CREATE ROLE ${DATABASE_NAME}_shadow`);
-  });
+  // Create visitor role
+  yield* executeQuery(rootPgPool, `create role ${DATABASE_VISITOR}`);
+  yield* Effect.log(`CREATE ROLE ${DATABASE_VISITOR}`);
+
+  // Grant visitor to authenticator
+  yield* executeQuery(rootPgPool, `grant ${DATABASE_VISITOR} to ${DATABASE_AUTHENTICATOR}`);
+  yield* Effect.log(`GRANT ${DATABASE_VISITOR} TO ${DATABASE_AUTHENTICATOR}`);
+
+  // Create shadow role for graphile-migrate
+  yield* executeQuery(
+    rootPgPool,
+    `create role ${DATABASE_NAME}_shadow with login password '${SHADOW_DATABASE_PASSWORD}' superuser`,
+  );
+  yield* Effect.log(`CREATE ROLE ${DATABASE_NAME}_shadow`);
+});
 
 // Main program
 const program = Effect.gen(function* () {
@@ -210,11 +218,7 @@ const program = Effect.gen(function* () {
         pipe(
           acquireConnection(pgPool),
           Effect.andThen((rootPgPool) => executeDatabaseSetup(rootPgPool)),
-          Effect.catchAll((error) =>
-            Effect.gen(function* () {
-              yield* Effect.logError(`Database setup error: ${String(error)}`);
-            }),
-          ),
+          Effect.catchAll((error) => Effect.logError(`Database setup error: ${String(error)}`)),
         ),
       );
     }),

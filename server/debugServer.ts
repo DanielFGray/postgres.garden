@@ -1,11 +1,16 @@
 import { WebSocketServer } from "ws";
 import Docker from "dockerode";
-import http from "node:http";
+import { Effect } from "effect";
+import * as S from "effect/Schema";
 import net from "node:net";
-import fs from "node:fs";
 import stream from "node:stream";
 
 const PORT = 5555;
+const http = process.getBuiltinModule("http");
+const fs = process.getBuiltinModule("fs");
+const tryPromise = <A>(run: () => PromiseLike<A>) =>
+  Effect.tryPromise({ try: run, catch: (cause) => String(cause) });
+const Init = S.Struct({ main: S.String, files: S.Record({ key: S.String, value: S.String }) });
 
 /** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
 function demuxStream(
@@ -25,8 +30,8 @@ function demuxStream(
   ).demuxStream(input, stdout, stderr);
 }
 
-function routeHandler(handler: (req: http.IncomingMessage, res: http.ServerResponse) => string) {
-  return (req: http.IncomingMessage, res: http.ServerResponse) => {
+function routeHandler(handler: (req: any, res: any) => string) {
+  return (req: any, res: any) => {
     try {
       const response = handler(req, res);
       if (response) res.write(response);
@@ -59,120 +64,147 @@ wss.on("connection", (ws) => {
   ws.on(
     "message",
     // oxlint-disable-next-line typescript/no-misused-promises
-    sequential(async (message: string) => {
-      if (!initialized) {
-        try {
-          initialized = true;
-          const init = JSON.parse(message) as { main: string; files: Record<string, string> };
-          for (const [file, content] of Object.entries(init.files)) {
-            await fs.promises.writeFile("/tmp/" + file, content);
+    sequential((message: string) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          if (!initialized) {
+            initialized = true;
+            const init = yield* S.decodeUnknown(S.parseJson(Init))(message);
+            for (const [file, content] of Object.entries(init.files)) {
+              yield* tryPromise(() => fs.promises.writeFile("/tmp/" + file, content));
+            }
+            const debuggerPort = yield* findPortFree;
+            const exec = yield* tryPromise(() =>
+              container.exec({
+                Cmd: [
+                  "node",
+                  `--dap=${debuggerPort}`,
+                  "--dap.WaitAttached",
+                  "--dap.Suspend=false",
+                  `${init.main}`,
+                ],
+                AttachStdout: true,
+                AttachStderr: true,
+              }),
+            );
+
+            const execStream = yield* tryPromise(() =>
+              exec.start({
+                hijack: true,
+              }),
+            );
+            const stdout = new stream.PassThrough();
+            const stderr = new stream.PassThrough();
+            demuxStream(container, execStream, stdout, stderr);
+
+            stdout.on("data", (buffer: Buffer) => ws.send(makeOutput("stdout", buffer)));
+            stderr.on("data", (buffer: Buffer) => ws.send(makeOutput("stderr", buffer)));
+
+            execStream.on("end", () => {
+              ws.close();
+            });
+
+            yield* Effect.sleep("1 second");
+            yield* Effect.sync(() => socket.connect(debuggerPort));
+
+            return;
           }
-          const debuggerPort = await findPortFree();
-          const exec = await container.exec({
-            Cmd: [
-              "node",
-              `--dap=${debuggerPort}`,
-              "--dap.WaitAttached",
-              "--dap.Suspend=false",
-              `${init.main}`,
-            ],
-            AttachStdout: true,
-            AttachStderr: true,
-          });
-
-          const execStream = await exec.start({
-            hijack: true,
-          });
-          const stdout = new stream.PassThrough();
-          const stderr = new stream.PassThrough();
-          demuxStream(container, execStream, stdout, stderr);
-
-          stdout.on("data", (buffer: Buffer) => ws.send(makeOutput("stdout", buffer)));
-          stderr.on("data", (buffer: Buffer) => ws.send(makeOutput("stderr", buffer)));
-
-          execStream.on("end", () => {
-            ws.close();
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          socket.connect(debuggerPort);
-
-          return;
-        } catch (err) {
-          console.error("Failed to initialize", err);
-        }
-      }
-      socket.sendMessage(message);
-    }),
+          socket.sendMessage(message);
+        }).pipe(Effect.catchAll((err) => Effect.logError("Failed to initialize", err))),
+      ),
+    ),
   );
 });
 server.listen(PORT, () => {
-  console.log(`Server started on port ${PORT} :)`);
+  Effect.runSync(Effect.log(`Server started on port ${PORT} :)`));
 });
 
 const docker = new Docker();
 const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
 
-async function createContainer() {
-  const stream = await docker.pull(image);
-  await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(stream, (err) => (err == null ? resolve() : reject(err)));
-  });
-  await fs.promises.mkdir("/tmp/workspace", {
-    recursive: true,
-  });
-  const container = await docker.createContainer({
-    name: "graalvm-debugger",
-    Image: image,
-    Entrypoint: ["sleep", "infinity"],
-    HostConfig: {
-      NetworkMode: "host",
-      Mounts: [
-        {
-          Type: "bind",
-          Target: "/workspace",
-          Source: "/tmp/workspace",
-        },
-      ],
-      AutoRemove: true,
-    },
-  });
-  return container;
+function createContainer() {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const stream = yield* tryPromise(() => docker.pull(image));
+      yield* Effect.async<void, string>((resume) => {
+        docker.modem.followProgress(stream, (err) =>
+          resume(err == null ? Effect.void : Effect.fail(String(err))),
+        );
+      });
+      yield* tryPromise(() =>
+        fs.promises.mkdir("/tmp/workspace", {
+          recursive: true,
+        }),
+      );
+      const container = yield* tryPromise(() =>
+        docker.createContainer({
+          name: "graalvm-debugger",
+          Image: image,
+          Entrypoint: ["sleep", "infinity"],
+          HostConfig: {
+            NetworkMode: "host",
+            Mounts: [
+              {
+                Type: "bind",
+                Target: "/workspace",
+                Source: "/tmp/workspace",
+              },
+            ],
+            AutoRemove: true,
+          },
+        }),
+      );
+      return container;
+    }),
+  );
 }
 
-async function prepareContainer(container: Docker.Container) {
-  await container.start();
+function prepareContainer(container: Docker.Container) {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      yield* tryPromise(() => container.start());
 
-  console.log("Installing node");
-  const exec = await container.exec({
-    Cmd: ["gu", "install", "nodejs"],
-    AttachStdout: true,
-    AttachStderr: true,
-  });
-  const execStream = await exec.start({
-    hijack: true,
-  });
-  execStream.pipe(process.stdout);
-  await new Promise((resolve) => execStream.on("end", resolve));
+      yield* Effect.log("Installing node");
+      const exec = yield* tryPromise(() =>
+        container.exec({
+          Cmd: ["gu", "install", "nodejs"],
+          AttachStdout: true,
+          AttachStderr: true,
+        }),
+      );
+      const execStream = yield* tryPromise(() =>
+        exec.start({
+          hijack: true,
+        }),
+      );
+      execStream.pipe(process.stdout);
+      yield* Effect.async<void>((resume) => {
+        execStream.on("end", () => resume(Effect.void));
+      });
 
-  console.log("Node installed");
+      yield* Effect.log("Node installed");
+    }),
+  );
 }
 
-console.log("Pulling image/starting container...");
+Effect.runSync(Effect.log("Pulling image/starting container..."));
 const containerPromise = createContainer();
 
-async function exitHandler() {
-  console.log("Exiting...");
-  try {
-    const container = await containerPromise;
-    await container.remove({
-      force: true,
-    });
-  } catch (err) {
-    console.error(err);
-  } finally {
-    process.exit();
-  }
+function exitHandler() {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.log("Exiting...");
+      const container = yield* tryPromise(() => containerPromise);
+      yield* tryPromise(() =>
+        container.remove({
+          force: true,
+        }),
+      );
+    }).pipe(
+      Effect.catchAll((err) => Effect.logError(err)),
+      Effect.ensuring(Effect.sync(() => process.exit())),
+    ),
+  );
 }
 /* oxlint-disable typescript/no-misused-promises */
 process.on("exit", exitHandler);
@@ -243,15 +275,13 @@ const TWO_CRLF = "\r\n\r\n";
 const HEADER_LINESEPARATOR = /\r?\n/;
 const HEADER_FIELDSEPARATOR = /: */;
 
-async function findPortFree() {
-  return new Promise<number>((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
+const findPortFree = Effect.async<number>((resume) => {
+  const srv = net.createServer();
+  srv.listen(0, () => {
+    const port = (srv.address() as net.AddressInfo).port;
+    srv.close(() => resume(Effect.succeed(port)));
   });
-}
+});
 
 function sequential<T, P extends unknown[]>(
   fn: (...params: P) => Promise<T>,

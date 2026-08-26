@@ -1,11 +1,12 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, onCleanup, For, Match, Switch } from "solid-js";
 import { sendInitialized } from "./api";
 import { ProfileSection } from "./sections/ProfileSection";
 import { EmailsSection } from "./sections/EmailsSection";
 import { SecuritySection } from "./sections/SecuritySection";
 import { LinkedAccountsSection } from "./sections/LinkedAccountsSection";
-import { DangerZoneSection } from "./sections/DangerZoneSection";
+import { DangerZoneSection, initializeDangerZone } from "./sections/DangerZoneSection";
+import * as S from "effect/Schema";
+import { Match as EffectMatch } from "effect";
 
 type SectionId = "profile" | "emails" | "security" | "linked-accounts" | "danger-zone";
 
@@ -23,49 +24,78 @@ const sections: NavSection[] = [
   { id: "danger-zone", label: "Danger Zone", icon: "codicon-warning" },
 ];
 
-const activeSectionAtom = Atom.make<SectionId>("profile");
+const SectionIdSchema = S.Literal(
+  "profile",
+  "emails",
+  "security",
+  "linked-accounts",
+  "danger-zone",
+);
+const InitStateMessage = S.Struct({
+  type: S.Literal("init-state"),
+  section: S.optional(SectionIdSchema),
+  deleteToken: S.optional(S.String),
+});
 
-// Tell extension we're ready
-sendInitialized();
+export const AccountSettings = () => {
+  const [activeSection, setActiveSection] = createSignal<SectionId>("profile");
 
-function renderSection(activeSection: SectionId) {
-  switch (activeSection) {
-    case "profile":
-      return <ProfileSection />;
-    case "emails":
-      return <EmailsSection />;
-    case "security":
-      return <SecuritySection />;
-    case "linked-accounts":
-      return <LinkedAccountsSection />;
-    case "danger-zone":
-      return <DangerZoneSection />;
-  }
-}
+  const handleMessage = (event: MessageEvent) => {
+    const msg = EffectMatch.value(S.decodeUnknownOption(InitStateMessage)(event.data)).pipe(
+      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
+      EffectMatch.exhaustive,
+    );
+    if (msg === undefined) return;
+    if (msg.section) setActiveSection(msg.section);
+    initializeDangerZone({
+      deleteToken: msg.deleteToken,
+    });
+  };
 
-export const AccountSettings = () =>
-  Effect.gen(function* () {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const activeSection = yield* Atom.get(activeSectionAtom);
+  window.addEventListener("message", handleMessage);
+  sendInitialized();
+  onCleanup(() => window.removeEventListener("message", handleMessage));
 
-    return (
-      <div class="settings-container">
-        <nav class="settings-nav">
-          <div class="nav-header">Account Settings</div>
-          {sections.map((section) => (
+  return (
+    <div
+      class="settings-container"
+      data-pw="account-settings-root"
+      data-pw-section={activeSection()}
+    >
+      <nav class="settings-nav">
+        <div class="nav-header">Account Settings</div>
+        <For each={sections}>
+          {(section) => (
             <button
-              key={section.id}
-              class={`nav-item ${activeSection === section.id ? "nav-item-active" : ""}`}
-              onClick={() => {
-                registry.set(activeSectionAtom, section.id);
-              }}
+              class={`nav-item ${activeSection() === section.id ? "nav-item-active" : ""}`}
+              onClick={() => setActiveSection(section.id)}
+              data-pw={`account-nav-${section.id}`}
             >
               <i class={`codicon ${section.icon}`} />
               <span>{section.label}</span>
             </button>
-          ))}
-        </nav>
-        <main class="settings-content">{renderSection(activeSection)}</main>
-      </div>
-    );
-  });
+          )}
+        </For>
+      </nav>
+      <main class="settings-content">
+        <Switch>
+          <Match when={activeSection() === "profile"}>
+            <ProfileSection />
+          </Match>
+          <Match when={activeSection() === "emails"}>
+            <EmailsSection />
+          </Match>
+          <Match when={activeSection() === "security"}>
+            <SecuritySection />
+          </Match>
+          <Match when={activeSection() === "linked-accounts"}>
+            <LinkedAccountsSection />
+          </Match>
+          <Match when={activeSection() === "danger-zone"}>
+            <DangerZoneSection />
+          </Match>
+        </Switch>
+      </main>
+    </div>
+  );
+};

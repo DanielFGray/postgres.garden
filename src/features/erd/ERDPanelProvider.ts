@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
+import { Effect, Fiber } from "effect";
 import { getMermaidERD, type ERDQueryClient } from "./query.js";
-import { generateNonce } from "../../utils/nonce";
+import { buildWebviewHtml } from "../webview/hostBridge";
 
 interface ExtensionToERDMessage {
   type: "load" | "error";
@@ -23,15 +24,19 @@ export class ERDPanelProvider {
   private _disposables: vscode.Disposable[] = [];
   private _pgliteService: ERDQueryClient;
 
-  private static _refreshTimeout: ReturnType<typeof setTimeout> | undefined;
+  private static _refreshFiber: Fiber.RuntimeFiber<void, never> | undefined;
 
   public static refresh() {
-    clearTimeout(ERDPanelProvider._refreshTimeout);
-    ERDPanelProvider._refreshTimeout = setTimeout(() => {
-      if (ERDPanelProvider.panel) {
-        void ERDPanelProvider.panel._loadERD();
-      }
-    }, 300);
+    if (ERDPanelProvider._refreshFiber) {
+      Effect.runFork(Fiber.interrupt(ERDPanelProvider._refreshFiber));
+    }
+    ERDPanelProvider._refreshFiber = Effect.runFork(
+      Effect.sleep("300 millis").pipe(
+        Effect.andThen(() =>
+          ERDPanelProvider.panel ? ERDPanelProvider.panel._loadERD() : Effect.void,
+        ),
+      ),
+    );
   }
 
   public static createOrShow(extensionUri: vscode.Uri, pgliteService: ERDQueryClient) {
@@ -70,46 +75,49 @@ export class ERDPanelProvider {
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
 
     // Load ERD data
-    void this._loadERD();
+    Effect.runFork(this._loadERD());
 
     // Handle dispose
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
     // Handle messages from webview
     this._panel.webview.onDidReceiveMessage(
-      (message: ERDToExtensionMessage) => this._handleMessage(message),
+      (message: ERDToExtensionMessage) => Effect.runFork(this._handleMessage(message)),
       null,
       this._disposables,
     );
   }
 
-  private async _loadERD() {
-    try {
-      const mermaidCode = await getMermaidERD(this._pgliteService);
-      this._postMessage({
-        type: "load",
-        data: { mermaidCode },
-      });
-    } catch (error) {
-      console.error("Failed to load ERD:", error);
-      this._postMessage({
-        type: "error",
-        data: {
-          message: `Failed to load schema: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      });
-    }
+  private _loadERD(): Effect.Effect<void> {
+    return getMermaidERD(this._pgliteService).pipe(
+      Effect.map((mermaidCode) => {
+        this._postMessage({ type: "load", data: { mermaidCode } });
+      }),
+      Effect.catchAll((error) =>
+        Effect.gen(this, function* () {
+          yield* Effect.logError("Failed to load ERD:", error);
+          this._postMessage({
+            type: "error",
+            data: {
+              message: `Failed to load schema: ${error.cause instanceof Error ? error.cause.message : String(error.cause)}`,
+            },
+          });
+        }),
+      ),
+    );
   }
 
-  private async _handleMessage(message: ERDToExtensionMessage) {
-    switch (message.type) {
-      case "initialized":
-        // Webview is ready, data will be sent automatically
-        break;
-      case "refresh":
-        await this._loadERD();
-        break;
-    }
+  private _handleMessage(message: ERDToExtensionMessage): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      switch (message.type) {
+        case "initialized":
+          // Webview is ready, data will be sent automatically
+          break;
+        case "refresh":
+          yield* this._loadERD();
+          break;
+      }
+    });
   }
 
   private _postMessage(message: ExtensionToERDMessage) {
@@ -129,25 +137,12 @@ export class ERDPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
-    const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/webview-dist/erd-viewer.js`;
-    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
-
-    const nonce = generateNonce();
-
-    return `<!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="${styleUri}" rel="stylesheet">
-        <title>Entity Relationship Diagram</title>
-      </head>
-      <body>
-        <div id="root"></div>
-        <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-      </html>`;
+    return buildWebviewHtml({
+      webview,
+      extensionUri: this._extensionUri,
+      title: "Entity Relationship Diagram",
+      styles: ["src/webview-dist/postgres-garden.css"],
+      scripts: ["src/webview-dist/erd-viewer.js"],
+    });
   }
 }

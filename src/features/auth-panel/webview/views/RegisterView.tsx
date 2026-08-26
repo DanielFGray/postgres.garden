@@ -1,134 +1,140 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
+import { createSignal, Show } from "solid-js";
 import { apiRequest, signInWithGitHub, notifyAuthComplete } from "../api";
-
-const submittingAtom = Atom.make(false);
-const errorAtom = Atom.make<string | null>(null);
+import { runRequest } from "../../../webview/request";
 
 interface RegisterResponse {
   id: string;
   username: string;
 }
 
-export const RegisterView = (props: { onNavigate: (view: string) => void }) =>
-  Effect.gen(function*() {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const submitting = yield* Atom.get(submittingAtom);
-    const error = yield* Atom.get(errorAtom);
+export const RegisterView = (props: { onNavigate: (view: string) => void }) => {
+  const [submitting, setSubmitting] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
 
-    function handleSubmit(e: Event) {
-      e.preventDefault();
-      const form = e.target as HTMLFormElement;
-      const data = new FormData(form);
-      const password = data.get("password") as string;
-      const confirmPassword = data.get("confirmPassword") as string;
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = new FormData(form);
+    const getText = (name: string) => {
+      const value = data.get(name);
+      return value instanceof File ? "" : (value ?? "");
+    };
+    const password = getText("password");
+    const confirmPassword = getText("confirmPassword");
 
-      registry.set(errorAtom, null);
+    setError(null);
 
-      if (password.length < 8) {
-        registry.set(errorAtom, "Password must be at least 8 characters");
-        return;
-      }
-      if (password !== confirmPassword) {
-        registry.set(errorAtom, "Passwords do not match");
-        return;
-      }
-
-      registry.set(submittingAtom, true);
-
-      void Effect.runFork(
-        apiRequest<RegisterResponse>("/register", "POST", {
-          username: data.get("username"),
-          email: data.get("email"),
-          password,
-        }, {
-          action: "auth.register.submit",
-        }).pipe(
-          Effect.tap((resp) => Effect.sync(() => notifyAuthComplete(resp.username))),
-          Effect.catchAll((err) =>
-            Effect.sync(() => {
-              registry.set(errorAtom, err.message);
-            }),
-          ),
-          Effect.ensuring(
-            Effect.sync(() => {
-              registry.set(submittingAtom, false);
-            }),
-          ),
-        ),
-      );
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
     }
 
-    return (
-      <div class="auth-view">
-        <div class="auth-header">
-          <h2>Create Account</h2>
-          <p class="auth-subtitle">Join postgres.garden</p>
+    setSubmitting(true);
+
+    void runRequest(
+      apiRequest<RegisterResponse>(
+        "/register",
+        "POST",
+        { username: getText("username"), email: getText("email"), password },
+        { action: "auth.register.submit" },
+      ),
+    )
+      .then(
+        (resp) => notifyAuthComplete(resp.username),
+        (reason: Error) => setError(reason.message),
+      )
+      .finally(() => setSubmitting(false));
+  }
+
+  return (
+    <div class="auth-view">
+      <div class="auth-header">
+        <h2>Create Account</h2>
+        <p class="auth-subtitle">Join postgres.garden</p>
+      </div>
+
+      <form onSubmit={handleSubmit} data-pw="register-form">
+        <div class="auth-field">
+          <label>Username</label>
+          <input
+            type="text"
+            name="username"
+            class="setting-input"
+            placeholder="Choose a username"
+            autofocus
+            data-pw="register-username-input"
+          />
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div class="auth-field">
-            <label>Username</label>
-            <input
-              type="text"
-              name="username"
-              class="setting-input"
-              placeholder="Choose a username"
-              autoFocus
-            />
-          </div>
+        <div class="auth-field">
+          <label>Email</label>
+          <input
+            type="email"
+            name="email"
+            class="setting-input"
+            placeholder="you@example.com"
+            data-pw="register-email-input"
+          />
+        </div>
 
-          <div class="auth-field">
-            <label>Email</label>
-            <input
-              type="email"
-              name="email"
-              class="setting-input"
-              placeholder="you@example.com"
-            />
-          </div>
+        <div class="auth-field">
+          <label>Password</label>
+          <input
+            type="password"
+            name="password"
+            class="setting-input"
+            placeholder="At least 8 characters"
+            data-pw="register-password-input"
+          />
+        </div>
 
-          <div class="auth-field">
-            <label>Password</label>
-            <input
-              type="password"
-              name="password"
-              class="setting-input"
-              placeholder="At least 8 characters"
-            />
-          </div>
+        <div class="auth-field">
+          <label>Confirm Password</label>
+          <input
+            type="password"
+            name="confirmPassword"
+            class="setting-input"
+            data-pw="register-confirm-password-input"
+          />
+        </div>
 
-          <div class="auth-field">
-            <label>Confirm Password</label>
-            <input type="password" name="confirmPassword" class="setting-input" />
-          </div>
-
-          {error && (
-            <div class="auth-error">
+        <Show when={error()}>
+          {(message) => (
+            <div class="auth-error" data-pw="register-error">
               <i class="codicon codicon-error" />
-              <span>{error}</span>
+              <span>{message()}</span>
             </div>
           )}
+        </Show>
 
-          <button class="button auth-button-primary" type="submit" disabled={submitting}>
-            {submitting ? "Creating account..." : "Create Account"}
-          </button>
-        </form>
+        <button
+          class="button auth-button-primary"
+          type="submit"
+          disabled={submitting()}
+          data-pw="register-submit-button"
+        >
+          {submitting() ? "Creating account..." : "Create Account"}
+        </button>
+      </form>
 
-        <div class="auth-links">
-          <button class="auth-link" onClick={() => props.onNavigate("login")}>
-            Already have an account? Sign in
-          </button>
-        </div>
-
-        <div class="auth-divider">
-          <span>or</span>
-        </div>
-
-        <button class="button auth-button-github" onClick={signInWithGitHub} type="button">
-          <i class="codicon codicon-github" />
-          Sign up with GitHub
+      <div class="auth-links">
+        <button class="auth-link" onClick={() => props.onNavigate("login")} data-pw="nav-login">
+          Already have an account? Sign in
         </button>
       </div>
-    );
-  });
+
+      <div class="auth-divider">
+        <span>or</span>
+      </div>
+
+      <button class="button auth-button-github" onClick={signInWithGitHub} type="button">
+        <i class="codicon codicon-github" />
+        Sign up with GitHub
+      </button>
+    </div>
+  );
+};

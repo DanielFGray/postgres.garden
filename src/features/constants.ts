@@ -45,6 +45,13 @@ export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS = "workbench.action.closeAllEdit
 
 // Account Commands
 export const ACCOUNT_SETTINGS_OPEN = "account.openSettings";
+export const AI_CONFIGURE_PROVIDER = "ai.configureProvider";
+export const AI_CLEAR_PROVIDER = "ai.clearProvider";
+
+// Chat
+export const AI_CHAT_PARTICIPANT = "postgres.garden.chat";
+/** VSCode only surfaces models from a provider registered under this vendor. */
+export const AI_MODEL_VENDOR = "copilot";
 
 // View IDs
 export const DATABASE_EXPLORER = "databaseExplorer";

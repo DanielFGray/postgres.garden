@@ -1,11 +1,13 @@
 import type * as vscode from "vscode";
-import { Effect, Layer, Option, pipe } from "effect";
+import { Clock, Effect, Layer, Match, Option, Random, Runtime, pipe } from "effect";
 import { VSCodeService } from "../vscode/service";
 
 export const TestingFeatureLive = Layer.scopedDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const api = vscodeService.api;
+    const runtime = yield* Effect.runtime<never>();
+    const runPromise = Runtime.runPromise(runtime);
 
     const testRe = /^([0-9]+)\s*([+*/-])\s*([0-9]+)\s*=\s*([0-9]+)/;
     const headingRe = /^(#+)\s*(.+)$/;
@@ -51,35 +53,37 @@ export const TestingFeatureLive = Layer.scopedDiscard(
 
     let generationCounter = 0;
 
-    const getContentFromFilesystem = async (uri: vscode.Uri): Promise<string> => {
-      try {
-        const rawContent = await api.workspace.fs.readFile(uri);
-        return textDecoder.decode(rawContent);
-      } catch (e) {
-        console.warn(`Error providing tests for ${uri.fsPath}`, e);
-        return "";
-      }
-    };
+    const getContentFromFilesystem = (uri: vscode.Uri): Promise<string> =>
+      Promise.resolve(
+        api.workspace.fs.readFile(uri).then(
+          (rawContent) => textDecoder.decode(rawContent),
+          (error) => {
+            void runPromise(Effect.logWarning(`Error providing tests for ${uri.fsPath}`, error));
+            return "";
+          },
+        ),
+      );
 
     class TestFile {
       public didResolve = false;
 
-      public async updateFromDisk(
+      public updateFromDisk(
         controller: vscode.TestController,
         item: vscode.TestItem,
       ): Promise<void> {
-        try {
-          const uri = item.uri;
-          if (!uri) {
-            item.error = "Missing test item URI";
-            return;
-          }
-          const content = await getContentFromFilesystem(uri);
-          item.error = undefined;
-          this.updateFromContents(controller, content, item);
-        } catch (e) {
-          item.error = (e as Error).stack;
+        const uri = item.uri;
+        if (!uri) {
+          item.error = "Missing test item URI";
+          return Promise.resolve();
         }
+        return getContentFromFilesystem(uri)
+          .then((content) => {
+            item.error = undefined;
+            this.updateFromContents(controller, content, item);
+          })
+          .catch((error: Error) => {
+            item.error = error.stack;
+          });
       }
 
       /**
@@ -150,42 +154,42 @@ export const TestingFeatureLive = Layer.scopedDiscard(
         return `${this.a} ${this.operator} ${this.b} = ${this.expected}`;
       }
 
-      async run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
-        const start = Date.now();
-        await new Promise((resolve) => setTimeout(resolve, 1000 + Math.random() * 1000));
-        const actual = this.evaluate();
-        const duration = Date.now() - start;
+      run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
+        const effect = Effect.gen(this, function* () {
+          const start = yield* Clock.currentTimeMillis;
+          yield* Effect.sleep(1000 + (yield* Random.next) * 1000);
+          const actual = this.evaluate();
+          const duration = (yield* Clock.currentTimeMillis) - start;
 
-        if (actual === this.expected) {
-          options.passed(item, duration);
-        } else {
-          const uri = item.uri;
-          const range = item.range;
-          if (!uri || !range) {
-            options.errored(item, new api.TestMessage("Missing test location"), duration);
-            return;
+          if (actual === this.expected) {
+            options.passed(item, duration);
+          } else {
+            const uri = item.uri;
+            const range = item.range;
+            if (!uri || !range) {
+              options.errored(item, new api.TestMessage("Missing test location"), duration);
+              return;
+            }
+            const message = api.TestMessage.diff(
+              `Expected ${item.label}`,
+              String(this.expected),
+              String(actual),
+            );
+            message.location = new api.Location(uri, range);
+            options.failed(item, message, duration);
           }
-          const message = api.TestMessage.diff(
-            `Expected ${item.label}`,
-            String(this.expected),
-            String(actual),
-          );
-          message.location = new api.Location(uri, range);
-          options.failed(item, message, duration);
-        }
+        });
+        return runPromise(effect);
       }
 
       private evaluate() {
-        switch (this.operator) {
-          case "-":
-            return this.a - this.b;
-          case "+":
-            return this.a + this.b;
-          case "/":
-            return Math.floor(this.a / this.b);
-          case "*":
-            return this.a * this.b;
-        }
+        return Match.value(this.operator).pipe(
+          Match.when("-", () => this.a - this.b),
+          Match.when("+", () => this.a + this.b),
+          Match.when("/", () => Math.floor(this.a / this.b)),
+          Match.when("*", () => this.a * this.b),
+          Match.exhaustive,
+        );
       }
     }
 
@@ -234,13 +238,12 @@ export const TestingFeatureLive = Layer.scopedDiscard(
       }));
     }
 
-    async function findInitialFiles(
-      controller: vscode.TestController,
-      pattern: vscode.GlobPattern,
-    ) {
-      (await api.workspace.findFiles(pattern)).forEach((file) => {
-        getOrCreateFile(controller, file);
-      });
+    function findInitialFiles(controller: vscode.TestController, pattern: vscode.GlobPattern) {
+      return api.workspace.findFiles(pattern).then((files) =>
+        files.forEach((file) => {
+          getOrCreateFile(controller, file);
+        }),
+      );
     }
 
     function startWatchingWorkspace(
@@ -254,12 +257,12 @@ export const TestingFeatureLive = Layer.scopedDiscard(
           getOrCreateFile(controller, uri);
           emitter.fire(uri);
         });
-        watcher.onDidChange(async (uri) => {
+        watcher.onDidChange((uri) => {
           const { file, data } = getOrCreateFile(controller, uri);
-          if (data.didResolve) {
-            await data.updateFromDisk(controller, file);
-          }
-          emitter.fire(uri);
+          const update = data.didResolve
+            ? data.updateFromDisk(controller, file)
+            : Promise.resolve();
+          void update.then(() => emitter.fire(uri));
         });
         watcher.onDidDelete((uri) => controller.items.delete(uri.toString()));
 
@@ -276,76 +279,87 @@ export const TestingFeatureLive = Layer.scopedDiscard(
       type OptionalStatementCoverage = vscode.StatementCoverage | undefined;
       const coveredLines = new Map</* file uri */ string, OptionalStatementCoverage[]>();
 
-      const discoverTests = async (tests: Iterable<vscode.TestItem>) => {
-        await Array.from(tests).reduce(async (prev, test) => {
-          await prev;
-          if (request.exclude?.includes(test) ?? false) {
-            return;
-          }
+      const discoverTests = (tests: Iterable<vscode.TestItem>): Promise<void> => {
+        return Array.from(tests).reduce(
+          (prev, test) =>
+            prev.then(() => {
+              if (request.exclude?.includes(test) ?? false) {
+                return Promise.resolve();
+              }
 
-          const data = testData.get(test);
-          if (data instanceof TestCase) {
-            run.enqueued(test);
-            queue.push({ test, data });
-          } else {
-            if (data instanceof TestFile && !data.didResolve) {
-              await data.updateFromDisk(ctrl, test);
-            }
+              const data = testData.get(test);
+              if (data instanceof TestCase) {
+                run.enqueued(test);
+                queue.push({ test, data });
+              } else {
+                if (data instanceof TestFile && !data.didResolve) {
+                  return data
+                    .updateFromDisk(ctrl, test)
+                    .then(() => discoverTests(gatherTestItems(test.children)));
+                }
 
-            await discoverTests(gatherTestItems(test.children));
-          }
+                return discoverTests(gatherTestItems(test.children));
+              }
 
-          if (test.uri != null && !coveredLines.has(test.uri.toString())) {
-            try {
-              const lines = (await getContentFromFilesystem(test.uri)).split("\n");
-              coveredLines.set(
-                test.uri.toString(),
-                lines.map((lineText, lineNo) =>
-                  lineText.trim().length > 0
-                    ? new api.StatementCoverage(0, new api.Position(lineNo, 0))
-                    : undefined,
-                ),
-              );
-            } catch {
-              // ignored
-            }
-          }
-        }, Promise.resolve());
+              if (test.uri == null || coveredLines.has(test.uri.toString())) return;
+              return getContentFromFilesystem(test.uri)
+                .then((content) => {
+                  coveredLines.set(
+                    test.uri!.toString(),
+                    content
+                      .split("\n")
+                      .map((lineText, lineNo) =>
+                        lineText.trim().length > 0
+                          ? new api.StatementCoverage(0, new api.Position(lineNo, 0))
+                          : undefined,
+                      ),
+                  );
+                })
+                .catch(() => undefined);
+            }),
+          Promise.resolve(),
+        );
       };
 
-      const runTestQueue = async () => {
-        await queue.reduce(async (prev, { test, data }) => {
-          await prev;
-          run.appendOutput(`Running ${test.id}\r\n`);
-          if (run.token.isCancellationRequested) {
-            run.skipped(test);
-          } else {
-            run.started(test);
-            await data.run(test, run);
-          }
+      const runTestQueue = () => {
+        return queue
+          .reduce(
+            (prev, { test, data }) =>
+              prev.then(() => {
+                run.appendOutput(`Running ${test.id}\r\n`);
+                if (run.token.isCancellationRequested) {
+                  run.skipped(test);
+                } else {
+                  run.started(test);
+                  return data.run(test, run);
+                }
 
-          const lineNo = test.range?.start.line;
-          const testUri = test.uri?.toString();
-          const fileCoverage =
-            testUri && typeof lineNo === "number" ? coveredLines.get(testUri) : undefined;
-          const lineInfo = typeof lineNo === "number" ? fileCoverage?.[lineNo] : undefined;
-          if (lineInfo != null) {
-            (lineInfo.executed as number)++;
-          }
+                const lineNo = test.range?.start.line;
+                const testUri = test.uri?.toString();
+                const fileCoverage =
+                  testUri && typeof lineNo === "number" ? coveredLines.get(testUri) : undefined;
+                const lineInfo = typeof lineNo === "number" ? fileCoverage?.[lineNo] : undefined;
+                if (lineInfo != null) {
+                  (lineInfo.executed as number)++;
+                }
 
-          run.appendOutput(`Completed ${test.id}\r\n`);
-        }, Promise.resolve());
+                run.appendOutput(`Completed ${test.id}\r\n`);
+                return;
+              }),
+            Promise.resolve(),
+          )
+          .then(() => {
+            Array.from(coveredLines.entries()).forEach(([uri, statements]) => {
+              run.addCoverage(
+                api.FileCoverage.fromDetails(
+                  api.Uri.parse(uri),
+                  statements.filter((s): s is vscode.StatementCoverage => s != null),
+                ),
+              );
+            });
 
-        Array.from(coveredLines.entries()).forEach(([uri, statements]) => {
-          run.addCoverage(
-            api.FileCoverage.fromDetails(
-              api.Uri.parse(uri),
-              statements.filter((s): s is vscode.StatementCoverage => s != null),
-            ),
-          );
-        });
-
-        run.end();
+            run.end();
+          });
       };
 
       void discoverTests(request.include ?? gatherTestItems(ctrl.items)).then(runTestQueue);
@@ -399,24 +413,31 @@ export const TestingFeatureLive = Layer.scopedDiscard(
       (d) => Effect.sync(() => d.dispose()),
     );
 
-    ctrl.refreshHandler = async () => {
-      await Promise.all(
+    ctrl.refreshHandler = () =>
+      Promise.all(
         getWorkspaceTestPatterns().map(({ pattern }) => findInitialFiles(ctrl, pattern)),
-      );
-    };
+      ).then(() => undefined);
 
-    ctrl.createRunProfile("Run Tests", api.TestRunProfileKind.Run, runHandler, true, undefined, true);
+    ctrl.createRunProfile(
+      "Run Tests",
+      api.TestRunProfileKind.Run,
+      runHandler,
+      true,
+      undefined,
+      true,
+    );
 
-    ctrl.resolveHandler = async (item) => {
+    ctrl.resolveHandler = (item) => {
       if (item == null) {
         startWatchingWorkspace(ctrl, fileChangedEmitter);
-        return;
+        return Promise.resolve();
       }
 
       const data = testData.get(item);
       if (data instanceof TestFile) {
-        await data.updateFromDisk(ctrl, item);
+        return data.updateFromDisk(ctrl, item);
       }
+      return Promise.resolve();
     };
 
     function updateNodeForDocument(e: vscode.TextDocument) {

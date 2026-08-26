@@ -1,15 +1,7 @@
 import * as vscode from "vscode";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
-import { Effect, Layer } from "effect";
-import { getNetworkState } from "../network";
+import { Effect } from "effect";
 import type { AuthWebviewMessage, AuthPanelCallbacks } from "./types";
-import { generateNonce } from "../../utils/nonce";
-import { applyTelemetryHeaders, type RequestTelemetryContext } from "../webview/requestTelemetry";
-
-const WebviewHttpClientLayer = Layer.mergeAll(
-  FetchHttpClient.layer,
-  Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
-);
+import { buildWebviewHtml, handleWebviewApiRequest } from "../webview/hostBridge";
 
 export class AuthPanelProvider {
   public static readonly viewType = "authPanel.editor";
@@ -77,39 +69,35 @@ export class AuthPanelProvider {
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(
       (message: AuthWebviewMessage) => {
-        void this._handleMessage(message);
+        void Effect.runPromise(this._handleMessage(message));
       },
       null,
       this._disposables,
     );
   }
 
-  private async _handleMessage(message: AuthWebviewMessage) {
-    switch (message.type) {
-      case "initialized":
-        this._sendInitView();
-        break;
+  private _handleMessage(message: AuthWebviewMessage): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      switch (message.type) {
+        case "initialized":
+          this._sendInitView();
+          break;
 
-      case "request":
-        await this._handleApiRequest(
-          message.id,
-          message.endpoint,
-          message.method,
-          message.body,
-          message.telemetry,
-        );
-        break;
+        case "request":
+          yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);
+          break;
 
-      case "github-signin":
-        this._handleGitHubSignIn();
-        break;
+        case "github-signin":
+          this._handleGitHubSignIn();
+          break;
 
-      case "auth-complete":
-        this._authCompleted = true;
-        AuthPanelProvider._callbacks?.onAuth(message.username);
-        this._panel.dispose();
-        break;
-    }
+        case "auth-complete":
+          this._authCompleted = true;
+          AuthPanelProvider._callbacks?.onAuth(message.username);
+          this._panel.dispose();
+          break;
+      }
+    });
   }
 
   private _sendInitView() {
@@ -151,78 +139,6 @@ export class AuthPanelProvider {
     }
   }
 
-  private async _handleApiRequest(
-    id: string,
-    endpoint: string,
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-    body?: unknown,
-    telemetry?: RequestTelemetryContext,
-  ) {
-    const networkState = getNetworkState();
-
-    if (networkState !== "online" && method !== "GET") {
-      this._panel.webview.postMessage({ type: "offline" });
-      return;
-    }
-
-    if (networkState === "offline") {
-      this._panel.webview.postMessage({
-        type: "error",
-        id,
-        error: { code: "OFFLINE", message: "You're offline" },
-      });
-      return;
-    }
-
-    try {
-      const headers: Record<string, string> = {};
-      if (body !== undefined) {
-        headers["Content-Type"] = "application/json";
-      }
-      applyTelemetryHeaders(headers, telemetry);
-
-      const { response, responseBody } = await Effect.gen(function*() {
-        const client = yield* HttpClient.HttpClient;
-        const requestWithoutBody = HttpClientRequest.make(method)(window.location.origin + endpoint).pipe(
-          HttpClientRequest.setHeaders(headers),
-        );
-        const request = body !== undefined
-          ? HttpClientRequest.bodyUnsafeJson(requestWithoutBody, body)
-          : requestWithoutBody;
-
-        const response = yield* client.execute(request);
-        const responseBody: unknown = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-        return { response, responseBody };
-      }).pipe(
-        Effect.provide(WebviewHttpClientLayer),
-        Effect.runPromise,
-      );
-
-      if (response.status < 200 || response.status >= 300) {
-        this._panel.webview.postMessage({
-          type: "error",
-          id,
-          error: {
-            code: String(response.status),
-            message: JSON.stringify(responseBody),
-          },
-        });
-        return;
-      }
-
-      this._panel.webview.postMessage({ type: "data", id, data: responseBody });
-    } catch (err) {
-      this._panel.webview.postMessage({
-        type: "error",
-        id,
-        error: {
-          code: "NETWORK",
-          message: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
-  }
-
   public dispose() {
     if (!this._authCompleted) {
       AuthPanelProvider._callbacks?.onCancel();
@@ -241,27 +157,20 @@ export class AuthPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
-    const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/webview-dist/auth-panel.js`;
-    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
-    const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
+    const serverOrigin = this._extensionUri.toString().replace(/\/$/, "");
 
-    const nonce = generateNonce();
-
-    return `<!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="${styleUri}" rel="stylesheet" />
-        <link href="${codiconsUri}" rel="stylesheet" />
-        <title>Sign In</title>
-      </head>
-      <body>
-        <div id="root"></div>
-        <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-      </html>`;
+    return buildWebviewHtml({
+      webview,
+      extensionUri: this._extensionUri,
+      title: "Sign In",
+      styles: [
+        "src/webview-dist/postgres-garden.css",
+        "node_modules/@vscode/codicons/dist/codicon.css",
+      ],
+      scripts: ["src/webview-dist/auth-panel.js"],
+      connectSrc: serverOrigin,
+      allowRemoteImages: true,
+      extraHeadHtml: `<meta name="pg-garden-server-origin" content="${serverOrigin}">`,
+    });
   }
 }

@@ -1,7 +1,7 @@
 {
   "window.autoDetectColorScheme": true,
-  "workbench.preferredDarkColorTheme": "Default Dark Modern",
-  "workbench.colorTheme": "Default Light Modern",
+  "workbench.preferredDarkColorTheme": "VS Code Dark",
+  "workbench.colorTheme": "VS Code Light",
   "workbench.iconTheme": "vs-seti",
   "editor.autoClosingBrackets": "languageDefined",
   "editor.autoClosingQuotes": "languageDefined",
@@ -26,5 +26,10 @@
   "workbench.layoutControl.enabled": false,
   "workbench.sideBar.location": "right",
   "workbench.activityBar.location": "top",
-  "window.menuBarVisibility": "classic"
+  "window.menuBarVisibility": "classic",
+  "chat.disableAIFeatures": true,
+  "disableAICustomizations": true,
+  "workbench.disableAICustomizations": true,
+  "chat.customizationsMenu.enabled": false,
+  "chat.agentsControl.enabled": "hidden"
 }

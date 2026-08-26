@@ -1,91 +1,99 @@
-import * as Effect from "effect/Effect";
-import { Atom, AtomRegistry } from "fibrae";
-import { sendInitialized, setOnInitView, setOnGitHubComplete, setOnGitHubError } from "./api";
+import { createSignal, onCleanup, Show, Switch, Match } from "solid-js";
+import { notifyAuthComplete, sendInitialized } from "./api";
 import { LoginView } from "./views/LoginView";
 import { RegisterView } from "./views/RegisterView";
 import { ForgotPasswordView } from "./views/ForgotPasswordView";
 import { ResetPasswordView, setResetParams } from "./views/ResetPasswordView";
 import { VerifyEmailView, triggerVerification } from "./views/VerifyEmailView";
-import { notifyAuthComplete } from "./api";
+import * as S from "effect/Schema";
+import { Match as EffectMatch } from "effect";
 
 type ViewId = "login" | "register" | "forgot-password" | "reset-password" | "verify-email";
 
-const activeViewAtom = Atom.make<ViewId>("login");
-const githubErrorAtom = Atom.make<string | null>(null);
+const ViewIdSchema = S.Literal(
+  "login",
+  "register",
+  "forgot-password",
+  "reset-password",
+  "verify-email",
+);
+const HostMessage = S.Union(
+  S.Struct({ type: S.Literal("github-complete"), username: S.String }),
+  S.Struct({ type: S.Literal("github-error"), message: S.String }),
+  S.Struct({
+    type: S.Literal("init-view"),
+    view: S.optional(ViewIdSchema),
+    params: S.optional(S.Record({ key: S.String, value: S.String })),
+  }),
+);
 
-// Wire up extension host messages
-setOnInitView((view, params) => {
-  // This is called when the extension host tells us which view to show
-  // (e.g., when opened from a /reset or /verify URL)
-  if (view === "reset-password" && params?.userId && params?.token) {
-    setResetParams(params.userId, params.token);
-  }
-  if (view === "verify-email" && params?.emailId && params?.token) {
-    triggerVerification(params.emailId, params.token);
-  }
-  // We'll set the view via the registry in the component
-  _pendingView = view as ViewId;
-});
+export const AuthPanel = () => {
+  const [activeView, setActiveView] = createSignal<ViewId>("login");
+  const [githubError, setGithubError] = createSignal<string | null>(null);
 
-setOnGitHubComplete((username) => {
-  notifyAuthComplete(username);
-});
-
-setOnGitHubError((message) => {
-  _pendingGithubError = message;
-});
-
-let _pendingView: ViewId | null = null;
-let _pendingGithubError: string | null = null;
-
-// Tell extension we're ready
-sendInitialized();
-
-function renderView(view: ViewId, onNavigate: (v: string) => void) {
-  switch (view) {
-    case "login":
-      return <LoginView onNavigate={onNavigate} />;
-    case "register":
-      return <RegisterView onNavigate={onNavigate} />;
-    case "forgot-password":
-      return <ForgotPasswordView onNavigate={onNavigate} />;
-    case "reset-password":
-      return <ResetPasswordView onNavigate={onNavigate} />;
-    case "verify-email":
-      return <VerifyEmailView onNavigate={onNavigate} />;
-  }
-}
-
-export const AuthPanel = () =>
-  Effect.gen(function* () {
-    const registry = yield* AtomRegistry.AtomRegistry;
-    const activeView = yield* Atom.get(activeViewAtom);
-    const githubError = yield* Atom.get(githubErrorAtom);
-
-    // Apply pending state from extension host
-    if (_pendingView) {
-      registry.set(activeViewAtom, _pendingView);
-      _pendingView = null;
+  const handleHostMessage = (message: MessageEvent) => {
+    const msg = EffectMatch.value(S.decodeUnknownOption(HostMessage)(message.data)).pipe(
+      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
+      EffectMatch.exhaustive,
+    );
+    if (msg === undefined) return;
+    if (msg.type === "github-complete") {
+      notifyAuthComplete(msg.username);
+    } else if (msg.type === "github-error") {
+      setGithubError(msg.message);
+    } else if (msg.type === "init-view") {
+      const view = msg.view ?? "login";
+      const params = msg.params;
+      if (view === "reset-password" && params?.userId && params?.token) {
+        setResetParams(params.userId, params.token);
+      }
+      if (view === "verify-email" && params?.emailId && params?.token) {
+        triggerVerification(params.emailId, params.token);
+      }
+      setActiveView(view);
     }
-    if (_pendingGithubError) {
-      registry.set(githubErrorAtom, _pendingGithubError);
-      _pendingGithubError = null;
-    }
+  };
 
-    function onNavigate(view: string) {
-      registry.set(githubErrorAtom, null);
-      registry.set(activeViewAtom, view as ViewId);
-    }
+  window.addEventListener("message", handleHostMessage);
+  sendInitialized();
+  onCleanup(() => window.removeEventListener("message", handleHostMessage));
 
-    return (
-      <div class="auth-container">
-        {githubError && (
-          <div class="auth-error" style={{ marginBottom: "16px" }}>
+  function onNavigate(view: string) {
+    setGithubError(null);
+    const parsed = EffectMatch.value(S.decodeUnknownOption(ViewIdSchema)(view)).pipe(
+      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
+      EffectMatch.exhaustive,
+    );
+    if (parsed !== undefined) setActiveView(parsed);
+  }
+
+  return (
+    <div class="auth-container" data-pw="auth-panel" data-pw-view={activeView()}>
+      <Show when={githubError()}>
+        {(message) => (
+          <div class="auth-error" style={{ "margin-bottom": "16px" }} data-pw="github-auth-error">
             <i class="codicon codicon-error" />
-            <span>{githubError}</span>
+            <span>{message()}</span>
           </div>
         )}
-        {renderView(activeView, onNavigate)}
-      </div>
-    );
-  });
+      </Show>
+      <Switch>
+        <Match when={activeView() === "login"}>
+          <LoginView onNavigate={onNavigate} />
+        </Match>
+        <Match when={activeView() === "register"}>
+          <RegisterView onNavigate={onNavigate} />
+        </Match>
+        <Match when={activeView() === "forgot-password"}>
+          <ForgotPasswordView onNavigate={onNavigate} />
+        </Match>
+        <Match when={activeView() === "reset-password"}>
+          <ResetPasswordView onNavigate={onNavigate} />
+        </Match>
+        <Match when={activeView() === "verify-email"}>
+          <VerifyEmailView onNavigate={onNavigate} />
+        </Match>
+      </Switch>
+    </div>
+  );
+};

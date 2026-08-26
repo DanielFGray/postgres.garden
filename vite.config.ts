@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
-import importMetaUrlPlugin from "@codingame/esbuild-import-meta-url-plugin";
+import wasm from "vite-plugin-wasm";
+import solid from "@solidjs/vite-plugin";
 import * as fs from "fs";
 import path from "path";
 
@@ -8,6 +9,12 @@ export default defineConfig({
   server: {
     port: 3000,
     host: "0.0.0.0",
+    // Build output and Playwright reports contain HTML files. Vite treats an
+    // HTML change as a full-page reload, even though neither directory is an
+    // input to the development app.
+    watch: {
+      ignored: ["**/dist/**", "**/playwright-report/**"],
+    },
     fs: {
       allow: ["../"], // allow to load codicon.ttf from monaco-editor in the parent folder
     },
@@ -21,6 +28,33 @@ export default defineConfig({
     format: "es",
   },
   plugins: [
+    solid(),
+    wasm(),
+    {
+      // The embedded workbench has global VS Code registrations, so a normal
+      // module replacement is unsafe. Route source updates through loader.tsx:
+      // it owns an Effect scope, waits for its finalizers, then reactivates the
+      // plugin layer without replacing the workbench DOM or PGlite worker.
+      name: "reload-workbench-plugins",
+      apply: "serve",
+      handleHotUpdate(ctx) {
+        const generatedOutput = ["dist", "playwright-report"].some((directory) =>
+          ctx.file.startsWith(path.join(import.meta.dirname, directory) + path.sep),
+        );
+        if (generatedOutput) {
+          return [];
+        }
+
+        if (!ctx.file.startsWith(path.join(import.meta.dirname, "src") + path.sep)) {
+          return;
+        }
+
+        const loader = ctx.server.moduleGraph.getModuleById(
+          path.join(import.meta.dirname, "src", "loader.tsx"),
+        );
+        return loader ? [...ctx.modules, loader] : ctx.modules;
+      },
+    },
     {
       name: "load-vscode-css-as-string",
       enforce: "pre",
@@ -64,7 +98,7 @@ export default defineConfig({
               if (pathname.endsWith(".html")) {
                 res.setHeader("Content-Type", "text/html");
                 res.writeHead(200);
-                res.write(fs.readFileSync(path.join(__dirname, pathname)));
+                res.write(fs.readFileSync(path.join(import.meta.dirname, pathname)));
                 res.end();
               }
             }
@@ -110,13 +144,9 @@ export default defineConfig({
       "marked",
     ],
     exclude: ["@electric-sql/pglite", "@postgres-language-server/wasm"],
-    esbuildOptions: {
-      tsconfig: "./tsconfig.json",
-      plugins: [importMetaUrlPlugin],
-    },
   },
   define: {
-    rootDirectory: JSON.stringify(__dirname),
+    rootDirectory: JSON.stringify(import.meta.dirname),
   },
   resolve: {
     dedupe: ["vscode"],

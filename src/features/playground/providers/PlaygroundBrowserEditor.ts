@@ -4,34 +4,28 @@
  */
 
 import * as vscode from "vscode";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
-import { Effect, Layer } from "effect";
-import { navigateTo } from "fibrae/router";
-import { getNetworkState } from "../../network";
-import { generateNonce } from "../../../utils/nonce";
-import { applyTelemetryHeaders, type RequestTelemetryContext } from "../../webview/requestTelemetry";
-
-const WebviewHttpClientLayer = Layer.mergeAll(
-  FetchHttpClient.layer,
-  Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
-);
+import { Effect } from "effect";
+import { navigateTo } from "../../../shared/navigation";
+import type { RequestTelemetryContext } from "../../webview/requestTelemetry";
+import { buildWebviewHtml, handleWebviewApiRequest } from "../../webview/hostBridge";
+import type { WebviewValue } from "../../webview/apiBridge";
 
 interface RequestMessage {
   type: "request";
   id: string;
   endpoint: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: unknown;
+  body?: WebviewValue;
   telemetry?: RequestTelemetryContext;
 }
 
-interface CommandMessage {
+interface OpenPlaygroundCommand {
   type: "command";
-  command: string;
-  data?: Record<string, unknown>;
+  command: "openPlayground";
+  data: { readonly hash: string };
 }
 
-type WebviewMessage = RequestMessage | CommandMessage;
+type WebviewMessage = RequestMessage | OpenPlaygroundCommand;
 
 export class PlaygroundBrowserPanel {
   public static currentPanel: PlaygroundBrowserPanel | undefined;
@@ -65,10 +59,7 @@ export class PlaygroundBrowserPanel {
     PlaygroundBrowserPanel.currentPanel = new PlaygroundBrowserPanel(panel, extensionUri);
   }
 
-  private constructor(
-    panel: vscode.WebviewPanel,
-    extensionUri: vscode.Uri,
-  ) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
     this._extensionUri = extensionUri;
 
@@ -81,7 +72,7 @@ export class PlaygroundBrowserPanel {
     // Handle messages from webview
     this._panel.webview.onDidReceiveMessage(
       (message: WebviewMessage) => {
-        void this._handleMessage(message);
+        void Effect.runPromise(this._handleMessage(message));
       },
       null,
       this._disposables,
@@ -102,135 +93,43 @@ export class PlaygroundBrowserPanel {
     }
   }
 
-  private async _handleMessage(message: WebviewMessage) {
-    switch (message.type) {
-      case "request":
-        await this._handleApiRequest(
-          message.id,
-          message.endpoint,
-          message.method,
-          message.body,
-          message.telemetry,
-        );
-        break;
+  private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      switch (message.type) {
+        case "request":
+          yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);
+          break;
 
-      case "command":
-        this._handleCommand(message.command, message.data);
-        break;
-    }
+        case "command":
+          yield* this._handleCommand(message);
+          break;
+      }
+    });
   }
 
-  private _handleCommand(command: string, data?: Record<string, unknown>) {
-    switch (command) {
-      case "openPlayground": {
-        const hash = data?.hash;
-        if (typeof hash !== "string") return;
-        const url = `/playgrounds/${hash}`;
-        console.log("[PlaygroundBrowser] Navigating to playground:", url);
-        navigateTo(url);
-        break;
+  private _handleCommand(command: OpenPlaygroundCommand): Effect.Effect<void> {
+    return Effect.gen(function* () {
+      switch (command.command) {
+        case "openPlayground": {
+          const url = `/playgrounds/${command.data.hash}`;
+          yield* Effect.log("[PlaygroundBrowser] Navigating to playground:", url);
+          navigateTo(url);
+          break;
+        }
       }
-    }
-  }
-
-  private async _handleApiRequest(
-    id: string,
-    endpoint: string,
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-    body?: unknown,
-    telemetry?: RequestTelemetryContext,
-  ) {
-    const networkState = getNetworkState();
-
-    // Block writes when offline
-    if (networkState !== "online" && method !== "GET") {
-      this._panel.webview.postMessage({ type: "offline" });
-      return;
-    }
-
-    // For reads when offline, still try (may have cached data)
-    if (networkState === "offline") {
-      this._panel.webview.postMessage({
-        type: "error",
-        id,
-        error: { code: "OFFLINE", message: "You're offline" },
-      });
-      return;
-    }
-
-    try {
-      const headers: Record<string, string> = {};
-      if (body !== undefined) {
-        headers["Content-Type"] = "application/json";
-      }
-      applyTelemetryHeaders(headers, telemetry);
-
-      const { response, responseBody } = await Effect.gen(function*() {
-        const client = yield* HttpClient.HttpClient;
-        const requestWithoutBody = HttpClientRequest.make(method)(window.location.origin + endpoint).pipe(
-          HttpClientRequest.setHeaders(headers),
-        );
-        const request = body !== undefined
-          ? HttpClientRequest.bodyUnsafeJson(requestWithoutBody, body)
-          : requestWithoutBody;
-
-        const response = yield* client.execute(request);
-        const responseBody: unknown = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-        return { response, responseBody };
-      }).pipe(
-        Effect.provide(WebviewHttpClientLayer),
-        Effect.runPromise,
-      );
-
-      if (response.status < 200 || response.status >= 300) {
-        this._panel.webview.postMessage({
-          type: "error",
-          id,
-          error: {
-            code: String(response.status),
-            message: JSON.stringify(responseBody),
-          },
-        });
-        return;
-      }
-
-      this._panel.webview.postMessage({ type: "data", id, data: responseBody });
-    } catch (err) {
-      this._panel.webview.postMessage({
-        type: "error",
-        id,
-        error: {
-          code: "NETWORK",
-          message: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
+    });
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
-    const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/webview-dist/playground-view.js`;
-    const signalsUri = `${baseUri}/src/webview-dist/signals.module.js`;
-    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
-    const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
-
-    const nonce = generateNonce();
-
-    return `<!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="${codiconsUri}" rel="stylesheet" />
-        <link href="${styleUri}" rel="stylesheet">
-        <title>Playground Browser</title>
-      </head>
-      <body>
-        <div id="root"></div>
-        <script type="module" nonce="${nonce}" src="${signalsUri}"></script>
-        <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-      </html>`;
+    return buildWebviewHtml({
+      webview,
+      extensionUri: this._extensionUri,
+      title: "Playground Browser",
+      styles: [
+        "node_modules/@vscode/codicons/dist/codicon.css",
+        "src/webview-dist/postgres-garden.css",
+      ],
+      scripts: ["src/webview-dist/signals.module.js", "src/webview-dist/playground-view.js"],
+    });
   }
 }

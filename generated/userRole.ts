@@ -6,5 +6,3 @@ export const UserRole = S.Union(
   S.Literal("pro"),
   S.Literal("admin"),
 );
-
-export type UserRoleType = S.Schema.Type<typeof UserRole>;

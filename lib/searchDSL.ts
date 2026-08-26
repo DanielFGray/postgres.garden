@@ -11,6 +11,8 @@
  * Unknown filter keys are silently ignored (forward-compatible).
  */
 
+import { Match } from "effect";
+
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
@@ -81,13 +83,15 @@ function tokenize(input: string): Token[] {
 // Parsed types
 // ---------------------------------------------------------------------------
 
-const SORT_MAP: Record<string, "created_at" | "updated_at" | "stars"> = {
+export type SortField = "created_at" | "updated_at" | "stars";
+
+type SortMap = Record<string, SortField>;
+
+const SORT_MAP: SortMap = {
   created: "created_at",
   updated: "updated_at",
   stars: "stars",
 };
-
-export type SortField = "created_at" | "updated_at" | "stars";
 
 export interface ParsedSearch {
   readonly username: string | null;
@@ -107,7 +111,9 @@ export interface ParsedSearchHint {
 // Parser (full — for server query building)
 // ---------------------------------------------------------------------------
 
-const SORT_LABELS: Record<string, string> = {
+type SortLabelMap = Record<string, string>;
+
+const SORT_LABELS: SortLabelMap = {
   created: "created",
   updated: "updated",
   stars: "stars",
@@ -120,24 +126,26 @@ export function parseSearchDSL(raw: string): ParsedSearch {
   const textParts: string[] = [];
 
   for (const token of tokenize(raw)) {
-    if (token._tag === "text") {
-      textParts.push(token.value);
-      continue;
-    }
-    switch (token.key) {
-      case "by":
-        username = token.value;
-        break;
-      case "sort":
-        if (SORT_MAP[token.value.toLowerCase()]) {
-          sort = SORT_MAP[token.value.toLowerCase()]!;
+    Match.value(token).pipe(
+      Match.tag("text", ({ value }) => textParts.push(value)),
+      Match.tag("filter", (token) => {
+        switch (token.key) {
+          case "by":
+            username = token.value;
+            break;
+          case "sort":
+            if (SORT_MAP[token.value.toLowerCase()]) {
+              sort = SORT_MAP[token.value.toLowerCase()]!;
+            }
+            break;
+          case "is":
+            if (token.value.toLowerCase() === "starred") starred = true;
+            break;
+          // unknown keys silently ignored
         }
-        break;
-      case "is":
-        if (token.value.toLowerCase() === "starred") starred = true;
-        break;
-      // unknown keys silently ignored
-    }
+      }),
+      Match.exhaustive,
+    );
   }
 
   return { username, sort, text: textParts.join(" "), starred };
@@ -153,18 +161,23 @@ export function parseSearchHint(raw: string): ParsedSearchHint {
   let starred = false;
 
   for (const token of tokenize(raw)) {
-    if (token._tag === "text") continue;
-    switch (token.key) {
-      case "by":
-        username = token.value;
-        break;
-      case "sort":
-        sortLabel = SORT_LABELS[token.value.toLowerCase()] ?? null;
-        break;
-      case "is":
-        if (token.value.toLowerCase() === "starred") starred = true;
-        break;
-    }
+    Match.value(token).pipe(
+      Match.tag("text", () => undefined),
+      Match.tag("filter", (token) => {
+        switch (token.key) {
+          case "by":
+            username = token.value;
+            break;
+          case "sort":
+            sortLabel = SORT_LABELS[token.value.toLowerCase()] ?? null;
+            break;
+          case "is":
+            if (token.value.toLowerCase() === "starred") starred = true;
+            break;
+        }
+      }),
+      Match.exhaustive,
+    );
   }
 
   return {

@@ -128,19 +128,22 @@ setCatchHandler(async ({ request }) => {
   if (request.destination === "document") {
     const cache = await caches.open("workbox-precache-v2");
     const keys = await cache.keys();
-    const precachedDocument = await keys.reduce<Promise<Response | undefined>>(async (prev, key) => {
-      const resolved = await prev;
-      if (resolved) {
-        return resolved;
-      }
-      if (key.url.endsWith("index.html") || key.url === new URL("/", self.location.origin).href) {
-        const response = await cache.match(key);
-        if (response) {
-          return addCoiHeaders(response);
+    const precachedDocument = await keys.reduce<Promise<Response | undefined>>(
+      async (prev, key) => {
+        const resolved = await prev;
+        if (resolved) {
+          return resolved;
         }
-      }
-      return undefined;
-    }, Promise.resolve(undefined));
+        if (key.url.endsWith("index.html") || key.url === new URL("/", self.location.origin).href) {
+          const response = await cache.match(key);
+          if (response) {
+            return addCoiHeaders(response);
+          }
+        }
+        return undefined;
+      },
+      Promise.resolve(undefined),
+    );
     if (precachedDocument) {
       return precachedDocument;
     }

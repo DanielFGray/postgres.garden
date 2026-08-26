@@ -1,8 +1,21 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
   "plugins": ["typescript"],
+  "jsPlugins": [{ "name": "qa-review", "specifier": "./tools/oxlint/qa-review/index.ts" }],
   "categories": {
     "correctness": "error"
+  },
+  "rules": {
+    "qa-review/no-chained-type-assertions": "error",
+    "qa-review/no-conditional-empty-object-spread": "error",
+    "qa-review/no-known-value-widening": "error",
+    "qa-review/no-object-parameters": "error",
+    "qa-review/no-runtime-typeof": "error",
+    "qa-review/no-shape-in-symbol-names": "error",
+    "qa-review/no-unknown-parameters": "error",
+    "qa-review/no-unknown-type-aliases": "error",
+    "qa-review/no-unsafe-dictionary-type": "error",
+    "qa-review/no-widen-then-assert": "error"
   },
   "ignorePatterns": [
     "dist/**",
@@ -15,18 +28,11 @@
     "src/features/notebook/renderer-dist/**",
     "src/webview-dist/**",
     "src/features/remoteExtensionExample/**",
-    "server/vendor/**"
+    "server/vendor/**",
+    "tools/ast-grep/tests/**",
+    "tools/oxlint/qa-review/fixtures/**"
   ],
   "overrides": [
-    {
-      "files": ["cypress/**/*.{js,ts}"],
-      "globals": {
-        "cy": "readonly",
-        "Cypress": "readonly",
-        "expect": "readonly",
-        "assert": "readonly"
-      }
-    },
     {
       "files": ["k6/**/*.js"],
       "globals": {

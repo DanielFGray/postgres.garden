@@ -1,8 +1,9 @@
 import { Elysia } from "elysia";
 import Docker from "dockerode";
-import net from "node:net";
-import fs from "node:fs";
-import stream from "node:stream";
+import net from "net";
+import stream from "stream";
+import { Effect } from "effect";
+import * as S from "effect/Schema";
 
 const PORT = 5555;
 
@@ -26,58 +27,79 @@ function demuxStream(
 
 const docker = new Docker();
 const image = "ghcr.io/graalvm/graalvm-ce:21.2.0";
+const fs = process.getBuiltinModule("fs");
+const tryPromise = <A>(run: () => PromiseLike<A>) =>
+  Effect.tryPromise({ try: run, catch: (cause) => String(cause) });
+const Init = S.Struct({ main: S.String, files: S.Record({ key: S.String, value: S.String }) });
 
-async function createContainer() {
-  const pullStream = await docker.pull(image);
-  await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(pullStream, (err) => (err == null ? resolve() : reject(err)));
-  });
-  await fs.promises.mkdir("/tmp/workspace", { recursive: true });
-  return docker.createContainer({
-    name: "graalvm-debugger",
-    Image: image,
-    Entrypoint: ["sleep", "infinity"],
-    HostConfig: {
-      NetworkMode: "host",
-      Mounts: [
-        {
-          Type: "bind",
-          Target: "/workspace",
-          Source: "/tmp/workspace",
-        },
-      ],
-      AutoRemove: true,
-    },
-  });
+function createContainer() {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const pullStream = yield* tryPromise(() => docker.pull(image));
+      yield* Effect.async<void, string>((resume) => {
+        docker.modem.followProgress(pullStream, (err) =>
+          resume(err == null ? Effect.void : Effect.fail(String(err))),
+        );
+      });
+      yield* tryPromise(() => fs.promises.mkdir("/tmp/workspace", { recursive: true }));
+      return yield* tryPromise(() =>
+        docker.createContainer({
+          name: "graalvm-debugger",
+          Image: image,
+          Entrypoint: ["sleep", "infinity"],
+          HostConfig: {
+            NetworkMode: "host",
+            Mounts: [
+              {
+                Type: "bind",
+                Target: "/workspace",
+                Source: "/tmp/workspace",
+              },
+            ],
+            AutoRemove: true,
+          },
+        }),
+      );
+    }),
+  );
 }
 
-async function prepareContainer(container: Docker.Container) {
-  await container.start();
-  console.log("Installing node");
-  const exec = await container.exec({
-    Cmd: ["gu", "install", "nodejs"],
-    AttachStdout: true,
-    AttachStderr: true,
-  });
-  const execStream = await exec.start({ hijack: true });
-  execStream.pipe(process.stdout);
-  await new Promise((resolve) => execStream.on("end", resolve));
-  console.log("Node installed");
+function prepareContainer(container: Docker.Container) {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      yield* tryPromise(() => container.start());
+      yield* Effect.log("Installing node");
+      const exec = yield* tryPromise(() =>
+        container.exec({
+          Cmd: ["gu", "install", "nodejs"],
+          AttachStdout: true,
+          AttachStderr: true,
+        }),
+      );
+      const execStream = yield* tryPromise(() => exec.start({ hijack: true }));
+      execStream.pipe(process.stdout);
+      yield* Effect.async<void>((resume) => {
+        execStream.on("end", () => resume(Effect.void));
+      });
+      yield* Effect.log("Node installed");
+    }),
+  );
 }
 
-console.log("Pulling image/starting container...");
+Effect.runSync(Effect.log("Pulling image/starting container..."));
 const containerPromise = createContainer();
 
-async function exitHandler() {
-  console.log("Exiting...");
-  try {
-    const c = await containerPromise;
-    await c.remove({ force: true });
-  } catch (err) {
-    console.error(err);
-  } finally {
-    process.exit();
-  }
+function exitHandler() {
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.log("Exiting...");
+      const c = yield* tryPromise(() => containerPromise);
+      yield* tryPromise(() => c.remove({ force: true }));
+    }).pipe(
+      Effect.catchAll((err) => Effect.logError(err)),
+      Effect.ensuring(Effect.sync(() => process.exit())),
+    ),
+  );
 }
 /* oxlint-disable typescript/no-misused-promises */
 process.on("exit", exitHandler);
@@ -152,15 +174,13 @@ class DAPSocket {
 
 // --- Helpers ---
 
-async function findPortFree() {
-  return new Promise<number>((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
+const findPortFree = Effect.async<number>((resume) => {
+  const srv = net.createServer();
+  srv.listen(0, () => {
+    const port = (srv.address() as net.AddressInfo).port;
+    srv.close(() => resume(Effect.succeed(port)));
   });
-}
+});
 
 export type OutputMessage = {
   type: "event";
@@ -210,49 +230,50 @@ new Elysia()
 
       // Process messages sequentially per connection
       state.queue = state.queue
-        .then(async () => {
-          if (!state.initialized) {
-            try {
-              state.initialized = true;
-              const init = JSON.parse(message) as {
-                main: string;
-                files: Record<string, string>;
-              };
-              await Object.entries(init.files).reduce(async (prev, [file, content]) => {
-                await prev;
-                await fs.promises.writeFile("/tmp/" + file, content);
-              }, Promise.resolve());
-              const debuggerPort = await findPortFree();
-              const exec = await container.exec({
-                Cmd: [
-                  "node",
-                  `--dap=${debuggerPort}`,
-                  "--dap.WaitAttached",
-                  "--dap.Suspend=false",
-                  init.main,
-                ],
-                AttachStdout: true,
-                AttachStderr: true,
-              });
+        .then(() => {
+          return Effect.runPromise(
+            Effect.gen(function* () {
+              if (!state.initialized) {
+                state.initialized = true;
+                const init = yield* S.decodeUnknown(S.parseJson(Init))(message);
+                yield* Effect.forEach(
+                  Object.entries(init.files),
+                  ([file, content]) =>
+                    tryPromise(() => fs.promises.writeFile("/tmp/" + file, content)),
+                  { concurrency: 1 },
+                );
+                const debuggerPort = yield* findPortFree;
+                const exec = yield* tryPromise(() =>
+                  container.exec({
+                    Cmd: [
+                      "node",
+                      `--dap=${debuggerPort}`,
+                      "--dap.WaitAttached",
+                      "--dap.Suspend=false",
+                      init.main,
+                    ],
+                    AttachStdout: true,
+                    AttachStderr: true,
+                  }),
+                );
 
-              const execStream = await exec.start({ hijack: true });
-              const stdout = new stream.PassThrough();
-              const stderr = new stream.PassThrough();
-              demuxStream(container, execStream, stdout, stderr);
+                const execStream = yield* tryPromise(() => exec.start({ hijack: true }));
+                const stdout = new stream.PassThrough();
+                const stderr = new stream.PassThrough();
+                demuxStream(container, execStream, stdout, stderr);
 
-              stdout.on("data", (buf: Buffer) => ws.send(makeOutput("stdout", buf)));
-              stderr.on("data", (buf: Buffer) => ws.send(makeOutput("stderr", buf)));
+                stdout.on("data", (buf: Buffer) => ws.send(makeOutput("stdout", buf)));
+                stderr.on("data", (buf: Buffer) => ws.send(makeOutput("stderr", buf)));
 
-              execStream.on("end", () => ws.close());
+                execStream.on("end", () => ws.close());
 
-              await new Promise((resolve) => setTimeout(resolve, 1000));
-              state.dapSocket.connect(debuggerPort);
-            } catch (err) {
-              console.error("Failed to initialize", err);
-            }
-            return;
-          }
-          state.dapSocket.sendMessage(message);
+                yield* Effect.sleep("1 second");
+                yield* Effect.sync(() => state.dapSocket.connect(debuggerPort));
+                return;
+              }
+              yield* Effect.sync(() => state.dapSocket.sendMessage(message));
+            }).pipe(Effect.catchAll((err) => Effect.logError("Failed to initialize", err))),
+          );
         })
         .catch(() => {});
     },
@@ -262,5 +283,5 @@ new Elysia()
     },
   })
   .listen(PORT, () => {
-    console.log(`Debug server started on port ${PORT}`);
+    Effect.runSync(Effect.log(`Debug server started on port ${PORT}`));
   });

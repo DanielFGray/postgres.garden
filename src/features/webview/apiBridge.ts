@@ -1,22 +1,37 @@
 import * as Effect from "effect/Effect";
-import {
-  createRequestTelemetryContext,
-  type RequestTelemetryContext,
-} from "./requestTelemetry";
+import * as S from "effect/Schema";
+import { createRequestTelemetryContext, type RequestTelemetryContext } from "./requestTelemetry";
 
-declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
+/** Values that can cross the webview transport without losing their shape. */
+export type WebviewValue =
+  | boolean
+  | null
+  | number
+  | string
+  | undefined
+  | readonly WebviewValue[]
+  | { readonly [key: string]: WebviewValue };
+
+declare function acquireVsCodeApi(): { postMessage(message: WebviewValue): void };
+
+export class WebviewRequestError extends S.TaggedError<WebviewRequestError>()(
+  "WebviewRequestError",
+  {
+    message: S.String,
+    code: S.optional(S.String),
+  },
+) {}
 
 type PendingRequest = {
-  resolve: (data: unknown) => void;
-  reject: (error: Error) => void;
+  resolve: (data: WebviewValue) => void;
+  reject: (error: WebviewRequestError) => void;
 };
 
 export type BridgeMessage = {
   type: string;
   id?: string;
-  data?: unknown;
+  data?: WebviewValue;
   error?: { code: string; message: string };
-  [key: string]: unknown;
 };
 
 type CreateBridgeOptions = {
@@ -43,12 +58,17 @@ export const createWebviewApiBridge = (options: CreateBridgeOptions) => {
       const req = pending.get(msg.id);
       if (req) {
         pending.delete(msg.id);
-        req.reject(new Error(msg.error?.message ?? "Unknown error"));
+        req.reject(
+          new WebviewRequestError({
+            message: msg.error?.message ?? "Unknown error",
+            code: msg.error?.code,
+          }),
+        );
       }
     } else if (msg.type === "offline") {
       Array.from(pending.entries()).forEach(([id, req]) => {
         pending.delete(id);
-        req.reject(new Error("You're offline"));
+        req.reject(new WebviewRequestError({ message: "You're offline", code: "OFFLINE" }));
       });
     }
 
@@ -58,15 +78,11 @@ export const createWebviewApiBridge = (options: CreateBridgeOptions) => {
   const request = <T>(
     endpoint: string,
     method = "GET",
-    body?: unknown,
+    body?: WebviewValue,
     telemetry?: Omit<RequestTelemetryContext, "requestId">,
-  ): Effect.Effect<T, Error> =>
-    Effect.async<T, Error>((resume) => {
+  ): Effect.Effect<T, WebviewRequestError> =>
+    Effect.async<T, WebviewRequestError>((resume) => {
       const id = String(++requestId);
-      const timeout = setTimeout(() => {
-        pending.delete(id);
-        resume(Effect.fail(new Error("Request timed out")));
-      }, 15_000);
 
       const context = createRequestTelemetryContext({
         action: telemetry?.action ?? `${method.toUpperCase()} ${endpoint}`,
@@ -77,25 +93,24 @@ export const createWebviewApiBridge = (options: CreateBridgeOptions) => {
       });
 
       pending.set(id, {
-        resolve: (data) => {
-          clearTimeout(timeout);
-          resume(Effect.succeed(data as T));
-        },
-        reject: (err) => {
-          clearTimeout(timeout);
-          resume(Effect.fail(err));
-        },
+        resolve: (data) => resume(Effect.succeed(data as T)),
+        reject: (err) => resume(Effect.fail(err)),
       });
 
       vscode.postMessage({ type: "request", id, endpoint, method, body, telemetry: context });
 
       return Effect.sync(() => {
-        clearTimeout(timeout);
         pending.delete(id);
       });
-    }).pipe(Effect.withSpan(`${options.spanPrefix} ${method.toUpperCase()} ${endpoint}`));
+    }).pipe(
+      Effect.timeoutFail({
+        duration: "15 seconds",
+        onTimeout: () => new WebviewRequestError({ message: "Request timed out", code: "TIMEOUT" }),
+      }),
+      Effect.withSpan(`${options.spanPrefix} ${method.toUpperCase()} ${endpoint}`),
+    );
 
-  const postMessage = (message: unknown): Effect.Effect<void> =>
+  const postMessage = (message: WebviewValue): Effect.Effect<void> =>
     Effect.sync(() => {
       vscode.postMessage(message);
     });

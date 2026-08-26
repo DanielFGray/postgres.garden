@@ -7,11 +7,11 @@
 // @ts-ignore internal VS Code module, resolved via package exports "./vscode/*"
 import { Delayer } from "@codingame/monaco-vscode-api/vscode/vs/base/common/async";
 
-type DelayerInternal = { cancel: () => void; completionPromise: Promise<unknown> | null };
-
-const proto = Delayer.prototype as unknown as DelayerInternal;
-const originalCancel = proto.cancel;
+const proto = Delayer.prototype;
+const originalCancel = proto.cancel.bind(proto);
 proto.cancel = function () {
+  // completionPromise is a private member of the third-party Delayer class.
+  // @ts-expect-error
   this.completionPromise?.catch(() => {});
   originalCancel.call(this);
 };

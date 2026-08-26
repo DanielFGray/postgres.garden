@@ -1,86 +1,45 @@
-import * as Effect from "effect/Effect";
-import { AtomRegistry } from "fibrae";
-import { createApp, type App } from "vue";
+import { onCleanup } from "solid-js";
+import { createApp } from "vue";
 import Plan from "./pev2/components/Plan.vue";
-import type { SQLResult } from "./types";
-
-// Import pev2 styles
+import type { SQLResult, SqlValue } from "./types";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./pev2/assets/css/tippy-bootstrap.css";
 
-interface ExplainViewProps {
-  data: SQLResult;
-}
+const extractPlan = (data: SQLResult): string => {
+  const formatValue = (value: SqlValue | undefined): string =>
+    typeof value === "object" && value !== null
+      ? JSON.stringify(value, null, 2)
+      : String(value ?? "");
+  if (data.rows.length === 0) return "";
+  const first = data.rows[0]!;
+  const field = first["QUERY PLAN"] ?? first["query plan"] ?? first.Plan;
+  if (typeof field === "object" && field !== null) return JSON.stringify(field, null, 2);
+  if (typeof field === "string" && /^[{[]/.test(field.trim())) return field;
+  if (field !== undefined) {
+    return data.rows
+      .map((row) => formatValue(row["QUERY PLAN"] ?? row["query plan"] ?? Object.values(row)[0]))
+      .join("\n");
+  }
+  const value = Object.values(first)[0];
+  return typeof value === "object"
+    ? JSON.stringify(value, null, 2)
+    : data.rows.map((row) => formatValue(Object.values(row)[0])).join("\n");
+};
 
-let vueApp: App | null = null;
-let initialized = false;
+/** Hosts the vendored pev2 Vue app inside the Solid renderer tree. */
+export function ExplainView(props: { data: SQLResult }) {
+  const mount = (el: HTMLDivElement) => {
+    const app = createApp(Plan, {
+      planSource: extractPlan(props.data),
+      planQuery: props.data.query || "",
+    });
+    app.mount(el);
+    onCleanup(() => app.unmount());
+  };
 
-// Unique ID to find the container in the DOM after render
-const CONTAINER_ID = "pev2-container-" + Math.random().toString(36).slice(2);
-
-export function ExplainView({ data }: ExplainViewProps) {
-  return Effect.gen(function* () {
-    yield* AtomRegistry.AtomRegistry;
-
-    if (!initialized) {
-      initialized = true;
-
-      // Schedule Vue mount after fibrae commits the DOM
-      queueMicrotask(() => {
-        const container = document.getElementById(CONTAINER_ID);
-        if (!container) return;
-
-        // Extract the plan from the result rows
-        let planSource = "";
-
-        if (data.rows.length > 0) {
-          const firstRow = data.rows[0]!;
-          const planField = firstRow["QUERY PLAN"] ?? firstRow["query plan"] ?? firstRow["Plan"];
-
-          if (planField !== undefined) {
-            if (typeof planField === "object" || Array.isArray(planField)) {
-              planSource = JSON.stringify(planField, null, 2);
-            } else if (
-              typeof planField === "string" &&
-              (planField.trim().startsWith("[") || planField.trim().startsWith("{"))
-            ) {
-              planSource = planField;
-            } else {
-              planSource = data.rows
-                .map((row) => row["QUERY PLAN"] ?? row["query plan"] ?? Object.values(row)[0])
-                .join("\n");
-            }
-          } else {
-            const firstValue = Object.values(firstRow)[0];
-            if (typeof firstValue === "string") {
-              planSource = data.rows.map((row) => Object.values(row)[0]).join("\n");
-            } else if (typeof firstValue === "object") {
-              planSource = JSON.stringify(firstValue, null, 2);
-            }
-          }
-        }
-
-        // Clean up previous Vue app if any
-        if (vueApp) {
-          vueApp.unmount();
-          vueApp = null;
-        }
-
-        // Create Vue app with vendored pev2 Plan component
-        const app = createApp(Plan, {
-          planSource: planSource,
-          planQuery: data.query || "",
-        });
-
-        vueApp = app;
-        app.mount(container);
-      });
-    }
-
-    return (
-      <div class="explain-view">
-        <div id={CONTAINER_ID} class="pev2-container" />
-      </div>
-    );
-  });
+  return (
+    <div class="explain-view">
+      <div ref={mount} class="pev2-container" />
+    </div>
+  );
 }

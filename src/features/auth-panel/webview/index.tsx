@@ -1,9 +1,8 @@
-import * as Effect from "effect/Effect";
-import { render } from "fibrae";
+import { render } from "@solidjs/web";
 import { AuthPanel } from "./AuthPanel";
 import "./styles.css";
 
 const container = document.getElementById("root");
 if (container) {
-  Effect.runFork(render(<AuthPanel />, container));
+  render(() => <AuthPanel />, container);
 }

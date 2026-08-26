@@ -1,7 +1,7 @@
 import { Effect, pipe, Schema as S } from "effect";
 import { Model } from "@effect/sql";
 import { type Selectable, sql } from "kysely";
-import { PgAuthDB, PgRootDB, withAuthContext } from "../db.js";
+import { asRoot, asVisitor } from "../db.js";
 import type { AppPublicUserEmails as UserEmail } from "../../generated/db.js";
 
 export interface UpdateProfileInput {
@@ -21,18 +21,15 @@ export class User extends Model.Class<User>("User")({
   is_verified: S.Boolean,
   created_at: Model.Generated(S.Date),
   updated_at: Model.Generated(S.Date),
-}) { }
+}) {}
 
 export class UserService extends Effect.Service<UserService>()("UserService", {
-  effect: Effect.gen(function*() {
-    const rootDb = yield* PgRootDB;
-    const authDb = yield* PgAuthDB;
-
+  effect: Effect.sync(() => {
     return {
-      requestAccountDeletion: (token: string | undefined) =>
-        Effect.gen(function*() {
-          if (!token) {
-            return yield* rootDb
+      requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
+        if (!token) {
+          return yield* asVisitor((authDb) =>
+            authDb
               .selectNoFrom((eb) =>
                 eb
                   .fn<boolean>("app_public.request_account_deletion", [])
@@ -41,10 +38,12 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
               .pipe(
                 Effect.head,
                 Effect.map((rows) => rows?.request_account_deletion === true),
-              );
-          }
+              ),
+          );
+        }
 
-          return yield* rootDb
+        return yield* asVisitor((authDb) =>
+          authDb
             .selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_public.confirm_account_deletion", [eb.val(token)])
@@ -53,13 +52,12 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .pipe(
               Effect.head,
               Effect.map((rows) => rows?.confirm_account_deletion === true),
-            );
-        }),
+            ),
+        );
+      }),
 
-      getProfile: (sessionId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      getProfile: () =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.users")
             .selectAll()
@@ -70,26 +68,23 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             ),
         ),
 
-      updateProfile: (sessionId: string, input: UpdateProfileInput) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      updateProfile: (input: UpdateProfileInput) =>
+        asVisitor((authDb) =>
           pipe(
             authDb
               .updateTable("app_public.users")
-              .where("id", "=", sql<string>`app_public.current_user_id()`),
-            (q) => (input.username !== undefined ? q.set("username", input.username) : q),
-            (q) => (input.name !== undefined ? q.set("name", input.name) : q),
-            (q) => (input.bio !== undefined ? q.set("bio", input.bio) : q),
-            (q) => (input.avatar_url !== undefined ? q.set("avatar_url", input.avatar_url) : q),
-            (q) => q.returningAll().pipe(Effect.head),
+              .where("id", "=", sql<string>`app_public.current_user_id()`)
+              .$if(input.username !== undefined, (q) => q.set("username", input.username!))
+              .$if(input.name !== undefined, (q) => q.set("name", input.name!))
+              .$if(input.bio !== undefined, (q) => q.set("bio", input.bio!))
+              .$if(input.avatar_url !== undefined, (q) => q.set("avatar_url", input.avatar_url!))
+              .returningAll(),
+            Effect.head,
           ),
         ),
 
-      listEmails: (sessionId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      listEmails: () =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.user_emails")
             .selectAll()
@@ -98,10 +93,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .orderBy("created_at", "asc"),
         ),
 
-      addEmail: (sessionId: string, email: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      addEmail: (email: string) =>
+        asVisitor((authDb) =>
           authDb
             .insertInto("app_public.user_emails")
             .values({ email })
@@ -109,10 +102,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .pipe(Effect.head),
         ),
 
-      deleteEmail: (sessionId: string, id: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      deleteEmail: (id: string) =>
+        asVisitor((authDb) =>
           authDb
             .deleteFrom("app_public.user_emails")
             .where("id", "=", id)
@@ -120,10 +111,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .pipe(Effect.head),
         ),
 
-      listAuthentications: (sessionId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      listAuthentications: () =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.user_authentications")
             .select(["id", "service", "identifier", "created_at"])
@@ -131,10 +120,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .orderBy("created_at", "asc"),
         ),
 
-      unlinkAuthentication: (sessionId: string, id: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      unlinkAuthentication: (id: string) =>
+        asVisitor((authDb) =>
           authDb
             .deleteFrom("app_public.user_authentications")
             .where("id", "=", id)
@@ -142,10 +129,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             .pipe(Effect.head),
         ),
 
-      hasPassword: (sessionId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      hasPassword: () =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom("app_public.users as u")
             .select((eb) => [
@@ -156,34 +141,36 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
         ),
 
       forgotPassword: (email: string) =>
-        rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<void>("app_public.forgot_password", [sql`${email}::citext`])
-              .as("forgot_password"),
-          )
-          .pipe(Effect.asVoid),
+        asRoot((rootDb) =>
+          rootDb
+            .selectNoFrom((eb) =>
+              eb
+                .fn<void>("app_public.forgot_password", [sql`${email}::citext`])
+                .as("forgot_password"),
+            )
+            .pipe(Effect.asVoid),
+        ),
 
       resetPassword: (userId: string, token: string, password: string) =>
-        rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_private.reset_password", [
-                sql`${userId}::uuid`,
-                eb.val(token),
-                eb.val(password),
-              ])
-              .as("reset_password"),
-          )
-          .pipe(
-            Effect.head,
-            Effect.map((rows) => ({ success: rows?.reset_password === true })),
-          ),
+        asRoot((rootDb) =>
+          rootDb
+            .selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_private.reset_password", [
+                  sql`${userId}::uuid`,
+                  eb.val(token),
+                  eb.val(password),
+                ])
+                .as("reset_password"),
+            )
+            .pipe(
+              Effect.head,
+              Effect.map((rows) => ({ success: rows?.reset_password === true })),
+            ),
+        ),
 
-      changePassword: (sessionId: string, oldPassword: string, newPassword: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      changePassword: (oldPassword: string, newPassword: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectNoFrom((eb) =>
               eb
@@ -200,21 +187,21 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
         ),
 
       verifyEmail: (emailId: string, token: string) =>
-        rootDb
-          .selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
-              .as("verify_email"),
-          )
-          .pipe(
-            Effect.head,
-            Effect.map((rows) => ({ success: rows?.verify_email === true })),
-          ),
+        asRoot((rootDb) =>
+          rootDb
+            .selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
+                .as("verify_email"),
+            )
+            .pipe(
+              Effect.head,
+              Effect.map((rows) => ({ success: rows?.verify_email === true })),
+            ),
+        ),
 
-      makeEmailPrimary: (sessionId: string, emailId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      makeEmailPrimary: (emailId: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectFrom((eb) =>
               eb
@@ -230,10 +217,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
             ),
         ),
 
-      resendEmailVerificationCode: (sessionId: string, emailId: string) =>
-        withAuthContext(
-          authDb,
-          sessionId,
+      resendEmailVerificationCode: (emailId: string) =>
+        asVisitor((authDb) =>
           authDb
             .selectNoFrom((eb) =>
               eb
@@ -249,9 +234,8 @@ export class UserService extends Effect.Service<UserService>()("UserService", {
         ),
     } as const;
   }),
-  dependencies: [PgRootDB.Live, PgAuthDB.Live],
   accessors: true,
-}) { }
+}) {}
 
 export const runUserService = <A, E>(effect: Effect.Effect<A, E, UserService>) =>
   Effect.runPromise(effect.pipe(Effect.provide(UserService.Default)));

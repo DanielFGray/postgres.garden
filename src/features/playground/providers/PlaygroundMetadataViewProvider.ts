@@ -4,34 +4,33 @@
  */
 
 import * as vscode from "vscode";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
-import { Effect, Layer } from "effect";
-import { navigateTo } from "fibrae/router";
-import { getNetworkState } from "../../network";
-import { generateNonce } from "../../../utils/nonce";
-import { applyTelemetryHeaders, type RequestTelemetryContext } from "../../webview/requestTelemetry";
-
-const WebviewHttpClientLayer = Layer.mergeAll(
-  FetchHttpClient.layer,
-  Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
-);
+import { Effect } from "effect";
+import { navigateTo } from "../../../shared/navigation";
+import type { RequestTelemetryContext } from "../../webview/requestTelemetry";
+import { buildWebviewHtml, handleWebviewApiRequest } from "../../webview/hostBridge";
+import type { WebviewValue } from "../../webview/apiBridge";
 
 interface RequestMessage {
   type: "request";
   id: string;
   endpoint: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: unknown;
+  body?: WebviewValue;
   telemetry?: RequestTelemetryContext;
 }
 
-interface CommandMessage {
+interface ForkCommandMessage {
   type: "command";
-  command: string;
-  data?: Record<string, unknown>;
+  command: "fork";
+  data: { readonly hash: string };
 }
 
-type WebviewMessage = RequestMessage | CommandMessage;
+interface ToggleStarCommandMessage {
+  type: "command";
+  command: "toggleStar";
+}
+
+type WebviewMessage = RequestMessage | ForkCommandMessage | ToggleStarCommandMessage;
 
 export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "playground.metadata";
@@ -63,7 +62,7 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
         }
         return;
       }
-      void this._handleMessage(message as WebviewMessage);
+      void Effect.runPromise(this._handleMessage(message as WebviewMessage));
     });
   }
 
@@ -92,30 +91,24 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
     });
   }
 
-  private async _handleMessage(message: WebviewMessage) {
-    switch (message.type) {
-      case "request":
-        await this._handleApiRequest(
-          message.id,
-          message.endpoint,
-          message.method,
-          message.body,
-          message.telemetry,
-        );
-        break;
+  private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      switch (message.type) {
+        case "request":
+          yield* handleWebviewApiRequest((msg) => this._view?.webview.postMessage(msg), message);
+          break;
 
-      case "command":
-        this._handleCommand(message.command, message.data);
-        break;
-    }
+        case "command":
+          this._handleCommand(message);
+          break;
+      }
+    });
   }
 
-  private _handleCommand(command: string, data?: Record<string, unknown>) {
-    switch (command) {
+  private _handleCommand(message: ForkCommandMessage | ToggleStarCommandMessage) {
+    switch (message.command) {
       case "fork": {
-        const hash = data?.hash;
-        if (typeof hash !== "string") return;
-        const url = `/playgrounds/${hash}`;
+        const url = `/playgrounds/${message.data.hash}`;
         navigateTo(url);
         break;
       }
@@ -126,104 +119,16 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
     }
   }
 
-  private async _handleApiRequest(
-    id: string,
-    endpoint: string,
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-    body?: unknown,
-    telemetry?: RequestTelemetryContext,
-  ) {
-    if (!this._view) return;
-
-    const networkState = getNetworkState();
-
-    if (networkState !== "online" && method !== "GET") {
-      this._view.webview.postMessage({ type: "offline" });
-      return;
-    }
-
-    if (networkState === "offline") {
-      this._view.webview.postMessage({
-        type: "error",
-        id,
-        error: { code: "OFFLINE", message: "You're offline" },
-      });
-      return;
-    }
-
-    try {
-      const headers: Record<string, string> = {};
-      if (body !== undefined) {
-        headers["Content-Type"] = "application/json";
-      }
-      applyTelemetryHeaders(headers, telemetry);
-
-      const { response, responseBody } = await Effect.gen(function* () {
-        const client = yield* HttpClient.HttpClient;
-        const requestWithoutBody = HttpClientRequest.make(method)(
-          window.location.origin + endpoint,
-        ).pipe(HttpClientRequest.setHeaders(headers));
-        const request =
-          body !== undefined
-            ? HttpClientRequest.bodyUnsafeJson(requestWithoutBody, body)
-            : requestWithoutBody;
-
-        const response = yield* client.execute(request);
-        const responseBody: unknown = yield* response.json.pipe(
-          Effect.orElseSucceed(() => null),
-        );
-        return { response, responseBody };
-      }).pipe(Effect.provide(WebviewHttpClientLayer), Effect.runPromise);
-
-      if (response.status < 200 || response.status >= 300) {
-        this._view.webview.postMessage({
-          type: "error",
-          id,
-          error: {
-            code: String(response.status),
-            message: JSON.stringify(responseBody),
-          },
-        });
-        return;
-      }
-
-      this._view.webview.postMessage({ type: "data", id, data: responseBody });
-    } catch (err) {
-      this._view.webview.postMessage({
-        type: "error",
-        id,
-        error: {
-          code: "NETWORK",
-          message: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
-  }
-
   private _getHtmlForWebview(webview: vscode.Webview): string {
-    const baseUri = this._extensionUri.toString().replace(/\/$/, "");
-    const scriptUri = `${baseUri}/src/webview-dist/playground-panel.js`;
-    const signalsUri = `${baseUri}/src/webview-dist/signals.module.js`;
-    const styleUri = `${baseUri}/src/webview-dist/postgres-garden.css`;
-    const codiconsUri = `${baseUri}/node_modules/@vscode/codicons/dist/codicon.css`;
-
-    const nonce = generateNonce();
-
-    return `<!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="${codiconsUri}" rel="stylesheet" />
-        <link href="${styleUri}" rel="stylesheet">
-        <title>Playground Info</title>
-      </head>
-      <body>
-        <div id="root"></div>
-        <script type="module" nonce="${nonce}" src="${signalsUri}"></script>
-        <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-      </body>
-      </html>`;
+    return buildWebviewHtml({
+      webview,
+      extensionUri: this._extensionUri,
+      title: "Playground Info",
+      styles: [
+        "node_modules/@vscode/codicons/dist/codicon.css",
+        "src/webview-dist/postgres-garden.css",
+      ],
+      scripts: ["src/webview-dist/signals.module.js", "src/webview-dist/playground-panel.js"],
+    });
   }
 }

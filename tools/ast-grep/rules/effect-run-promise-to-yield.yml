@@ -1,0 +1,5 @@
+id: effect-run-promise-to-yield
+language: TypeScript
+rule:
+  pattern: await Effect.runPromise($E)
+fix: yield* $E

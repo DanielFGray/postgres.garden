@@ -1,0 +1,236 @@
+- application [ref=f12e5]:
+  - generic [ref=f12e9]:
+    - generic [ref=f12e11]:
+      - menubar [ref=f12e15]:
+        - menuitem "More" [ref=f12e16]:
+          - generic [ref=f12e17]: 
+      - toolbar [ref=f12e23]:
+        - button "Go Back (Ctrl+Alt+-)" [disabled] [ref=f12e412]: 
+        - button "Go Forward (Ctrl+Shift+-)" [disabled] [ref=f12e413]: 
+        - listitem [ref=f12e414] [cursor=pointer]:
+          - toolbar [ref=f12e417]:
+            - button "postgres.garden - example.md" [ref=f12e418]:
+              - generic [ref=f12e419]: 
+      - toolbar "Title actions" [ref=f12e37]:
+        - button "Create Playground" [ref=f12e421] [cursor=pointer]: 
+        - button "Browse Playgrounds" [ref=f12e422] [cursor=pointer]: 
+        - button "Save" [ref=f12e423] [cursor=pointer]: 
+        - button "Show ERD" [ref=f12e424] [cursor=pointer]: 
+        - button "Download Workspace" [ref=f12e425] [cursor=pointer]: 
+        - button "Accounts" [ref=f12e426] [cursor=pointer]:
+          - generic "Accounts" [ref=f12e427]: 
+        - button "Manage" [ref=f12e428] [cursor=pointer]:
+          - generic "Manage" [ref=f12e429]: 
+    - generic [ref=f12e46]:
+      - main [ref=f12e54]:
+        - generic [ref=f12e63] [cursor=pointer]:
+          - generic [ref=f12e64]:
+            - tablist [ref=f12e65]:
+              - tab "example.md, preview" [selected] [ref=f12e66]:
+                - generic "example.md" [ref=f12e67]: 
+                - toolbar "Tab actions" [ref=f12e72]:
+                  - button "Close (Ctrl+W)" [ref=f12e73]: 
+              - text: 
+            - toolbar "Editor actions" [ref=f12e77]:
+              - button "Customize Notebook..." [ref=f12e432]: 
+              - button "Split Editor Right (Ctrl+\\) [Alt] Split Editor Down" [ref=f12e433]: 
+              - button "More Actions..." [ref=f12e436]: 
+          - list [ref=f12e87]:
+            - listitem [ref=f12e88]:
+              - generic "/workspace" [ref=f12e89]: workspace
+              - generic [ref=f12e92]: 
+            - listitem [ref=f12e93]:
+              - generic "~/example.md" [ref=f12e94]:
+                - text: 
+                - generic [ref=f12e95]: example.md
+              - generic [ref=f12e97]: 
+            - listitem [ref=f12e98]:
+              - generic [ref=f12e99]:
+                - text: 
+                - generic [ref=f12e100]: begin;
+              - text: 
+      - generic [ref=f12e106]:
+        - tablist "Active View Switcher" [ref=f12e111]:
+          - tab "Explorer (Ctrl+Shift+E)" [expanded] [selected] [ref=f12e112] [cursor=pointer]:
+            - generic "Explorer (Ctrl+Shift+E)" [ref=f12e113]: 
+          - tab "Search (Ctrl+Shift+F)" [ref=f12e114] [cursor=pointer]:
+            - generic "Search (Ctrl+Shift+F)" [ref=f12e115]: 
+          - tab "Source Control (Ctrl+Shift+G)" [ref=f12e116] [cursor=pointer]:
+            - generic "Source Control (Ctrl+Shift+G)" [ref=f12e117]: 
+          - tab "Run and Debug (Ctrl+Shift+D)" [ref=f12e118] [cursor=pointer]:
+            - generic "Run and Debug (Ctrl+Shift+D)" [ref=f12e119]: 
+          - tab "Extensions (Ctrl+Shift+X)" [ref=f12e120] [cursor=pointer]:
+            - generic "Extensions (Ctrl+Shift+X)" [ref=f12e121]: 
+        - generic [ref=f12e122]:
+          - heading "Explorer" [level=2] [ref=f12e124]
+          - toolbar "Explorer actions" [ref=f12e128]:
+            - button "Views and More Actions..." [ref=f12e439] [cursor=pointer]: 
+          - generic:
+            - generic:
+              - generic:
+                - toolbar
+        - generic [ref=f12e136]:
+          - generic [ref=f12e138]:
+            - 'button "Explorer Section: workspace (Workspace)" [expanded] [ref=f12e139] [cursor=pointer]':
+              - generic [ref=f12e140]: 
+              - text: 
+              - 'heading "Explorer Section: workspace (Workspace)" [level=3] [ref=f12e141]': workspace (Workspace)
+              - text:    
+            - tree "Files Explorer" [ref=f12e144]:
+              - generic [ref=f12e145]:
+                - treeitem "workspace" [expanded] [level=1] [ref=f12e146] [cursor=pointer]:
+                  - generic [ref=f12e147]:
+                    - generic [ref=f12e148]: 
+                    - generic "/workspace" [ref=f12e150]: workspace
+                - treeitem "00010-graphile-starter.sql" [level=2] [ref=f12e154] [cursor=pointer]:
+                  - generic "~/00010-graphile-starter.sql" [ref=f12e157]:
+                    - text: 
+                    - generic [ref=f12e158]: 00010-graphile-starter.sql
+                - treeitem "00100-posts.sql" [level=2] [ref=f12e161] [cursor=pointer]:
+                  - generic "~/00100-posts.sql" [ref=f12e164]:
+                    - text: 
+                    - generic [ref=f12e165]: 00100-posts.sql
+                - treeitem "99999-fixtures.sql" [level=2] [ref=f12e168] [cursor=pointer]:
+                  - generic "~/99999-fixtures.sql" [ref=f12e171]:
+                    - text: 
+                    - generic [ref=f12e172]: 99999-fixtures.sql
+                - treeitem "example.md" [level=2] [selected] [ref=f12e175] [cursor=pointer]:
+                  - generic "~/example.md" [ref=f12e178]:
+                    - text: 
+                    - generic [ref=f12e179]: example.md
+          - button "Outline Section" [ref=f12e184] [cursor=pointer]:
+            - generic [ref=f12e185]: 
+            - text: 
+            - heading "Outline" [level=3] [ref=f12e186]
+            - text:   
+          - button "Database Section" [ref=f12e189] [cursor=pointer]:
+            - generic [ref=f12e190]: 
+            - text: 
+            - heading "Database" [level=3] [ref=f12e191]
+            - text:  
+          - button "Playground Info Section" [ref=f12e194] [cursor=pointer]:
+            - generic [ref=f12e195]: 
+            - text: 
+            - heading "Playground Info" [level=3] [ref=f12e196]
+            - text:  
+    - status [ref=f12e198]:
+      - generic [ref=f12e199]:
+        - generic "remote postgres.garden" [ref=f12e200]:
+          - button "remote postgres.garden" [ref=f12e201]:
+            - generic [ref=f12e202]: 
+            - text: postgres.garden
+        - 'generic "Errors: 3" [ref=f12e203]':
+          - 'button "Errors: 3" [ref=f12e204] [cursor=pointer]':
+            - generic [ref=f12e205]: 
+            - text: "3"
+            - generic [ref=f12e206]: 
+            - text: "0"
+      - generic [ref=f12e207]:
+        - generic "Notifications" [ref=f12e208]:
+          - button "Notifications" [ref=f12e209] [cursor=pointer]:
+            - generic [ref=f12e210]: 
+        - 'generic "Layout: us" [ref=f12e211]':
+          - 'button "Layout: us" [ref=f12e212] [cursor=pointer]'
+        - generic "account testuser_y7gon83r, Signed in as testuser_y7gon83r Click for account options" [ref=f12e440]:
+          - button "account testuser_y7gon83r, Signed in as testuser_y7gon83r Click for account options" [ref=f12e441] [cursor=pointer]:
+            - generic [ref=f12e442]: 
+            - text: testuser_y7gon83r
+        - generic "Cell 1 of 6" [ref=f12e213]:
+          - button "Cell 1 of 6" [ref=f12e214] [cursor=pointer]
+        - 'generic "Spaces: 4" [ref=f12e215]':
+          - 'button "Spaces: 4" [ref=f12e216] [cursor=pointer]'
+  - generic [ref=f12e217]:
+    - alert
+    - alert
+  - generic [ref=f12e218]:
+    - generic [ref=f12e219]:
+      - toolbar [ref=f12e223]:
+        - button "Add Code Cell (Ctrl+Enter)" [ref=f12e443] [cursor=pointer]: 
+        - generic [ref=f12e444] [cursor=pointer]: Code
+        - button "Add Markdown Cell" [ref=f12e445] [cursor=pointer]: 
+        - generic [ref=f12e446] [cursor=pointer]: Markdown
+        - button "Run All" [ref=f12e448] [cursor=pointer]: 
+        - generic [ref=f12e449] [cursor=pointer]: Run All
+        - button "Clear All Outputs" [disabled] [ref=f12e450]: 
+        - generic [ref=f12e451]: Clear All Outputs
+        - button "More Actions..." [ref=f12e454] [cursor=pointer]: 
+      - toolbar [ref=f12e239]:
+        - button "SQL Notebook" [ref=f12e455] [cursor=pointer]: 
+        - generic [ref=f12e456] [cursor=pointer]: SQL Notebook
+    - list "Notebook Use Shift+Alt+F1 for accessibility help" [ref=f12e244]:
+      - generic [ref=f12e245]:
+        - iframe [ref=f12e247]:
+          - document [ref=f17e1]
+        - toolbar [ref=f12e252]:
+          - button [ref=f12e253] [cursor=pointer]:
+            - generic [ref=f12e254]: 
+            - text: Code
+          - button [ref=f12e255] [cursor=pointer]:
+            - generic [ref=f12e256]: 
+            - text: Markdown
+        - listitem "code cell" [ref=f12e257]:
+          - generic [ref=f12e258]:
+            - generic [ref=f12e260]:
+              - toolbar [ref=f12e263]:
+                - button "Execute Above Cells" [ref=f12e457] [cursor=pointer]: 
+                - button "Execute Cell and Below" [ref=f12e458] [cursor=pointer]: 
+                - button "Split Cell (Ctrl+K Ctrl+Shift+\\)" [ref=f12e459] [cursor=pointer]: 
+                - button "More Actions..." [ref=f12e462] [cursor=pointer]: 
+              - toolbar [ref=f12e272]:
+                - button "Delete Cell (Del)" [ref=f12e273] [cursor=pointer]: 
+            - generic [ref=f12e274]:
+              - generic "Execution Order" [ref=f12e275]: "[ ]"
+              - generic [ref=f12e277] [cursor=pointer]
+            - generic [ref=f12e279]:
+              - toolbar [ref=f12e283]:
+                - button "Execute Cell (Super+Enter)" [ref=f12e284] [cursor=pointer]: 
+              - generic [ref=f12e285]:
+                - code [ref=f12e287]:
+                  - generic [ref=f12e288]:
+                    - textbox "Editor content"
+                    - textbox [ref=f12e289]
+                    - generic [ref=f12e299]:
+                      - generic [ref=f12e300]: begin;
+                      - generic [ref=f12e302]: truncate app_public.users restart identity cascade;
+                - generic "PostgreSQL" [ref=f12e308] [cursor=pointer]
+            - text: 
+            - toolbar [ref=f12e313]:
+              - button "Add Code Cell (Ctrl+Enter)" [ref=f12e314] [cursor=pointer]:
+                - generic [ref=f12e315]: 
+                - text: Code
+              - button "Add Markdown Cell" [ref=f12e316] [cursor=pointer]:
+                - generic [ref=f12e317]: 
+                - text: Markdown
+        - listitem "code cell" [ref=f12e319]:
+          - generic [ref=f12e320]:
+            - generic "Execution Order" [ref=f12e323]: "[ ]"
+            - generic [ref=f12e327]:
+              - code [ref=f12e329]:
+                - generic [ref=f12e330]:
+                  - textbox "Editor content"
+                  - textbox [ref=f12e331]
+                  - generic [ref=f12e334]:
+                    - generic [ref=f12e335]: 
+                    - generic [ref=f12e338]: 
+                    - generic [ref=f12e342]: 
+                  - generic [ref=f12e369]:
+                    - generic [ref=f12e370]: with make_user(id) as (
+                    - generic [ref=f12e372]: select id from app_private
+                    - generic [ref=f12e374]: .really_create_user('alice', 'alice@test.com', true, 'alice', null)
+                    - generic [ref=f12e376]: ),
+                    - generic [ref=f12e378]: make_session as (
+                    - generic [ref=f12e380]: insert into app_private.sessions (user_id) values ((select id from make_user)) returning *
+                    - generic [ref=f12e382]: )
+                    - generic [ref=f12e384]: select set_config('my.session_id', (select uuid from make_session)::text, true);
+                    - generic [ref=f12e387]: select * from app_public.create_post('this is a test', 'my hands are typing words', 'private')
+                    - generic [ref=f12e389]: union all
+                    - generic [ref=f12e391]: select * from app_public.create_post('testing', 'This is another test post with more unique words', 'private');
+              - generic "PostgreSQL" [ref=f12e397] [cursor=pointer]
+            - text: 
+            - toolbar [ref=f12e402]:
+              - button "Add Code Cell (Ctrl+Enter)" [ref=f12e403] [cursor=pointer]:
+                - generic [ref=f12e404]: 
+                - text: Code
+              - button "Add Markdown Cell" [ref=f12e405] [cursor=pointer]:
+                - generic [ref=f12e406]: 
+                - text: Markdown

@@ -1,76 +1,30 @@
-/**
- * Dehydrate / hydrate page data for fibrae SSR.
- *
- * Server: dehydratePageState → __FIBRAE_STATE__ (DehydratedAtom[])
- * Client: hydratePageState  → PageState from that same array
- */
-
 import * as S from "effect/Schema";
-import * as Option from "effect/Option";
-import { Hydration } from "@effect-atom/atom";
-import { User, Commit } from "./schemas.js";
-import { RouteInfo } from "./atoms.js";
+import { Commit, User } from "./schemas.js";
 
-const encodeUser = S.encodeSync(S.NullOr(User));
-const encodeCommit = S.encodeSync(S.Option(Commit));
-const encodeRouteInfo = S.encodeSync(S.NullOr(RouteInfo));
+export const RouteInfoSchema = S.Struct({
+  type: S.Literal("home", "shared", "playground", "commit", "verify", "reset", "settings"),
+  playgroundHash: S.optional(S.String),
+  commitId: S.optional(S.String),
+  data: S.optional(S.String),
+});
 
-const decodeUser = S.decodeUnknownSync(S.NullOr(User));
-const decodeCommit = S.decodeUnknownSync(S.Option(Commit));
-const decodeRouteInfo = S.decodeUnknownSync(S.NullOr(RouteInfo));
+export const PageStateSchema = S.Struct({
+  user: S.NullOr(User),
+  commit: S.NullOr(Commit),
+  route: S.NullOr(RouteInfoSchema),
+});
 
-export interface PageState {
-  readonly user: User | null;
-  readonly commit: Commit | null;
-  readonly route: RouteInfo | null;
-}
+export type PageState = typeof PageStateSchema.Type;
 
-// Matches @effect-atom/atom's internal DehydratedAtomValue shape.
-// The public DehydratedAtom type is a narrow marker; hydrate() casts internally.
-interface DehydratedAtomValue extends Hydration.DehydratedAtom {
-  readonly key: string;
-  readonly value: unknown;
-  readonly dehydratedAt: number;
-}
+const emptyPageState: PageState = { user: null, commit: null, route: null };
 
-export function dehydratePageState(
-  state: PageState,
-): ReadonlyArray<Hydration.DehydratedAtom> {
-  const now = Date.now();
-  const atoms: DehydratedAtomValue[] = [
-    {
-      "~@effect-atom/atom/DehydratedAtom": true as const,
-      key: "pg/user",
-      value: encodeUser(state.user),
-      dehydratedAt: now,
-    },
-    {
-      "~@effect-atom/atom/DehydratedAtom": true as const,
-      key: "pg/commit",
-      value: encodeCommit(
-        state.commit ? Option.some(state.commit) : Option.none<Commit>(),
-      ),
-      dehydratedAt: now,
-    },
-    {
-      "~@effect-atom/atom/DehydratedAtom": true as const,
-      key: "pg/route",
-      value: encodeRouteInfo(state.route),
-      dehydratedAt: now,
-    },
-  ];
-  return atoms as ReadonlyArray<Hydration.DehydratedAtom>;
-}
+export const readInitialData = (): PageState => {
+  const decoded = S.decodeUnknownEither(PageStateSchema)(window.__INITIAL_DATA__);
+  return decoded._tag === "Right" ? decoded.right : emptyPageState;
+};
 
-export function hydratePageState(
-  state: ReadonlyArray<Hydration.DehydratedAtom>,
-): PageState {
-  const values = Hydration.toValues(state);
-  const find = (key: string) => values.find((v) => v.key === key)?.value;
-  const commitOpt = decodeCommit(find("pg/commit") ?? { _tag: "None" });
-  return {
-    user: decodeUser(find("pg/user") ?? null),
-    commit: Option.isSome(commitOpt) ? commitOpt.value : null,
-    route: decodeRouteInfo(find("pg/route") ?? null),
-  };
+declare global {
+  interface Window {
+    __INITIAL_DATA__?: unknown;
+  }
 }
