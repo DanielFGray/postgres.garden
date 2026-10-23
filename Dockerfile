@@ -1,5 +1,5 @@
 # Stage 1: Install dependencies and build
-FROM oven/bun:1 AS builder
+FROM oven/bun:1.4.4 AS builder
 WORKDIR /app
 
 COPY package.json bun.lock ./
@@ -14,7 +14,7 @@ ENV VITE_OTEL_COLLECTOR_URL=$VITE_OTEL_COLLECTOR_URL
 RUN bun run build
 
 # Stage 2: Production runtime
-FROM oven/bun:1 AS runtime
+FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
 COPY package.json bun.lock ./
