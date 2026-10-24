@@ -1,4 +1,4 @@
-import { createSignal, Match, Switch } from "solid-js";
+import { createSignal, Match, onSettled, Switch } from "solid-js";
 import { apiRequest } from "../api";
 import { runRequest } from "../../../webview/request";
 
@@ -17,8 +17,10 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal(false);
 
-  const params = pending();
-  if (!autoVerifyAttempted && params) {
+  // Signal writes are not allowed while the component renders, so the request starts once mounted.
+  onSettled(() => {
+    const params = pending();
+    if (autoVerifyAttempted || !params) return;
     autoVerifyAttempted = true;
     setVerifying(true);
     void runRequest(
@@ -29,7 +31,7 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
         (reason: Error) => setError(reason.message),
       )
       .finally(() => setVerifying(false));
-  }
+  });
 
   return (
     <Switch>
