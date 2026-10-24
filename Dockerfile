@@ -18,7 +18,8 @@ FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+# --ignore-scripts: the prepare script patches dev-only tooling that is not installed here
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # Built output: esbuild server bundle + Vite client assets
 COPY --from=builder /app/dist ./dist
