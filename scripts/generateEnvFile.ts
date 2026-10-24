@@ -4,8 +4,6 @@ import dotenv from "dotenv";
 import { Prompt } from "effect/cli";
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Config, Crypto, Effect, FileSystem } from "effect";
-import * as S from "effect/Schema";
-import { envSchema } from "../server/envSchema.js";
 import packageJson from "../package.json" with { type: "json" };
 
 const DOTENV_PATH = ".env";
@@ -173,7 +171,7 @@ const program = Effect.gen(function* () {
 
   const existing = yield* readDotenv;
 
-  if (S.is(envSchema)(existing)) {
+  if (fieldOrder.every((key) => existing[key] !== undefined)) {
     yield* Effect.logInfo(".env already complete");
     return;
   }

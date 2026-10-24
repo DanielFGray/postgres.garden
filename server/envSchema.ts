@@ -1,25 +1,19 @@
 import * as S from "effect/Schema";
 
+/**
+ * What the production server reads from the environment. Migrations and the
+ * worker read their own variables, and dev scripts own the dev-only ones
+ * (see `scripts/generateEnvFile.ts`).
+ */
 export const envSchema = S.Struct({
   NODE_ENV: S.Union([S.Literals(["development"]), S.Literals(["production"]), S.Literals(["test"])]),
-  ROOT_DATABASE_USER: S.String,
-  ROOT_DATABASE_PASSWORD: S.String,
-  ROOT_DATABASE_URL: S.String,
-  DATABASE_HOST: S.String,
-  DATABASE_PORT: S.String,
-  DATABASE_NAME: S.String,
-  DATABASE_OWNER: S.String,
-  DATABASE_OWNER_PASSWORD: S.String,
-  DATABASE_URL: S.String,
-  DATABASE_AUTHENTICATOR: S.String,
-  DATABASE_AUTHENTICATOR_PASSWORD: S.String,
-  SHADOW_DATABASE_PASSWORD: S.String,
-  SHADOW_DATABASE_URL: S.String,
-  AUTH_DATABASE_URL: S.String,
-  DATABASE_VISITOR: S.String,
-  SECRET: S.String,
   PORT: S.String,
   VITE_ROOT_URL: S.String,
+  /** Owner login. The server's root pool connects with it. */
+  DATABASE_URL: S.String,
+  /** Login for the visitor pool. It switches to `DATABASE_VISITOR` per request. */
+  AUTH_DATABASE_URL: S.String,
+  DATABASE_VISITOR: S.String,
   GITHUB_CLIENT_ID: S.optionalKey(S.String),
   GITHUB_CLIENT_SECRET: S.optionalKey(S.String),
   GITHUB_PAT: S.optionalKey(S.String),

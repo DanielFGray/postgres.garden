@@ -41,7 +41,6 @@
    * these.
    */
   "placeholders": {
-    ":DATABASE_AUTHENTICATOR": "!ENV",
     ":DATABASE_VISITOR": "!ENV"
   },
 
