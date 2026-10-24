@@ -1,5 +1,5 @@
 import { getService, ISecretStorageService } from "@codingame/monaco-vscode-api/services";
-import { Effect, Option, Redacted } from "effect";
+import { Context, Effect, Layer, Option, Redacted } from "effect";
 import * as S from "effect/Schema";
 import type { ProviderId } from "../../lib/ai/providers";
 import { toErrorMessage } from "../shared/index.js";
@@ -21,10 +21,7 @@ class AiCredentialsError extends S.TaggedError<AiCredentialsError>()("AiCredenti
   message: S.String,
 }) {}
 
-const StoredCredentials = S.Record({
-  key: S.String,
-  value: S.Struct({ model: S.String, apiKey: S.String }),
-});
+const StoredCredentials = S.Record(S.String, S.Struct({ model: S.String, apiKey: S.String }));
 
 type Stored = Record<string, { model: string; apiKey: string }>;
 
@@ -34,8 +31,8 @@ const toCredentialError = (action: string) => (cause: unknown) =>
     cause,
   });
 
-export class AiCredentials extends Effect.Service<AiCredentials>()("app/AiCredentials", {
-  effect: Effect.gen(function* () {
+export class AiCredentials extends Context.Service<AiCredentials>()("app/AiCredentials", {
+  make: Effect.gen(function* () {
     // registerExtension exposes only getApi(); there is no ExtensionContext, so
     // context.secrets is unavailable. ISecretStorageService is reached through
     // the service container instead. It is APPLICATION-scoped and persisted to
@@ -51,7 +48,7 @@ export class AiCredentials extends Effect.Service<AiCredentials>()("app/AiCreden
         catch: toCredentialError("read"),
       });
       if (raw === undefined) return {};
-      return yield* S.decodeUnknown(S.parseJson(StoredCredentials))(raw).pipe(
+      return yield* S.decodeEffect(S.fromJsonString(StoredCredentials))(raw).pipe(
         // Corrupt data is no worse than an empty store: the user reconfigures.
         Effect.orElseSucceed(() => ({})),
       );
@@ -59,7 +56,7 @@ export class AiCredentials extends Effect.Service<AiCredentials>()("app/AiCreden
 
     const writeStored = (stored: Stored): Effect.Effect<void, Error> =>
       Effect.gen(function* () {
-        const encoded = yield* S.encode(S.parseJson(S.Unknown))(stored).pipe(
+        const encoded = yield* S.encodeEffect(S.fromJsonString(S.Unknown))(stored).pipe(
           Effect.mapError(toCredentialError("write")),
         );
         yield* Effect.tryPromise({
@@ -106,4 +103,6 @@ export class AiCredentials extends Effect.Service<AiCredentials>()("app/AiCreden
         }),
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

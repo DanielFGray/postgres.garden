@@ -1,8 +1,8 @@
-import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
-import { DateTime, Effect, Layer } from "effect";
-import * as S from "effect/Schema";
+import { DateTime, Effect, Layer, Schema as S } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 import { CurrentSession, PgGardenApi } from "./apiSchema.js";
-import { handleDbError } from "./db.js";
+import { DatabaseLive, handleDbError } from "./db.js";
 import {
   ApiError,
   Conflict,
@@ -12,7 +12,12 @@ import {
   ServerError,
   Unauthorized,
 } from "./errors.js";
-import { authActiveSessions, authAttempts, httpErrors, webhookReceived } from "./metrics.js";
+import {
+  recordActiveSessions,
+  recordAuthAttempt,
+  recordHttpError,
+  recordWebhook,
+} from "./metrics.js";
 import { AuthService } from "./services/authService.js";
 import { makeExpiredNamedCookie, makeOAuthCookie } from "./services/cookies.js";
 import {
@@ -76,14 +81,12 @@ const reportHttpError = (args: {
   error: unknown;
   context?: RequestObservabilityContext;
 }) =>
-  Effect.sync(() => {
-    httpErrors.add(1, {
-      route: args.route,
-      status: String(args.status),
-      kind: args.kind,
-    });
+  recordHttpError({
+    route: args.route,
+    status: String(args.status),
+    kind: args.kind,
   }).pipe(
-    Effect.zipRight(
+    Effect.andThen(
       Effect.logError({
         message: "HTTP request failed",
         route: args.route,
@@ -113,7 +116,7 @@ type DatesToUtc<T> = T extends Date
 
 function datesToUtc<T>(obj: T): DatesToUtc<T> {
   if (obj === null || obj === undefined) return obj as DatesToUtc<T>;
-  if (obj instanceof Date) return DateTime.unsafeFromDate(obj) as DatesToUtc<T>;
+  if (obj instanceof Date) return DateTime.fromDateUnsafe(obj) as DatesToUtc<T>;
   if (Array.isArray(obj)) return obj.map(datesToUtc) as DatesToUtc<T>;
   if (typeof obj === "object") {
     return Object.fromEntries(
@@ -131,29 +134,32 @@ const withDbError = <A, E, R>(
 ): Effect.Effect<DatesToUtc<A>, ApiError | ServerError, R> =>
   effect.pipe(
     Effect.map(datesToUtc),
-    Effect.catchAll((e) => {
-      const { code, error } = handleDbError(e, route);
-      const httpError: ApiError | ServerError =
-        code >= 500 ? new ServerError({ error }) : new ApiError({ error });
-      return Effect.annotateCurrentSpan({
-        error: true,
-        "error.type": "db",
-        "error.message": error,
-        "error.operation": route,
-        "error.status": code,
-      }).pipe(
-        Effect.zipRight(
-          reportHttpError({
-            route,
-            status: code,
-            kind: "db",
-            error: e,
-            context: requestObservabilityContext(headers),
-          }),
-        ),
-        Effect.zipRight(Effect.fail(httpError)),
-      );
-    }),
+    Effect.catch((e) =>
+      handleDbError(e, route).pipe(
+        Effect.flatMap(({ code, error }) => {
+          const httpError: ApiError | ServerError =
+            code >= 500 ? new ServerError({ error }) : new ApiError({ error });
+          return Effect.annotateCurrentSpan({
+            error: true,
+            "error.type": "db",
+            "error.message": error,
+            "error.operation": route,
+            "error.status": code,
+          }).pipe(
+            Effect.andThen(
+              reportHttpError({
+                route,
+                status: code,
+                kind: "db",
+                error: e,
+                context: requestObservabilityContext(headers),
+              }),
+            ),
+            Effect.andThen(Effect.fail(httpError)),
+          );
+        }),
+      ),
+    ),
   );
 
 /** Require a session, fail with Unauthorized if missing. */
@@ -167,7 +173,7 @@ const requireSession = (route: string, headers?: RequestHeaders) =>
           kind: "unknown",
           error: "Unauthorized",
           context: requestObservabilityContext(headers),
-        }).pipe(Effect.zipRight(Effect.fail(new Unauthorized({ error: "Unauthorized" }))));
+        }).pipe(Effect.andThen(Effect.fail(new Unauthorized({ error: "Unauthorized" }))));
       }
       return Effect.succeed({ session, user });
     }),
@@ -253,120 +259,113 @@ const STATE_COOKIE = "github_oauth_state";
 
 const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
   handlers
-    .handle("register", ({ payload }) =>
-      AuthService.register(payload).pipe(
-        Effect.tap(({ token, expiresAt }) => {
-          authAttempts.add(1, {
-            method: "password",
-            action: "register",
-            result: "success",
-          });
-          authActiveSessions.add(1);
-          return setSessionCookie(token, expiresAt);
-        }),
-        Effect.map((result) => ({
-          ...datesToUtc(result.user),
-          bio: result.user.bio ?? "",
-        })),
-        Effect.catchTags({
-          DuplicateAccount: (e) => {
-            authAttempts.add(1, {
+    .handleAll({
+      register: ({ payload }) =>
+        AuthService.use((service) => service.register(payload)).pipe(
+          Effect.tap(({ token, expiresAt }) =>
+            recordAuthAttempt({
               method: "password",
               action: "register",
-              result: "duplicate",
-            });
-            return Effect.fail(new Conflict({ error: e.message }));
-          },
-          MissingData: (e) => {
-            authAttempts.add(1, {
-              method: "password",
-              action: "register",
-              result: "error",
-            });
-            return Effect.fail(new ApiError({ error: e.message }));
-          },
-          WeakPassword: (e) => {
-            authAttempts.add(1, {
-              method: "password",
-              action: "register",
-              result: "error",
-            });
-            return Effect.fail(new ApiError({ error: e.message }));
-          },
-        }),
-      ),
-    )
-    .handle("login", ({ payload }) =>
-      AuthService.login(payload).pipe(
-        Effect.tap(({ token, expiresAt }) => {
-          authAttempts.add(1, {
-            method: "password",
-            action: "login",
-            result: "success",
-          });
-          authActiveSessions.add(1);
-          return setSessionCookie(token, expiresAt);
-        }),
-        Effect.map((result) => ({
-          ...datesToUtc(result.user),
-          bio: result.user.bio ?? "",
-        })),
-        Effect.catchTags({
-          InvalidCredentials: (e) => {
-            authAttempts.add(1, {
-              method: "password",
-              action: "login",
-              result: "invalid",
-            });
-            return Effect.fail(new Unauthorized({ error: e.message }));
-          },
-          AccountLocked: (e) => {
-            authAttempts.add(1, {
-              method: "password",
-              action: "login",
-              result: "locked",
-            });
-            return Effect.fail(new Locked({ error: e.message }));
-          },
-        }),
-      ),
-    )
-    .handle("authMe", () =>
-      CurrentSession.pipe(
-        Effect.map(({ user }) =>
-          user
-            ? {
-                ...user,
-                role: user.role as "user" | "sponsor" | "pro" | "admin",
-              }
-            : null,
+              result: "success",
+            }).pipe(
+              Effect.andThen(recordActiveSessions(1)),
+              Effect.andThen(setSessionCookie(token, expiresAt)),
+            ),
+          ),
+          Effect.map((result) => ({
+            ...datesToUtc(result.user),
+            bio: result.user.bio ?? "",
+          })),
+          Effect.catchTags({
+            DuplicateAccount: (e) =>
+              recordAuthAttempt({
+                method: "password",
+                action: "register",
+                result: "duplicate",
+              }).pipe(Effect.andThen(Effect.fail(new Conflict({ error: e.message })))),
+            MissingData: (e) =>
+              recordAuthAttempt({
+                method: "password",
+                action: "register",
+                result: "error",
+              }).pipe(Effect.andThen(Effect.fail(new ApiError({ error: e.message })))),
+            WeakPassword: (e) =>
+              recordAuthAttempt({
+                method: "password",
+                action: "register",
+                result: "error",
+              }).pipe(Effect.andThen(Effect.fail(new ApiError({ error: e.message })))),
+          }),
         ),
-      ),
-    )
-    .handle("logout", () =>
-      Effect.gen(function* () {
-        const { session } = yield* CurrentSession;
-        yield* AuthService.logout(session?.cookie_id);
-        authActiveSessions.add(-1);
-        yield* expireSessionCookie;
-        return { success: true as const };
-      }).pipe(
-        Effect.catchAll((e) => {
-          const { code, error } = handleDbError(e, "Logout failed");
-          const httpError: ApiError | ServerError =
-            code >= 500 ? new ServerError({ error }) : new ApiError({ error });
-          return reportHttpError({
-            route: "logout",
-            status: code,
-            kind: "unknown",
-            error: e,
-          }).pipe(Effect.zipRight(Effect.fail(httpError)));
-        }),
-      ),
-    )
+      login: ({ payload }) =>
+        AuthService.use((service) => service.login(payload)).pipe(
+          Effect.tap(({ token, expiresAt }) =>
+            recordAuthAttempt({
+              method: "password",
+              action: "login",
+              result: "success",
+            }).pipe(
+              Effect.andThen(recordActiveSessions(1)),
+              Effect.andThen(setSessionCookie(token, expiresAt)),
+            ),
+          ),
+          Effect.map((result) => ({
+            ...datesToUtc(result.user),
+            bio: result.user.bio ?? "",
+          })),
+          Effect.catchTags({
+            InvalidCredentials: (e) =>
+              recordAuthAttempt({
+                method: "password",
+                action: "login",
+                result: "invalid",
+              }).pipe(Effect.andThen(Effect.fail(new Unauthorized({ error: e.message })))),
+            AccountLocked: (e) =>
+              recordAuthAttempt({
+                method: "password",
+                action: "login",
+                result: "locked",
+              }).pipe(Effect.andThen(Effect.fail(new Locked({ error: e.message })))),
+          }),
+        ),
+      authMe: () =>
+        CurrentSession.pipe(
+          Effect.map(({ user }) =>
+            user
+              ? {
+                  ...user,
+                  role: user.role as "user" | "sponsor" | "pro" | "admin",
+                }
+              : null,
+          ),
+        ),
+      logout: () =>
+        Effect.gen(function* () {
+          const { session } = yield* CurrentSession;
+          yield* AuthService.use((service) => service.logout(session?.cookie_id));
+          yield* recordActiveSessions(-1);
+          yield* expireSessionCookie;
+          return { success: true as const };
+        }).pipe(
+          Effect.catch((e) =>
+            handleDbError(e, "Logout failed").pipe(
+              Effect.flatMap(({ code, error }) => {
+                const httpError: ApiError | ServerError =
+                  code >= 500 ? new ServerError({ error }) : new ApiError({ error });
+                return reportHttpError({
+                  route: "logout",
+                  status: code,
+                  kind: "unknown",
+                  error: e,
+                }).pipe(Effect.andThen(Effect.fail(httpError)));
+              }),
+            ),
+          ),
+        ),
+    })
     .handleRaw("authGithubStart", ({ request }) =>
       Effect.gen(function* () {
-        const result = yield* OAuthService.createAuthorizationUrl(["user:email"]);
+        const result = yield* OAuthService.use((service) => service.createAuthorizationUrl(["user:email"]));
         const headers: Record<string, string> = {};
         headers["Set-Cookie"] = makeOAuthCookie(STATE_COOKIE, result.state);
         return HttpServerResponse.empty({
@@ -374,53 +373,58 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
           headers: { Location: result.url.toString(), ...headers },
         });
       }).pipe(
-        Effect.catchAll((e) => {
+        Effect.catch((e) => {
           if (S.is(OAuthNotConfiguredError)(e)) {
             return Effect.succeed(
-              HttpServerResponse.unsafeJson(
+              HttpServerResponse.jsonUnsafe(
                 { error: "GitHub OAuth is not configured" },
                 { status: 503 },
               ),
             );
           }
-          const { code, error } = handleDbError(e, "OAuth error");
-          return (
-            code >= 400
-              ? reportHttpError({
-                  route: "authGithubStart",
-                  status: code,
-                  kind: "oauth",
-                  error: e,
-                  context: requestObservabilityContext(request.headers),
-                })
-              : Effect.void
-          ).pipe(Effect.as(HttpServerResponse.unsafeJson({ error }, { status: code })));
+          return handleDbError(e, "OAuth error").pipe(
+            Effect.flatMap(({ code, error }) =>
+              (
+                code >= 400
+                  ? reportHttpError({
+                      route: "authGithubStart",
+                      status: code,
+                      kind: "oauth",
+                      error: e,
+                      context: requestObservabilityContext(request.headers),
+                    })
+                  : Effect.void
+              ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code }))),
+            ),
+          );
         }),
       ),
     )
-    .handleRaw("authGithubCallback", ({ urlParams, request }) =>
+    .handleRaw("authGithubCallback", ({ query, request }) =>
       Effect.gen(function* () {
         const storedState = parseCookie(request.headers.cookie, STATE_COOKIE);
-        if (!storedState || urlParams.state !== storedState) {
-          return HttpServerResponse.unsafeJson(
+        if (!storedState || query.state !== storedState) {
+          return HttpServerResponse.jsonUnsafe(
             { error: "Invalid state parameter" },
             { status: 400 },
           );
         }
 
         const { session: currentSession } = yield* CurrentSession;
-        const result = yield* OAuthService.handleCallback(urlParams.code, currentSession?.user_id);
+        const result = yield* OAuthService.use((service) =>
+          service.handleCallback(query.code, currentSession?.user_id),
+        );
 
-        authAttempts.add(1, {
+        yield* recordAuthAttempt({
           method: "github",
           action: "oauth",
           result: "success",
         });
         if (result.isNewSession) {
-          authActiveSessions.add(1);
+          yield* recordActiveSessions(1);
         }
 
-        const authData = yield* S.encode(S.parseJson(S.Unknown))({
+        const authData = yield* S.encodeEffect(S.fromJsonString(S.Unknown))({
           id: result.user.id,
           username: result.user.username,
           role: result.user.role,
@@ -434,52 +438,62 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
           headers: { "Set-Cookie": cookieHeader },
         });
       }).pipe(
-        Effect.catchAll((e) => {
+        Effect.catch((e) => {
           if (S.is(OAuthCallbackError)(e)) {
             if (e.isBadCode) {
-              authAttempts.add(1, {
+              return recordAuthAttempt({
                 method: "github",
                 action: "oauth",
                 result: "bad_verification_code",
-              });
-              return Effect.succeed(
-                HttpServerResponse.unsafeJson({ error: "Bad verification code" }, { status: 400 }),
+              }).pipe(
+                Effect.andThen(
+                  Effect.succeed(
+                    HttpServerResponse.jsonUnsafe(
+                      { error: "Bad verification code" },
+                      { status: 400 },
+                    ),
+                  ),
+                ),
               );
             }
-            authAttempts.add(1, {
+            return recordAuthAttempt({
               method: "github",
               action: "oauth",
               result: "error",
-            });
-            return Effect.succeed(
-              HttpServerResponse.unsafeJson({ error: e.message }, { status: 400 }),
+            }).pipe(
+              Effect.andThen(
+                Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.message }, { status: 400 })),
+              ),
             );
           }
           if (S.is(OAuthNotConfiguredError)(e)) {
             return Effect.succeed(
-              HttpServerResponse.unsafeJson(
+              HttpServerResponse.jsonUnsafe(
                 { error: "GitHub OAuth is not configured" },
                 { status: 503 },
               ),
             );
           }
-          authAttempts.add(1, {
+          return recordAuthAttempt({
             method: "github",
             action: "oauth",
             result: "error",
-          });
-          const { code, error } = handleDbError(e, "OAuth error");
-          return (
-            code >= 400
-              ? reportHttpError({
-                  route: "authGithubCallback",
-                  status: code,
-                  kind: "oauth",
-                  error: e,
-                  context: requestObservabilityContext(request.headers),
-                })
-              : Effect.void
-          ).pipe(Effect.as(HttpServerResponse.unsafeJson({ error }, { status: code })));
+          }).pipe(
+            Effect.andThen(handleDbError(e, "OAuth error")),
+            Effect.flatMap(({ code, error }) =>
+              (
+                code >= 400
+                  ? reportHttpError({
+                      route: "authGithubCallback",
+                      status: code,
+                      kind: "oauth",
+                      error: e,
+                      context: requestObservabilityContext(request.headers),
+                    })
+                  : Effect.void
+              ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code }))),
+            ),
+          );
         }),
       ),
     ),
@@ -490,14 +504,14 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
 // ---------------------------------------------------------------------------
 
 const usersLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
-  handlers
-    .handle("me", ({ request }) =>
+  handlers.handleAll({
+    me: ({ request }) =>
       Effect.gen(function* () {
         const { session } = yield* CurrentSession;
         if (!session) return { user: null };
         const profile = yield* withDbError(
           "Failed to fetch profile",
-          UserService.getProfile(),
+          UserService.use((service) => service.getProfile),
           request.headers,
         );
         return {
@@ -509,157 +523,147 @@ const usersLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
             : null,
         };
       }),
-    )
-    .handle("deleteMe", ({ urlParams, request }) =>
+    deleteMe: ({ query, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.deleteMe", request.headers);
         const success = yield* withDbError(
           "Account deletion failed",
-          UserService.requestAccountDeletion(urlParams.token),
+          UserService.use((service) => service.requestAccountDeletion(query.token)),
           request.headers,
         );
         return { success };
       }),
-    )
-    .handle("patchMe", ({ payload, request }) =>
+    patchMe: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.patchMe", request.headers);
         return yield* withDbError(
           "Failed to update profile",
-          UserService.updateProfile(payload).pipe(
-            Effect.catchTag("NoSuchElementException", () =>
+          UserService.use((service) => service.updateProfile(payload)).pipe(
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "User not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("meEmails", ({ request }) =>
+    meEmails: ({ request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.meEmails", request.headers);
         return yield* withDbError(
           "Failed to fetch emails",
-          UserService.listEmails(),
+          UserService.use((service) => service.listEmails),
           request.headers,
         );
       }),
-    )
-    .handle("createMeEmail", ({ payload, request }) =>
+    createMeEmail: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.createMeEmail", request.headers);
         return yield* withDbError(
           "Failed to add email",
-          UserService.addEmail(payload.email),
+          UserService.use((service) => service.addEmail(payload.email)),
           request.headers,
         );
       }),
-    )
-    .handle("deleteMeEmail", ({ path, request }) =>
+    deleteMeEmail: ({ params, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.deleteMeEmail", request.headers);
         return yield* withDbError(
           "Failed to delete email",
-          UserService.deleteEmail(path.id).pipe(
-            Effect.catchTag("NoSuchElementException", () =>
+          UserService.use((service) => service.deleteEmail(params.id)).pipe(
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Email not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("meAuthentications", ({ request }) =>
+    meAuthentications: ({ request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.meAuthentications", request.headers);
         return yield* withDbError(
           "Failed to fetch authentications",
-          UserService.listAuthentications(),
+          UserService.use((service) => service.listAuthentications),
           request.headers,
         );
       }),
-    )
-    .handle("deleteMeAuthentication", ({ path, request }) =>
+    deleteMeAuthentication: ({ params, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.deleteMeAuthentication", request.headers);
         return yield* withDbError(
           "Failed to delete authentication",
-          UserService.unlinkAuthentication(path.id).pipe(
+          UserService.use((service) => service.unlinkAuthentication(params.id)).pipe(
             Effect.map((result) => ({ id: result.id })),
-            Effect.catchTag("NoSuchElementException", () =>
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Authentication not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("meHasPassword", ({ request }) =>
+    meHasPassword: ({ request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.meHasPassword", request.headers);
         return yield* withDbError(
           "Failed to check password",
-          UserService.hasPassword().pipe(
+          UserService.use((service) => service.hasPassword).pipe(
             Effect.map((result) => ({ has_password: result.has_password })),
-            Effect.catchTag("NoSuchElementException", () =>
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "User not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("forgotPassword", ({ payload, request }) =>
+    forgotPassword: ({ payload, request }) =>
       withDbError(
         "Failed to send password reset",
-        UserService.forgotPassword(payload.email).pipe(Effect.as({ success: true as const })),
+        UserService.use((service) => service.forgotPassword(payload.email)).pipe(
+          Effect.as({ success: true as const }),
+        ),
         request.headers,
       ),
-    )
-    .handle("resetPassword", ({ payload, request }) =>
+    resetPassword: ({ payload, request }) =>
       withDbError(
         "Failed to reset password",
-        UserService.resetPassword(payload.userId, payload.token, payload.password),
+        UserService.use((service) =>
+          service.resetPassword(payload.userId, payload.token, payload.password),
+        ),
         request.headers,
       ),
-    )
-    .handle("changePassword", ({ payload, request }) =>
+    changePassword: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.changePassword", request.headers);
         return yield* withDbError(
           "Failed to change password",
-          UserService.changePassword(payload.oldPassword, payload.newPassword),
+          UserService.use((service) => service.changePassword(payload.oldPassword, payload.newPassword)),
           request.headers,
         );
       }),
-    )
-    .handle("verifyEmail", ({ payload, request }) =>
+    verifyEmail: ({ payload, request }) =>
       withDbError(
         "Failed to verify email",
-        UserService.verifyEmail(payload.emailId, payload.token),
+        UserService.use((service) => service.verifyEmail(payload.emailId, payload.token)),
         request.headers,
       ),
-    )
-    .handle("makeEmailPrimary", ({ payload, request }) =>
+    makeEmailPrimary: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.makeEmailPrimary", request.headers);
         return yield* withDbError(
           "Failed to update primary email",
-          UserService.makeEmailPrimary(payload.emailId),
+          UserService.use((service) => service.makeEmailPrimary(payload.emailId)),
           request.headers,
         );
       }),
-    )
-    .handle("resendEmailVerificationCode", ({ payload, request }) =>
+    resendEmailVerificationCode: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiUsers.resendEmailVerificationCode", request.headers);
         return yield* withDbError(
           "Failed to resend verification",
-          UserService.resendEmailVerificationCode(payload.emailId),
+          UserService.use((service) => service.resendEmailVerificationCode(payload.emailId)),
           request.headers,
         );
       }),
-    ),
+  }),
 );
 
 // ---------------------------------------------------------------------------
@@ -667,23 +671,25 @@ const usersLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
 // ---------------------------------------------------------------------------
 
 const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (handlers) =>
-  handlers
-    .handle("userPlaygrounds", ({ path, urlParams, request }) =>
+  handlers.handleAll({
+    userPlaygrounds: ({ params, query, request }) =>
       withDbError(
         "Failed to list user playgrounds",
-        PlaygroundService.listForUser(path.username, urlParams),
+        PlaygroundService.use((service) => service.listForUser(params.username, query)),
         request.headers,
       ),
-    )
-    .handle("playgrounds", ({ urlParams, request }) =>
-      withDbError("Failed to list playgrounds", PlaygroundService.list(urlParams), request.headers),
-    )
-    .handle("createPlayground", ({ payload, request }) =>
+    playgrounds: ({ query, request }) =>
+      withDbError(
+        "Failed to list playgrounds",
+        PlaygroundService.use((service) => service.list(query)),
+        request.headers,
+      ),
+    createPlayground: ({ payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiPlaygrounds.createPlayground", request.headers);
         return yield* withDbError(
           "Failed to create playground",
-          PlaygroundService.create(payload).pipe(
+          PlaygroundService.use((service) => service.create(payload)).pipe(
             Effect.map((result) => ({
               commit_id: result.commit_id,
               playground_hash: result.playground_hash,
@@ -695,30 +701,28 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
           request.headers,
         );
       }),
-    )
-    .handle("playgroundByHash", ({ path, request }) =>
+    playgroundByHash: ({ params, request }) =>
       withDbError(
         "Failed to fetch playground",
         Effect.gen(function* () {
-          const pg = yield* PlaygroundService.getByHash(path.hash);
+          const pg = yield* PlaygroundService.use((service) => service.getByHash(params.hash));
           return {
             ...pg,
             user: pg.user?.username ? { username: pg.user.username } : null,
           };
         }).pipe(
-          Effect.catchTag("NoSuchElementException", () =>
+          Effect.catchTag("NoSuchElementError", () =>
             Effect.fail(new NotFound({ error: "Playground not found" })),
           ),
         ),
         request.headers,
       ),
-    )
-    .handle("forkPlayground", ({ path, payload, request }) =>
+    forkPlayground: ({ params, payload, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiPlaygrounds.forkPlayground", request.headers);
         return yield* withDbError(
           "Failed to fork playground",
-          PlaygroundService.fork(path.hash, payload.name).pipe(
+          PlaygroundService.use((service) => service.fork(params.hash, payload.name)).pipe(
             Effect.map((result) => ({
               commit_id: result.commit_id,
               playground_id: result.playground_id,
@@ -730,8 +734,7 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
           request.headers,
         );
       }),
-    )
-    .handle("updatePlayground", ({ path, payload, request }) =>
+    updatePlayground: ({ params, payload, request }) =>
       Effect.gen(function* () {
         const { user } = yield* requireSession("apiPlaygrounds.updatePlayground", request.headers);
         if (payload.privacy === "private" && !["sponsor", "pro", "admin"].includes(user.role)) {
@@ -742,7 +745,7 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
             error: "Private playgrounds require a sponsor account",
             context: requestObservabilityContext(request.headers),
           }).pipe(
-            Effect.zipRight(
+            Effect.andThen(
               Effect.fail(
                 new Forbidden({
                   error: "Private playgrounds require a sponsor account",
@@ -753,97 +756,93 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
         }
         return yield* withDbError(
           "Failed to update playground",
-          PlaygroundService.update(path.hash, payload).pipe(
-            Effect.catchTag("NoSuchElementException", () =>
+          PlaygroundService.use((service) => service.update(params.hash, payload)).pipe(
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Playground not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("createCommit", ({ path, payload, request }) =>
+    createCommit: ({ params, payload, request }) =>
       Effect.gen(function* () {
         const { user } = yield* requireSession("apiPlaygrounds.createCommit", request.headers);
         return yield* withDbError(
           "Failed to create commit",
-          PlaygroundService.createCommit(user.id, path.hash, payload).pipe(
-            Effect.catchTag("NoSuchElementException", () =>
+          PlaygroundService.use((service) => service.createCommit(user.id, params.hash, payload)).pipe(
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Playground not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("listCommits", ({ path, request }) =>
+    listCommits: ({ params, request }) =>
       withDbError(
         "Failed to fetch playground commits",
-        PlaygroundService.listCommits(path.hash),
+        PlaygroundService.use((service) => service.listCommits(params.hash)),
         request.headers,
       ),
-    )
-    .handle("getCommit", ({ path, request }) =>
+    getCommit: ({ params, request }) =>
       withDbError(
         "Failed to fetch commit",
-        PlaygroundService.getCommit(path.hash, path.commit_id).pipe(
-          Effect.catchTag("NoSuchElementException", () =>
+        PlaygroundService.use((service) => service.getCommit(params.hash, params.commit_id)).pipe(
+          Effect.catchTag("NoSuchElementError", () =>
             Effect.fail(new NotFound({ error: "Commit not found" })),
           ),
         ),
         request.headers,
       ),
-    )
-    .handle("getCommitHistory", ({ path, urlParams, request }) =>
+    getCommitHistory: ({ params, query, request }) =>
       withDbError(
         "Failed to fetch commit history",
-        PlaygroundService.getCommitHistory(path.hash, path.commit_id, urlParams.limit),
+        PlaygroundService.use((service) =>
+          service.getCommitHistory(params.hash, params.commit_id, query.limit),
+        ),
         request.headers,
       ),
-    )
-    .handle("getCommitDiff", ({ path, request }) =>
+    getCommitDiff: ({ params, request }) =>
       withDbError(
         "Failed to generate diff",
-        PlaygroundService.getCommitDiff(path.hash, path.commit_id).pipe(
-          Effect.catchTag("NoSuchElementException", () =>
+        PlaygroundService.use((service) => service.getCommitDiff(params.hash, params.commit_id)).pipe(
+          Effect.catchTag("NoSuchElementError", () =>
             Effect.fail(new NotFound({ error: "Commit not found" })),
           ),
         ),
         request.headers,
       ),
-    )
-    .handle("togglePlaygroundStar", ({ path, request }) =>
+    togglePlaygroundStar: ({ params, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiPlaygrounds.togglePlaygroundStar", request.headers);
         return yield* withDbError(
           "Failed to toggle star",
-          PlaygroundService.toggleStar(path.hash),
+          PlaygroundService.use((service) => service.toggleStar(params.hash)),
           request.headers,
         );
       }),
-    )
-    .handle("deletePlayground", ({ path, request }) =>
+    deletePlayground: ({ params, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiPlaygrounds.deletePlayground", request.headers);
         return yield* withDbError(
           "Failed to delete playground",
-          PlaygroundService.deletePlayground(path.hash).pipe(
+          PlaygroundService.use((service) => service.deletePlayground(params.hash)).pipe(
             Effect.map((result) => ({ hash: result.hash })),
-            Effect.catchTag("NoSuchElementException", () =>
+            Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Playground not found" })),
             ),
           ),
           request.headers,
         );
       }),
-    )
-    .handle("searchPlaygrounds", ({ urlParams, request }) =>
+    searchPlaygrounds: ({ query, request }) =>
       withDbError(
         "Failed to search playgrounds",
-        PlaygroundService.search(urlParams.q ?? "", urlParams.limit, urlParams.offset),
+        PlaygroundService.use((service) =>
+          service.search(query.q ?? "", query.limit, query.offset),
+        ),
         request.headers,
       ),
-    ),
+  }),
 );
 
 // ---------------------------------------------------------------------------
@@ -856,59 +855,70 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
     const signature = (request.headers["x-hub-signature-256"] as string | undefined) ?? null;
     return Effect.gen(function* () {
       const body = yield* request.text;
-      const result = yield* WebhookService.handleGitHubSponsor(signature, body, event);
-      webhookReceived.add(1, {
+      const result = yield* WebhookService.use((service) =>
+        service.handleGitHubSponsor(signature, body, event),
+      );
+      yield* recordWebhook({
         provider: "github",
         event: event ?? "unknown",
         verified: "true",
       });
-      return HttpServerResponse.unsafeJson(result);
+      return HttpServerResponse.jsonUnsafe(result);
     }).pipe(
-      Effect.catchAll((e) => {
+      Effect.catch((e) => {
         if (S.is(WebhookNotConfiguredError)(e)) {
-          webhookReceived.add(1, {
+          return recordWebhook({
             provider: "github",
             event: event ?? "unknown",
             verified: "false",
-          });
-          return reportHttpError({
-            route: "webhooks.githubSponsorWebhook",
-            status: 503,
-            kind: "webhook",
-            error: e,
-            context: requestObservabilityContext(request.headers),
           }).pipe(
-            Effect.as(
-              HttpServerResponse.unsafeJson({ error: "Webhook not configured" }, { status: 503 }),
+            Effect.andThen(
+              reportHttpError({
+                route: "webhooks.githubSponsorWebhook",
+                status: 503,
+                kind: "webhook",
+                error: e,
+                context: requestObservabilityContext(request.headers),
+              }).pipe(
+                Effect.as(
+                  HttpServerResponse.jsonUnsafe({ error: "Webhook not configured" }, { status: 503 }),
+                ),
+              ),
             ),
           );
         }
         if (S.is(WebhookVerificationError)(e)) {
-          webhookReceived.add(1, {
+          return recordWebhook({
             provider: "github",
             event: event ?? "unknown",
             verified: "false",
-          });
-          return reportHttpError({
-            route: "webhooks.githubSponsorWebhook",
-            status: 401,
-            kind: "webhook",
-            error: e,
-            context: requestObservabilityContext(request.headers),
           }).pipe(
-            Effect.as(
-              HttpServerResponse.unsafeJson({ error: "Invalid signature" }, { status: 401 }),
+            Effect.andThen(
+              reportHttpError({
+                route: "webhooks.githubSponsorWebhook",
+                status: 401,
+                kind: "webhook",
+                error: e,
+                context: requestObservabilityContext(request.headers),
+              }).pipe(
+                Effect.as(
+                  HttpServerResponse.jsonUnsafe({ error: "Invalid signature" }, { status: 401 }),
+                ),
+              ),
             ),
           );
         }
-        const { code, error } = handleDbError(e, "Webhook processing failed");
-        return reportHttpError({
-          route: "webhooks.githubSponsorWebhook",
-          status: code,
-          kind: "webhook",
-          error: e,
-          context: requestObservabilityContext(request.headers),
-        }).pipe(Effect.as(HttpServerResponse.unsafeJson({ error }, { status: code })));
+        return handleDbError(e, "Webhook processing failed").pipe(
+          Effect.flatMap(({ code, error }) =>
+            reportHttpError({
+              route: "webhooks.githubSponsorWebhook",
+              status: code,
+              kind: "webhook",
+              error: e,
+              context: requestObservabilityContext(request.headers),
+            }).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code }))),
+          ),
+        );
       }),
     );
   }),
@@ -919,27 +929,38 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
 // ---------------------------------------------------------------------------
 
 const systemLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
-  handlers.handle("healthz", () => Effect.succeed({ ok: true })),
+  handlers.handleAll({
+    healthz: () => Effect.succeed({ ok: true }),
+  }),
 );
 
 // ---------------------------------------------------------------------------
 // Composition
 // ---------------------------------------------------------------------------
 
-const HttpApiHandlers = HttpApiBuilder.api(PgGardenApi).pipe(
+const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
   Layer.provide(authLive),
   Layer.provide(usersLive),
   Layer.provide(playgroundsLive),
   Layer.provide(webhookLive),
   Layer.provide(systemLive),
-  Layer.provide(SessionMiddlewareLive),
 );
 
+// One layer value, used twice: `Layer.provide` satisfies the plain requirements of
+// the middleware and handlers, and `HttpRouter.provideRequest` satisfies the
+// request-scoped `Requires` markers, which `Layer.provide` leaves unsatisfied.
+// Layer memoization builds each service and pool once.
+const RequestServices = Layer.mergeAll(
+  AuthService.layer,
+  UserService.layer,
+  PlaygroundService.layer,
+  SessionService.layer,
+  OAuthService.layer,
+  WebhookService.layer,
+).pipe(Layer.provideMerge(DatabaseLive));
+
 export const HttpApiLive = HttpApiHandlers.pipe(
-  Layer.provide(AuthService.Default),
-  Layer.provide(UserService.Default),
-  Layer.provide(PlaygroundService.Default),
-  Layer.provide(SessionService.Default),
-  Layer.provide(OAuthService.Default),
-  Layer.provide(WebhookService.Default),
+  Layer.provide(SessionMiddlewareLive),
+  Layer.provide(RequestServices),
+  HttpRouter.provideRequest(RequestServices),
 );

@@ -1,8 +1,8 @@
-import { Effect, Layer, pipe } from "effect";
+import { Context, Effect, Layer, pipe } from "effect";
 import * as S from "effect/Schema";
 import { sql } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
-import { DatabaseLive, visitorQuerier, type KyselyDB } from "../db.js";
+import { DatabaseLive, runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
 import { CurrentSession } from "../apiSchema.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
@@ -65,11 +65,10 @@ const nestUser = <T extends { readonly username: string | null }>({
  * threaded through as a per-call requirement, the same way `HttpServerRequest`
  * would be.
  */
-export class PlaygroundService extends Effect.Service<PlaygroundService>()("PlaygroundService", {
-  accessors: true,
-  effect: Effect.gen(function* () {
+export class PlaygroundService extends Context.Service<PlaygroundService>()("PlaygroundService", {
+  make: Effect.gen(function* () {
     const run = yield* visitorQuerier;
-    const asVisitor = <A, E, R>(use: (authDb: KyselyDB) => Effect.Effect<A, E, R>) =>
+    const asVisitor = <A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
       Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use));
 
     return {
@@ -128,9 +127,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               "p.created_at",
               "p.updated_at",
               "u.username",
-            ])
-            .pipe(Effect.map((rows) => rows.map(nestUser))),
-        ),
+            ]),
+        ).pipe(Effect.map((rows) => rows.map(nestUser))),
 
       search: (q: string, limit?: number, offset?: number) => {
         const parsed = parseSearchDSL(q);
@@ -138,54 +136,55 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
         // anything when somebody is logged in.
         return Effect.flatMap(CurrentSession, ({ session }) =>
           run(session?.id, (authDb) =>
-            pipe(
-              authDb
-                .selectFrom("app_public.playgrounds as p")
-                .leftJoin("app_public.users as u", "p.user_id", "u.id")
-                .leftJoin(
-                  (eb) =>
-                    eb
-                      .selectFrom("app_public.playground_stars")
-                      .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
-                      .groupBy("playground_hash")
-                      .as("star_counts"),
-                  (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
-                )
-                .orderBy(sql.ref(parsed.sort), "desc")
-                .limit(limit ?? 50)
-                .offset(offset ?? 0),
-              (q) =>
-                parsed.starred && session
-                  ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
-                      join
-                        .onRef("my_stars.playground_hash", "=", "p.hash")
-                        .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
-                    )
-                  : q,
-              (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
-              (q) => q.where(publicOrOwn),
-              (q) =>
-                parsed.text
-                  ? q.where((eb) =>
-                      eb.or([
-                        eb("p.name", "ilike", `%${parsed.text}%`),
-                        eb("p.description", "ilike", `%${parsed.text}%`),
-                      ]),
-                    )
-                  : q,
-              (q) =>
-                q.select((eb) => [
-                  "p.hash",
-                  "p.fork_hash",
-                  "p.name",
-                  "p.description",
-                  eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
-                  "p.created_at",
-                  "p.updated_at",
-                  "u.username",
-                ]),
-              (q) => q.pipe(Effect.map((rows) => rows.map(nestUser))),
-            ),
+            runQuery(
+              pipe(
+                authDb
+                  .selectFrom("app_public.playgrounds as p")
+                  .leftJoin("app_public.users as u", "p.user_id", "u.id")
+                  .leftJoin(
+                    (eb) =>
+                      eb
+                        .selectFrom("app_public.playground_stars")
+                        .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
+                        .groupBy("playground_hash")
+                        .as("star_counts"),
+                    (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
+                  )
+                  .orderBy(sql.ref(parsed.sort), "desc")
+                  .limit(limit ?? 50)
+                  .offset(offset ?? 0),
+                (q) =>
+                  parsed.starred && session
+                    ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
+                        join
+                          .onRef("my_stars.playground_hash", "=", "p.hash")
+                          .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
+                      )
+                    : q,
+                (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
+                (q) => q.where(publicOrOwn),
+                (q) =>
+                  parsed.text
+                    ? q.where((eb) =>
+                        eb.or([
+                          eb("p.name", "ilike", `%${parsed.text}%`),
+                          eb("p.description", "ilike", `%${parsed.text}%`),
+                        ]),
+                      )
+                    : q,
+                (q) =>
+                  q.select((eb) => [
+                    "p.hash",
+                    "p.fork_hash",
+                    "p.name",
+                    "p.description",
+                    eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
+                    "p.created_at",
+                    "p.updated_at",
+                    "u.username",
+                  ]),
+              ),
+            ).pipe(Effect.map((rows) => rows.map(nestUser))),
           ),
         );
       },
@@ -201,20 +200,19 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 message: string;
                 created_at: Date;
               }>`app_public.create_playground_commit(
-                                            ${body.name ?? null},
-                                            ${body.message},
-                                            ${S.encodeSync(S.parseJson(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
-                                            ${null},
-                                            ${body.description ?? null}
-                                          )`.as("result"),
+                                      ${body.name ?? null},
+                                      ${body.message},
+                                      ${S.encodeSync(S.fromJsonString(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
+                                      ${null},
+                                      ${body.description ?? null}
+                                    )`.as("result"),
             )
-            .selectAll()
-            .pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementException", () =>
-                Effect.dieMessage("create_playground_commit returned no rows"),
-              ),
-            ),
+            .selectAll(),
+        ).pipe(
+          Effect.head,
+          Effect.catchTag("NoSuchElementError", () =>
+            Effect.die(new Error("create_playground_commit returned no rows")),
+          ),
         ),
 
       getByHash: (hash: string) =>
@@ -257,9 +255,8 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 .end()
                 .as("fork_of"),
             ])
-            .where("p.hash", "=", hash)
-            .pipe(Effect.head, Effect.map(nestUser)),
-        ),
+            .where("p.hash", "=", hash),
+        ).pipe(Effect.head, Effect.map(nestUser)),
 
       fork: (hash: string, name: string | null | undefined) =>
         asVisitor((authDb) =>
@@ -275,13 +272,12 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
                 }>("app_public.fork_playground", [eb.val(hash), eb.val(name ?? null)])
                 .as("result"),
             )
-            .selectAll()
-            .pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementException", () =>
-                Effect.dieMessage("Failed to fork playground"),
-              ),
-            ),
+            .selectAll(),
+        ).pipe(
+          Effect.head,
+          Effect.catchTag("NoSuchElementError", () =>
+            Effect.die(new Error("Failed to fork playground")),
+          ),
         ),
 
       update: (hash: string, input: UpdatePlaygroundInput) =>
@@ -292,75 +288,75 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             (q) => (input.description !== undefined ? q.set("description", input.description) : q),
             (q) => (input.privacy != null ? q.set("privacy", input.privacy) : q),
             (q) => q.returningAll(),
-            Effect.head,
           ),
-        ),
+        ).pipe(Effect.head),
 
       createCommit: (userId: string, hash: string, body: CommitPayload) =>
         asVisitor((authDb) =>
           Effect.gen(function* () {
-            const playground = yield* authDb
-              .selectFrom("app_public.playgrounds")
-              .select(["hash", "user_id"])
-              .where("hash", "=", hash)
-              .pipe(Effect.head);
+            const playground = yield* runQuery(
+              authDb
+                .selectFrom("app_public.playgrounds")
+                .select(["hash", "user_id"])
+                .where("hash", "=", hash),
+            ).pipe(Effect.head);
 
             if (playground.user_id === userId) {
-              const filesJson = yield* S.encode(S.parseJson(S.Unknown))({
+              const filesJson = yield* S.encodeEffect(S.fromJsonString(S.Unknown))({
                 files: body.files,
                 activeFile: body.activeFile,
               });
-              return yield* authDb
-                .selectFrom(
-                  sql<{
-                    commit_id: string;
-                    playground_hash: string;
-                    parent_id: string | null;
-                    message: string;
-                    created_at: Date;
-                  }>`app_public.create_playground_commit(
-                                                                                          ${null},
-                                                                                          ${body.message},
-                                                                                          ${filesJson}::jsonb,
-                                                                                          ${hash},
-                                                                                          ${null}
-                                                                                        )`.as(
-                    "result",
-                  ),
-                )
-                .selectAll()
-                .pipe(
-                  Effect.head,
-                  Effect.catchTag("NoSuchElementException", () =>
-                    Effect.dieMessage("create_playground_commit returned no rows"),
-                  ),
-                  Effect.map((result) => ({ ...result, forked: false as const })),
-                );
+              return yield* runQuery(
+                authDb
+                  .selectFrom(
+                    sql<{
+                      commit_id: string;
+                      playground_hash: string;
+                      parent_id: string | null;
+                      message: string;
+                      created_at: Date;
+                    }>`app_public.create_playground_commit(
+                                                                                      ${null},
+                                                                                      ${body.message},
+                                                                                      ${filesJson}::jsonb,
+                                                                                      ${hash},
+                                                                                      ${null}
+                                                                                    )`.as("result"),
+                  )
+                  .selectAll(),
+              ).pipe(
+                Effect.head,
+                Effect.catchTag("NoSuchElementError", () =>
+                  Effect.die(new Error("create_playground_commit returned no rows")),
+                ),
+                Effect.map((result) => ({ ...result, forked: false as const })),
+              );
             }
 
-            return yield* authDb
-              .selectFrom((eb) =>
-                eb
-                  .fn<{
-                    commit_id: string;
-                    playground_hash: string;
-                    parent_id: string | null;
-                    message: string;
-                    created_at: Date;
-                  }>("app_public.fork_playground", [
-                    eb.val(hash),
-                    eb.val(`fork-of-${hash.substring(0, 8)}`),
-                  ])
-                  .as("result"),
-              )
-              .selectAll()
-              .pipe(
-                Effect.head,
-                Effect.catchTag("NoSuchElementException", () =>
-                  Effect.dieMessage("fork_playground returned no rows"),
-                ),
-                Effect.map((result) => ({ ...result, forked: true as const })),
-              );
+            return yield* runQuery(
+              authDb
+                .selectFrom((eb) =>
+                  eb
+                    .fn<{
+                      commit_id: string;
+                      playground_hash: string;
+                      parent_id: string | null;
+                      message: string;
+                      created_at: Date;
+                    }>("app_public.fork_playground", [
+                      eb.val(hash),
+                      eb.val(`fork-of-${hash.substring(0, 8)}`),
+                    ])
+                    .as("result"),
+                )
+                .selectAll(),
+            ).pipe(
+              Effect.head,
+              Effect.catchTag("NoSuchElementError", () =>
+                Effect.die(new Error("fork_playground returned no rows")),
+              ),
+              Effect.map((result) => ({ ...result, forked: true as const })),
+            );
           }),
         ),
 
@@ -371,19 +367,18 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             .leftJoin("app_public.users as u", "c.user_id", "u.id")
             .select(["c.id", "c.message", "c.created_at", "c.parent_id", "c.user_id", "u.username"])
             .where("c.playground_hash", "=", hash)
-            .orderBy("c.created_at", "desc")
-            .pipe(
-              Effect.map((commits) =>
-                commits.map((commit) => ({
-                  id: commit.id,
-                  message: commit.message,
-                  timestamp: commit.created_at.getTime(),
-                  parent_id: commit.parent_id,
-                  user_id: commit.user_id,
-                  username: commit.username ?? undefined,
-                })),
-              ),
-            ),
+            .orderBy("c.created_at", "desc"),
+        ).pipe(
+          Effect.map((commits) =>
+            commits.map((commit) => ({
+              id: commit.id,
+              message: commit.message,
+              timestamp: commit.created_at.getTime(),
+              parent_id: commit.parent_id,
+              user_id: commit.user_id,
+              username: commit.username ?? undefined,
+            })),
+          ),
         ),
 
       getCommit: (hash: string, commitId: string) =>
@@ -392,26 +387,25 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             .selectFrom("app_public.playground_commits")
             .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
             .where("id", "=", commitId)
-            .where("playground_hash", "=", hash)
-            .pipe(
-              Effect.head,
-              Effect.map((commit) => {
-                const data = commit.data as {
-                  files?: Array<{ path: string; content: string }>;
-                  activeFile?: string | null;
-                };
-                return {
-                  id: commit.id,
-                  message: commit.message,
-                  created_at: commit.created_at,
-                  playground_hash: commit.playground_hash,
-                  parent_id: commit.parent_id,
-                  files: data.files || [],
-                  activeFile: data.activeFile || null,
-                  timestamp: commit.created_at.getTime(),
-                };
-              }),
-            ),
+            .where("playground_hash", "=", hash),
+        ).pipe(
+          Effect.head,
+          Effect.map((commit) => {
+            const data = commit.data as {
+              files?: Array<{ path: string; content: string }>;
+              activeFile?: string | null;
+            };
+            return {
+              id: commit.id,
+              message: commit.message,
+              created_at: commit.created_at,
+              playground_hash: commit.playground_hash,
+              parent_id: commit.parent_id,
+              files: data.files || [],
+              activeFile: data.activeFile || null,
+              timestamp: commit.created_at.getTime(),
+            };
+          }),
         ),
 
       getCommitHistory: (hash: string, commitId: string, limit = 50) =>
@@ -447,33 +441,33 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
             )
             .selectFrom("commit_history")
             .selectAll()
-            .orderBy("depth", "asc")
-            .pipe(
-              Effect.map((rows) => {
-                const history = rows.map((row) => ({
-                  id: row.id,
-                  message: row.message,
-                  timestamp: row.created_at.getTime(),
-                  parent_id: row.parent_id,
-                  playground_hash: row.playground_hash,
-                }));
+            .orderBy("depth", "asc"),
+        ).pipe(
+          Effect.map((rows) => {
+            const history = rows.map((row) => ({
+              id: row.id,
+              message: row.message,
+              timestamp: row.created_at.getTime(),
+              parent_id: row.parent_id,
+              playground_hash: row.playground_hash,
+            }));
 
-                const lastCommit = history[history.length - 1];
-                const isComplete = !lastCommit || lastCommit.parent_id === null;
-                return { history, isComplete };
-              }),
-            ),
+            const lastCommit = history[history.length - 1];
+            const isComplete = !lastCommit || lastCommit.parent_id === null;
+            return { history, isComplete };
+          }),
         ),
 
       getCommitDiff: (hash: string, commitId: string) =>
         asVisitor((authDb) =>
           Effect.gen(function* () {
-            const commit = yield* authDb
-              .selectFrom("app_public.playground_commits")
-              .select(["id", "parent_id", "data"])
-              .where("id", "=", commitId)
-              .where("playground_hash", "=", hash)
-              .pipe(Effect.head);
+            const commit = yield* runQuery(
+              authDb
+                .selectFrom("app_public.playground_commits")
+                .select(["id", "parent_id", "data"])
+                .where("id", "=", commitId)
+                .where("playground_hash", "=", hash),
+            ).pipe(Effect.head);
 
             const currentData = (commit.data as {
               files: Array<{ path: string; content: string }>;
@@ -489,11 +483,12 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
               };
             }
 
-            const parentCommit = yield* authDb
-              .selectFrom("app_public.playground_commits")
-              .select(["data"])
-              .where("id", "=", commit.parent_id)
-              .pipe(Effect.head);
+            const parentCommit = yield* runQuery(
+              authDb
+                .selectFrom("app_public.playground_commits")
+                .select(["data"])
+                .where("id", "=", commit.parent_id),
+            ).pipe(Effect.head);
 
             const parentData = (parentCommit.data as {
               files: Array<{ path: string; content: string }>;
@@ -517,33 +512,33 @@ export class PlaygroundService extends Effect.Service<PlaygroundService>()("Play
       toggleStar: (hash: string) =>
         asVisitor((authDb) =>
           Effect.gen(function* () {
-            const deleted = yield* authDb
-              .deleteFrom("app_public.playground_stars")
-              .where("playground_hash", "=", hash)
-              .returning("playground_hash");
+            const deleted = yield* runQuery(
+              authDb
+                .deleteFrom("app_public.playground_stars")
+                .where("playground_hash", "=", hash)
+                .returning("playground_hash"),
+            );
             if (deleted.length > 0) {
               return { starred: false };
             }
-            yield* authDb
-              .insertInto("app_public.playground_stars")
-              .values({ playground_hash: hash });
+            yield* runQuery(
+              authDb.insertInto("app_public.playground_stars").values({ playground_hash: hash }),
+            );
             return { starred: true };
           }),
         ),
 
       deletePlayground: (hash: string) =>
         asVisitor((authDb) =>
-          authDb
-            .deleteFrom("app_public.playgrounds")
-            .where("hash", "=", hash)
-            .returning("hash")
-            .pipe(Effect.head),
-        ),
+          authDb.deleteFrom("app_public.playgrounds").where("hash", "=", hash).returning("hash"),
+        ).pipe(Effect.head),
     } as const;
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 export const runPlaygroundService = <A, E>(effect: Effect.Effect<A, E, PlaygroundService>) =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(PlaygroundService.Default.pipe(Layer.provideMerge(DatabaseLive)))),
+    effect.pipe(Effect.provide(PlaygroundService.layer.pipe(Layer.provideMerge(DatabaseLive)))),
   );

@@ -8,15 +8,13 @@
 
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient";
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel";
-import * as GoogleClient from "@effect/ai-google/GoogleClient";
-import * as GoogleLanguageModel from "@effect/ai-google/GoogleLanguageModel";
 import * as OpenAiClient from "@effect/ai-openai/OpenAiClient";
 import * as OpenAiLanguageModel from "@effect/ai-openai/OpenAiLanguageModel";
 import * as OpenRouterClient from "@effect/ai-openrouter/OpenRouterClient";
 import * as OpenRouterLanguageModel from "@effect/ai-openrouter/OpenRouterLanguageModel";
-import type { LanguageModel } from "@effect/ai";
-import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Config, type ConfigError, Layer, type Redacted } from "effect";
+import type { LanguageModel } from "effect/ai";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { Config, Layer, type Redacted } from "effect";
 
 export type ProviderId = keyof typeof Providers;
 
@@ -58,12 +56,6 @@ export const Providers = {
     auth: "apiKey",
     suggestedModels: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.2"],
   },
-  google: {
-    displayName: "Google",
-    apiUrl: "https://generativelanguage.googleapis.com",
-    auth: "apiKey",
-    suggestedModels: ["gemini-3-pro", "gemini-2.5-flash"],
-  },
   "github-copilot": {
     displayName: "GitHub Copilot",
     apiUrl: "https://api.githubcopilot.com",
@@ -99,7 +91,7 @@ export const languageModelLayer = ({
   readonly model: string;
   readonly credential: ProviderCredential;
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>;
-}): Layer.Layer<LanguageModel.LanguageModel, ConfigError.ConfigError> => {
+}): Layer.Layer<LanguageModel.LanguageModel, Config.ConfigError> => {
   const apiKey = Config.succeed(credential.apiKey);
   // Each branch pairs a model with its own client. Splitting the two apart
   // breaks inference: the compiler can no longer tell which client satisfies
@@ -119,14 +111,6 @@ export const languageModelLayer = ({
             // is the whole point of bring-your-own-key.
             transformClient: setHeaders({ "anthropic-dangerous-direct-browser-access": "true" }),
           }),
-          httpClient,
-        ),
-      );
-    case "google":
-      return Layer.provide(
-        GoogleLanguageModel.model(model),
-        Layer.provide(
-          GoogleClient.layerConfig({ apiKey, apiUrl: url(Providers.google.apiUrl) }),
           httpClient,
         ),
       );

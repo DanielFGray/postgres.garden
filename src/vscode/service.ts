@@ -3,7 +3,7 @@ import {
   registerExtension,
   type RegisterLocalProcessExtensionResult,
 } from "@codingame/monaco-vscode-api/extensions";
-import { Effect, Scope } from "effect";
+import { Context, Effect, Layer, Scope } from "effect";
 import type * as vscode from "vscode";
 import {
   AI_CHAT_PARTICIPANT,
@@ -253,15 +253,11 @@ type VSCodeServiceApi = {
     command: string,
     callback: (...args: readonly unknown[]) => unknown,
   ) => Effect.Effect<void, never, Scope.Scope>;
-  readonly registerFileUrl: (
-    path: string,
-    url: string,
-  ) => Effect.Effect<void, never, Scope.Scope>;
+  readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, Scope.Scope>;
 };
 
-export class VSCodeService extends Effect.Service<VSCodeService>()("app/VSCodeService", {
-  dependencies: [Workbench.Default],
-  effect: Effect.gen(function* () {
+export class VSCodeService extends Context.Service<VSCodeService>()("app/VSCodeService", {
+  make: Effect.gen(function* () {
     const extension = yield* Effect.sync(() => {
       if (!registeredExtension) {
         registeredExtension = registerExtension(manifest, ExtensionHostKind.LocalProcess, {
@@ -296,4 +292,6 @@ export class VSCodeService extends Effect.Service<VSCodeService>()("app/VSCodeSe
       registerFileUrl,
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Workbench.layer));
+}

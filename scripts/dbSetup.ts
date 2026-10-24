@@ -1,7 +1,6 @@
-import { Config, Effect, Match, Schedule, pipe, Duration, Schema } from "effect";
-import { Prompt } from "@effect/cli";
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Terminal } from "@effect/platform";
+import { Config, Duration, Effect, Match, Schedule, Schema, pipe } from "effect";
+import { Prompt } from "effect/cli";
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import pg from "pg";
 
 // Environment variables
@@ -32,15 +31,17 @@ class DatabaseAuthError extends Schema.TaggedError<DatabaseAuthError>()("Databas
 }) {}
 
 class DatabaseSetupError extends Schema.TaggedError<DatabaseSetupError>()("DatabaseSetupError", {
-  error: Schema.Defect,
+  error: Schema.Defect(),
 }) {}
 
 // Create a retry schedule with exponential backoff and max attempts
-const retrySchedule = pipe(
-  Schedule.exponential(Duration.millis(RECONNECT_BASE_DELAY)),
-  Schedule.either(Schedule.spaced(Duration.millis(RECONNECT_MAX_DELAY))),
-  Schedule.compose(Schedule.recurs(30)),
-);
+const retrySchedule = Schedule.max([
+  Schedule.min([
+    Schedule.exponential(Duration.millis(RECONNECT_BASE_DELAY)),
+    Schedule.spaced(Duration.millis(RECONNECT_MAX_DELAY)),
+  ]),
+  Schedule.recurs(30),
+]);
 
 // Wrap a database query in Effect
 const executeQuery = (pool: pg.PoolClient | pg.Pool, query: string) =>
@@ -54,11 +55,10 @@ const testConnection = (pool: pg.Pool) =>
   Effect.tryPromise({
     try: () => pool.query('select true as "Connection test"'),
     catch: (error) => {
-      const pgError = error as { code?: string; message?: string };
-      if (pgError.code === "28P01") {
-        return new DatabaseAuthError({ message: pgError.message ?? "Auth failed" });
-      }
-      return new DatabaseConnectionError({ message: pgError.message ?? "Connection failed" });
+      const message = error instanceof Error ? error.message : String(error);
+      return error instanceof pg.DatabaseError && error.code === "28P01"
+        ? new DatabaseAuthError({ message })
+        : new DatabaseConnectionError({ message });
     },
   });
 
@@ -82,7 +82,7 @@ const waitForDatabase = (pool: pg.Pool) =>
     }),
     Effect.catchTags({
       DatabaseAuthError: (error) =>
-        Effect.dieMessage(`Database authentication failed: ${error.message}`),
+        Effect.die(new Error(`Database authentication failed: ${error.message}`)),
       DatabaseConnectionError: () =>
         Effect.gen(function* () {
           yield* Effect.logError("Database never came up, aborting :(");
@@ -105,15 +105,15 @@ const acquireConnection = (pool: pg.Pool) =>
   );
 
 // Prompt user for confirmation
-const confirmAction: Effect.Effect<boolean, never, Terminal.Terminal> = Effect.gen(function* () {
-  if (yield* Config.string("NOCONFIRM").pipe(Effect.isSuccess)) {
+const confirmAction = Effect.gen(function* () {
+  if (yield* Config.String("NOCONFIRM").pipe(Effect.isSuccess)) {
     return true;
   }
 
-  const result = yield* Prompt.confirm({
+  const result = yield* Prompt.Confirm({
     message: "press y to continue:",
     initial: true,
-  }).pipe(Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))));
+  }).pipe(Effect.catchTag("QuitError", () => Effect.sync(() => process.exit(0))));
 
   if (!result) {
     return yield* Effect.sync(() => process.exit(0));
@@ -145,7 +145,7 @@ const executeDatabaseSetup = Effect.fnUntraced(function* (rootPgPool: pg.PoolCli
 
   // Create owner role
   if (
-    yield* Config.string("NODE_ENV").pipe(
+    yield* Config.String("NODE_ENV").pipe(
       Effect.map((value) => value === "production"),
       Effect.orElseSucceed(() => false),
     )
@@ -218,7 +218,7 @@ const program = Effect.gen(function* () {
         pipe(
           acquireConnection(pgPool),
           Effect.andThen((rootPgPool) => executeDatabaseSetup(rootPgPool)),
-          Effect.catchAll((error) => Effect.logError(`Database setup error: ${String(error)}`)),
+          Effect.catch((error) => Effect.logError(`Database setup error: ${String(error)}`)),
         ),
       );
     }),
@@ -227,4 +227,4 @@ const program = Effect.gen(function* () {
 });
 
 // Run the program
-program.pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain);
+program.pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);

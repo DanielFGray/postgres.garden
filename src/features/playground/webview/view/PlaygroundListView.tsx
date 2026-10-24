@@ -31,8 +31,8 @@ function buildSearchUrl(q: string): string {
 // ---------------------------------------------------------------------------
 
 function formatDate(dateString: string) {
-  const date = DateTime.toDate(DateTime.unsafeMake(dateString));
-  const now = DateTime.toDate(DateTime.unsafeNow());
+  const date = DateTime.toDate(DateTime.makeUnsafe(dateString));
+  const now = DateTime.toDate(DateTime.nowUnsafe());
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -131,7 +131,7 @@ export const PlaygroundListView = () => {
   const [searchInput, setSearchInput] = createSignal("");
   const [searchQuery, setSearchQuery] = createSignal("");
   const [mutationError, setMutationError] = createSignal<string | null>(null);
-  let debounceFiber: Fiber.RuntimeFiber<void, never> | undefined;
+  let debounceFiber: Fiber.Fiber<void, never> | undefined;
 
   // Tracks `searchQuery`, so committing a debounced search re-runs the request
   // on its own — no explicit refetch needed.

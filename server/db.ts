@@ -1,16 +1,20 @@
-import { Context, Effect, Layer, Config, Match, Schedule, Duration, Schema } from "effect";
+import {
+  Config,
+  Context,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+  Semaphore,
+} from "effect";
+import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
 import * as pg from "pg";
-
-// Configure pg to return bigint for int8 columns (OID 20) instead of string
-pg.types.setTypeParser(20, BigInt);
-import * as SqlClient from "@effect/sql/SqlClient";
-import { PgClient } from "@effect/sql-pg";
-import * as PgKysely from "@effect/sql-kysely/Pg";
-import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 import { CurrentSession } from "./apiSchema.js";
 import { env } from "./assertEnv.js";
-import { logError } from "./otel-logger.js";
 import type {
   DB,
   AppPublicUsers as User,
@@ -19,32 +23,122 @@ import type {
   AppPublicPlaygroundCommits as Commit,
 } from "../generated/db.js";
 
+// Configure pg to return bigint for int8 columns (OID 20) instead of string
+pg.types.setTypeParser(20, BigInt);
+
 export type { DB, User, Organization, Playground, Commit };
 
-export type KyselyDB = PgKysely.EffectKysely<DB>;
+export type KyselyDB = Kysely<DB>;
 
-export const pgConfig: PgClient.PgClientConfig = {} as const;
+/** A query or transaction step failed. `cause` is usually the `pg.DatabaseError`. */
+export class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
+  cause: Schema.Unknown,
+}) {}
 
-const withDatabaseRetry = <E, A, R>(layer: Layer.Layer<E, A, R>) =>
-  Layer.retry(
-    layer,
-    Schedule.identity<Layer.Layer.Error<typeof layer>>().pipe(
-      Schedule.check(
-        (input) =>
-          input && typeof input === "object" && "_tag" in input && input._tag === "SqlError",
-      ),
-      Schedule.intersect(Schedule.exponential("100 millis")),
-      Schedule.intersect(Schedule.forever),
-      Schedule.jittered,
-      Schedule.onDecision(([[_error, duration], attempt], decision) =>
-        decision._tag === "Continue"
-          ? Effect.logInfo(
-              `Retrying database connection in ${Duration.format(duration)} (attempt #${++attempt})`,
-            )
-          : Effect.void,
+/** Pass as the `catch` of `Effect.tryPromise` around any Kysely `execute()`. */
+export const toDatabaseError = (cause: unknown) => new DatabaseError({ cause });
+
+/** A Kysely query builder, or any value whose `execute()` returns a Promise. */
+export type Query<A> = { execute(): Promise<A> };
+
+/** Something a boundary can run: an Effect, or a query that the boundary executes. */
+export type Step<A, E = never, R = never> = Effect.Effect<A, E, R> | Query<A>;
+
+/** Runs a query and maps its failure to `DatabaseError`. */
+// Every query gets its own span. The OTLP tracer exports these, and they stand
+// in for the Postgres auto-instrumentation the Node SDK used to provide.
+export const runQuery = <A>(query: Query<A>) =>
+  Effect.tryPromise({ try: () => query.execute(), catch: toDatabaseError }).pipe(
+    Effect.withSpan("db.query"),
+  );
+
+const toEffect = <A, E, R>(step: Step<A, E, R>): Effect.Effect<A, E | DatabaseError, R> =>
+  Effect.isEffect(step) ? step : runQuery(step);
+
+/** A Kysely instance over a `pg` pool. The pool connects lazily, on the first query. */
+export const connect = (connectionString: string): KyselyDB =>
+  new Kysely<DB>({ dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString }) }) });
+
+/**
+ * Runs `use` in one transaction on one pooled connection. The transaction
+ * commits when `use` succeeds and rolls back when it fails or is interrupted.
+ */
+const startTransaction = (db: KyselyDB) =>
+  Effect.tryPromise({ try: () => db.startTransaction().execute(), catch: toDatabaseError });
+
+/**
+ * Commits a transaction whose scope succeeded and rolls it back otherwise. A
+ * failed rollback leaves the connection in an unknown state, so it is a defect.
+ */
+const settle = <A, E>(trx: ControlledTransaction<DB>, exit: Exit.Exit<A, E>) =>
+  Exit.isSuccess(exit)
+    ? Effect.tryPromise({ try: () => trx.commit().execute(), catch: toDatabaseError })
+    : Effect.tryPromise({
+        try: () => trx.rollback().execute(),
+        catch: toDatabaseError,
+      }).pipe(Effect.orDie);
+
+/**
+ * Runs `use` in one transaction on one pooled connection. The transaction
+ * commits when `use` succeeds and rolls back when it fails or is interrupted.
+ */
+const transact = <A, E, R>(db: KyselyDB, use: (trx: KyselyDB) => Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(startTransaction(db), use, settle);
+
+/**
+ * Binds the visitor role and the session for RLS. Both are transaction-local.
+ * A session-local role would outlive the request on a pooled connection and
+ * leak one visitor's identity into the next request that reuses it.
+ */
+const bindVisitor = (trx: KyselyDB, sessionId: string | undefined) =>
+  Effect.tryPromise({
+    try: () =>
+      sql`select set_config('role', ${env.DATABASE_VISITOR}, true),
+                 set_config('my.session_id', ${sessionId ?? ""}, true)`.execute(trx),
+    catch: toDatabaseError,
+  });
+
+/**
+ * Starts a visitor transaction. If binding fails, the transaction rolls back
+ * here, so no open transaction is left without an owner.
+ */
+const openVisitor = (db: KyselyDB, sessionId: string | undefined) =>
+  startTransaction(db).pipe(
+    Effect.flatMap((trx) =>
+      bindVisitor(trx, sessionId).pipe(
+        Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : settle(trx, exit))),
+        Effect.as(trx),
       ),
     ),
   );
+
+/**
+ * Runs `use` on the request's transaction. The first call opens it under the
+ * lock, so two concurrent first calls cannot open two transactions and leak
+ * one. A later call keeps the session the transaction opened with.
+ */
+const joinRequest = <A, E, R>(
+  slot: RequestSlot,
+  db: KyselyDB,
+  sessionId: string | undefined,
+  use: (db: KyselyDB) => Step<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const trx = yield* Semaphore.withPermit(
+      slot.lock,
+      Effect.flatMap(
+        Ref.get(slot.opened),
+        Option.match({
+          onSome: (trx) => Effect.succeed(trx),
+          onNone: () =>
+            openVisitor(db, sessionId).pipe(
+              Effect.tap((trx) => Ref.set(slot.opened, Option.some(trx))),
+            ),
+        }),
+      ),
+    );
+    return yield* toEffect(use(trx));
+  });
 
 /**
  * Resolves the visitor pool once and hands back a function that runs a query
@@ -55,21 +149,22 @@ const withDatabaseRetry = <E, A, R>(layer: Layer.Layer<E, A, R>) =>
  * this closure, never the tag itself, so there is no way to reach the
  * visitor connection without going through the RLS boundary below.
  *
- * A `Effect.Service` whose methods all run as the visitor role should
+ * A `Context.Service` whose methods all run as the visitor role should
  * resolve this once in its constructor and close over the result, rather
  * than have every method re-`yield*` `AuthPool` (see `leakingRequirements`).
  */
 export const visitorQuerier = Effect.gen(function* () {
-  const { sql, db } = yield* AuthPool;
-  return <A, E, R>(sessionId: string | undefined, use: (db: KyselyDB) => Effect.Effect<A, E, R>) =>
-    sql.withTransaction(
-      Effect.zipRight(
-        // Both settings are transaction-local. A session-local role would
-        // outlive the request on a pooled connection and leak one visitor's
-        // identity into the next request that reuses it.
-        sql`select set_config('role', ${env.DATABASE_VISITOR}, true),
-                   set_config('my.session_id', ${sessionId ?? ""}, true)`,
-        use(db),
+  const db = yield* AuthPool;
+  return <A, E, R>(sessionId: string | undefined, use: (db: KyselyDB) => Step<A, E, R>) =>
+    // Read the slot per call, not here: this closure is built once per service,
+    // and each call must join the request it runs in.
+    Effect.serviceOption(RequestTransaction).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            transact(db, (trx) => Effect.andThen(bindVisitor(trx, sessionId), toEffect(use(trx)))),
+          onSome: (slot) => joinRequest(slot, db, sessionId, use),
+        }),
       ),
     );
 });
@@ -78,10 +173,13 @@ export const visitorQuerier = Effect.gen(function* () {
  * Run a query as the visitor role, in one transaction, with the request's
  * session bound for RLS policies to read via `current_setting`.
  *
- * Nested boundaries become savepoints, so wrapping an effect that already
- * established one is safe.
+ * Inside `withRequestTransaction`, every `asVisitor` shares the request's
+ * transaction, so nesting is safe there. The shared transaction keeps the
+ * session it opened with. Outside a request, each call takes its own
+ * connection: an inner call cannot see the outer transaction's writes and can
+ * wait forever on a lock the outer transaction holds. Do not nest there.
  */
-export const asVisitor = <A, E, R>(use: (db: KyselyDB) => Effect.Effect<A, E, R>) =>
+export const asVisitor = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
   Effect.gen(function* () {
     const run = yield* visitorQuerier;
     const { session } = yield* CurrentSession;
@@ -91,34 +189,63 @@ export const asVisitor = <A, E, R>(use: (db: KyselyDB) => Effect.Effect<A, E, R>
 /**
  * Resolves the root pool once and hands back a function that runs a query as
  * the owning role, in one transaction, bypassing RLS. See `visitorQuerier`
- * for why a `Effect.Service` should prefer this over `asRoot`.
+ * for why a `Context.Service` should prefer this over `asRoot`.
  */
 export const rootQuerier = Effect.gen(function* () {
-  const { sql, db } = yield* RootPool;
-  return <A, E, R>(use: (db: KyselyDB) => Effect.Effect<A, E, R>) => sql.withTransaction(use(db));
+  const db = yield* RootPool;
+  return <A, E, R>(use: (db: KyselyDB) => Step<A, E, R>) =>
+    transact(db, (trx) => toEffect(use(trx)));
 });
 
 /**
  * Run a query as the owning role, in one transaction, bypassing RLS.
  *
- * The two pools log in as different Postgres roles, so an `asRoot` nested
- * inside an `asVisitor` is an independent transaction on another connection,
- * not a savepoint: if the outer boundary rolls back, this one stays committed.
+ * The two pools log in as different Postgres roles and hold separate
+ * connections, so this transaction is independent of an enclosing `asVisitor`.
+ * It is not a savepoint: if the outer boundary rolls back, this one stays
+ * committed. It must not nest inside another boundary: the outer transaction can
+ * hold a lock this one waits on.
  */
-export const asRoot = <A, E, R>(use: (db: KyselyDB) => Effect.Effect<A, E, R>) =>
+export const asRoot = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
   Effect.flatMap(rootQuerier, (run) => run(use));
 
 /**
- * A connection pool plus the Kysely instance bound to it. The pool is chosen
- * by which of `asVisitor`/`asRoot` you enter.
+ * Runs `effect` as one request. Every `asVisitor` inside it shares one
+ * authenticator transaction, opened by the first call that needs it, so a
+ * request that never queries as the visitor opens nothing. The transaction
+ * commits when `effect` succeeds and rolls back when it fails or is interrupted.
+ *
+ * Only the authenticator pool is shared. `asRoot` keeps its own transaction,
+ * so owner-pool writes such as lockout counters do not roll back with a
+ * request that fails later.
  */
-interface Pool {
-  readonly sql: SqlClient.SqlClient;
-  readonly db: KyselyDB;
+export const withRequestTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.all({
+      lock: Semaphore.make(1),
+      opened: Ref.make(Option.none<ControlledTransaction<DB>>()),
+    }),
+    (slot) => effect.pipe(Effect.provideService(RequestTransaction, slot)),
+    (slot, exit) =>
+      Ref.get(slot.opened).pipe(
+        Effect.flatMap(
+          Option.match({ onNone: () => Effect.void, onSome: (trx) => settle(trx, exit) }),
+        ),
+      ),
+  );
+
+class AuthPool extends Context.Service<AuthPool, KyselyDB>()("AuthPool") {}
+class RootPool extends Context.Service<RootPool, KyselyDB>()("RootPool") {}
+
+/** The authenticator transaction a request shares. `opened` is empty until the first `asVisitor` opens it. */
+interface RequestSlot {
+  readonly lock: Semaphore.Semaphore;
+  readonly opened: Ref.Ref<Option.Option<ControlledTransaction<DB>>>;
 }
 
-class AuthPool extends Context.Tag("AuthPool")<AuthPool, Pool>() {}
-class RootPool extends Context.Tag("RootPool")<RootPool, Pool>() {}
+class RequestTransaction extends Context.Service<RequestTransaction, RequestSlot>()(
+  "RequestTransaction",
+) {}
 
 /**
  * What `asVisitor`/`asRoot` need in context. Exported as types only: the tags
@@ -127,20 +254,15 @@ class RootPool extends Context.Tag("RootPool")<RootPool, Pool>() {}
 export type VisitorContext = AuthPool | CurrentSession;
 export type RootContext = RootPool;
 
-const poolLayer = <I>(tag: Context.Tag<I, Pool>, urlKey: string) =>
+const poolLayer = <I>(tag: Context.Service<I, KyselyDB>, urlKey: string) =>
   Layer.effect(
     tag,
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const db = yield* PgKysely.make<DB>();
-      return { sql, db };
+      const url = yield* Config.Redacted(urlKey);
+      const db = connect(Redacted.value(url));
+      yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
+      return db;
     }),
-  ).pipe(
-    Layer.provide(
-      Layer.unwrapEffect(
-        Config.redacted(urlKey).pipe(Effect.andThen((url) => PgClient.layer({ url, ...pgConfig }))),
-      ).pipe(withDatabaseRetry),
-    ),
   );
 
 export const AuthPoolLive = poolLayer(AuthPool, "AUTH_DATABASE_URL");
@@ -164,32 +286,36 @@ const CUSTOM_ERROR_CODES: readonly string[] = [
   "OWNER", // Organization owner constraint
 ];
 
-/** Unwrap @effect/sql SqlError to get the underlying database error. */
-const ErrorCarrier = Schema.Struct({ cause: Schema.optional(Schema.Unknown) });
-const unwrapCause = (cause: unknown) => {
-  const decoded = Schema.decodeUnknownEither(ErrorCarrier)(cause);
-  return Match.value(decoded).pipe(
-    Match.tags({ Left: () => cause, Right: ({ right }) => right.cause ?? cause }),
-    Match.exhaustive,
-  );
-};
+const PgDatabaseError = Schema.instanceOf(pg.DatabaseError);
 
-export function handleDbError(cause: unknown, fallbackMessage: string) {
-  Schema.decodeUnknownEither(ErrorCarrier)(cause);
-  const span = trace.getActiveSpan();
-  const dbCause = unwrapCause(cause);
-  if (
-    dbCause instanceof pg.DatabaseError &&
-    dbCause.code &&
-    CUSTOM_ERROR_CODES.includes(dbCause.code)
-  ) {
-    span?.setAttribute("db.error_code", dbCause.code);
-    return { code: 400, error: dbCause.message };
+// A failed query reaches the handlers either as the raw pg error or wrapped in `DatabaseError`.
+const PgErrorSource = Schema.Union([
+  PgDatabaseError,
+  Schema.TaggedStruct("DatabaseError", { cause: PgDatabaseError }),
+]);
+
+/**
+ * The `pg.DatabaseError` behind a failed query, or `undefined` for any other failure.
+ * A non-pg failure is the normal case for most catch sites, so the decode failure is
+ * recovered here rather than surfaced.
+ */
+export const unwrapPgError = (error: unknown) =>
+  Schema.decodeUnknownEffect(PgErrorSource)(error).pipe(
+    Effect.map((source) => (source instanceof pg.DatabaseError ? source : source.cause)),
+    Effect.orElseSucceed((): pg.DatabaseError | undefined => undefined),
+  );
+
+/**
+ * Maps a failed query to an HTTP status and a message the client may see. A known
+ * constraint violation answers 400 with the database's message. Any other failure
+ * is logged and answers 500 with `fallbackMessage`.
+ */
+export const handleDbError = Effect.fnUntraced(function* (cause: unknown, fallbackMessage: string) {
+  const dbError = yield* unwrapPgError(cause);
+  if (dbError?.code && CUSTOM_ERROR_CODES.includes(dbError.code)) {
+    yield* Effect.annotateCurrentSpan("db.error_code", dbError.code);
+    return { code: 400, error: dbError.message };
   }
-  if (span) {
-    span.recordException(cause instanceof Error ? cause : new Error(String(cause)));
-    span.setStatus({ code: SpanStatusCode.ERROR });
-  }
-  logError("Database error", cause);
+  yield* Effect.logError("Database error", cause);
   return { code: 500, error: fallbackMessage };
-}
+});

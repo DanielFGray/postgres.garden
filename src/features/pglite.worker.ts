@@ -1,9 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { worker } from "@electric-sql/pglite/worker";
-import { vector } from "@electric-sql/pglite/vector";
-import { pg_ivm } from "@electric-sql/pglite/pg_ivm";
-import { pg_uuidv7 } from "@electric-sql/pglite/pg_uuidv7";
-import { pgtap } from "@electric-sql/pglite/pgtap";
+import { vector } from "@electric-sql/pglite-pgvector";
+import { pg_ivm } from "@electric-sql/pglite-pg_ivm";
+import { pg_uuidv7 } from "@electric-sql/pglite-pg_uuidv7";
+import { pgtap } from "@electric-sql/pglite-pgtap";
 
 // Import contrib extensions
 import { amcheck } from "@electric-sql/pglite/contrib/amcheck";
@@ -97,8 +97,7 @@ function setupFsPort(port: MessagePort) {
       return;
     }
 
-    // oxlint-disable-next-line typescript/no-explicit-any -- Module.FS is not in public types
-    const FS = (pgInstance as any).Module.FS as EmscriptenFS;
+    const FS = pgInstance.Module.FS;
 
     switch (type) {
       case "writeFile": {
@@ -196,8 +195,7 @@ void worker({
       // Store for FS sync access and create /workspace mount point
       pgInstance = db;
       try {
-        // oxlint-disable-next-line typescript/no-explicit-any -- Module.FS not in public types
-        (db as any).Module.FS.mkdir("/workspace");
+        db.Module.FS.mkdir("/workspace");
       } catch {
         // already exists (e.g. after reinitialize)
       }

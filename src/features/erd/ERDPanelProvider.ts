@@ -24,7 +24,7 @@ export class ERDPanelProvider {
   private _disposables: vscode.Disposable[] = [];
   private _pgliteService: ERDQueryClient;
 
-  private static _refreshFiber: Fiber.RuntimeFiber<void, never> | undefined;
+  private static _refreshFiber: Fiber.Fiber<void, never> | undefined;
 
   public static refresh() {
     if (ERDPanelProvider._refreshFiber) {
@@ -93,8 +93,8 @@ export class ERDPanelProvider {
       Effect.map((mermaidCode) => {
         this._postMessage({ type: "load", data: { mermaidCode } });
       }),
-      Effect.catchAll((error) =>
-        Effect.gen(this, function* () {
+      Effect.catch((error) =>
+        Effect.gen({ self: this }, function* () {
           yield* Effect.logError("Failed to load ERD:", error);
           this._postMessage({
             type: "error",
@@ -108,7 +108,7 @@ export class ERDPanelProvider {
   }
 
   private _handleMessage(message: ERDToExtensionMessage): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       switch (message.type) {
         case "initialized":
           // Webview is ready, data will be sent automatically

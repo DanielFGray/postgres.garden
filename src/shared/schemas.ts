@@ -34,5 +34,5 @@ export class Commit extends S.Class<Commit>("Commit")({
   parent_id: S.NullOr(S.String),
   files: S.Array(FileEntry),
   activeFile: S.NullOr(S.String),
-  timestamp: S.Number,
+  timestamp: S.Finite,
 }) {}

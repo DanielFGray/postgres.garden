@@ -1,6 +1,6 @@
-import { FetchHttpClient } from "@effect/platform";
-import { LanguageModel, Response } from "@effect/ai";
-import { Effect, Layer, Match, Option, Redacted, Runtime, Stream } from "effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { LanguageModel, Response } from "effect/ai";
+import { Effect, Layer, Match, Option, Redacted, Stream } from "effect";
 import type * as vscode from "vscode";
 import { languageModelLayer, Providers, type ProviderId } from "../../lib/ai/providers";
 import { VSCodeService } from "../vscode/service";
@@ -32,12 +32,12 @@ const toAbortSignal = (token: vscode.CancellationToken): AbortSignal | undefined
 
 const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.scopedDiscard(
+export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.effectDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const credentials = yield* AiCredentials;
     const vscodeApi = vscodeService.api;
-    const runtime = yield* Effect.runtime<never>();
+    const runtime = yield* Effect.context<never>();
 
     const onDidChangeModels = new vscodeApi.EventEmitter<void>();
 
@@ -48,7 +48,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
       onDidChangeLanguageModelChatInformation: onDidChangeModels.event,
 
       provideLanguageModelChatInformation(_options, _token) {
-        return Runtime.runPromise(runtime)(
+        return Effect.runPromiseWith(runtime)(
           credentials.list().pipe(Effect.orElseSucceed(() => [])),
         ).then((stored) =>
           stored.map((credential) => ({
@@ -80,7 +80,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
       },
 
       provideLanguageModelChatResponse(model, messages, _options, progress, token) {
-        return Runtime.runPromise(runtime)(
+        return Effect.runPromiseWith(runtime)(
           Effect.gen(function* () {
             const provider = model.family as ProviderId;
             if (!(provider in Providers)) {
@@ -110,7 +110,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
               return;
             }
             yield* streamText(credential.value, messagesToPrompt(messages), progress).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 token.isCancellationRequested
                   ? Effect.void
                   : Effect.sync(() =>
@@ -195,7 +195,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
         vscodeApi.chat.createChatParticipant(
           AI_CHAT_PARTICIPANT,
           (request, _context, response, token) =>
-            Runtime.runPromise(runtime)(
+            Effect.runPromiseWith(runtime)(
               Effect.gen(function* () {
                 const modelResponse = yield* Effect.tryPromise({
                   try: () =>
@@ -207,7 +207,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
                   catch: errorMessage,
                 });
                 const iterator = modelResponse.stream[Symbol.asyncIterator]();
-                yield* Effect.async<void, string>((resume) => {
+                yield* Effect.callback<void, string>((resume) => {
                   const read = (): void => {
                     void iterator.next().then(
                       (result) => {
@@ -233,7 +233,7 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
                   read();
                 });
               }).pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   token.isCancellationRequested
                     ? Effect.void
                     : Effect.sync(() => response.markdown(`**Error:** ${errorMessage(error)}`)),
@@ -323,9 +323,9 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
     });
 
     const runCommand = (effect: Effect.Effect<void, Error, never>) =>
-      Runtime.runPromise(runtime)(
+      Effect.runPromiseWith(runtime)(
         effect.pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.sync(() => {
               void vscodeApi.window.showErrorMessage(errorMessage(error));
             }),
@@ -336,4 +336,4 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.sco
     yield* vscodeService.registerCommand(AI_CONFIGURE_PROVIDER, () => runCommand(configureFlow));
     yield* vscodeService.registerCommand(AI_CLEAR_PROVIDER, () => runCommand(clearFlow));
   }).pipe(Effect.withSpan("feature.ai")),
-).pipe(Layer.provide(AiCredentials.Default));
+).pipe(Layer.provide(AiCredentials.layer));

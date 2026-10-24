@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode";
 import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vscode";
-import { DateTime, Effect, Layer, Match, Option, pipe, Runtime, Schema } from "effect";
+import { DateTime, Effect, Layer, Match, Option, pipe, Schema } from "effect";
 import { navigateTo } from "../shared/navigation";
 import {
   httpApiCreatePlayground,
@@ -60,7 +60,7 @@ class ServerSyncError extends Schema.TaggedError<ServerSyncError>()("ServerSyncE
 
 class SignInRequired extends Schema.TaggedError<SignInRequired>()("SignInRequired", {}) {}
 
-const stringify = Schema.encodeSync(Schema.parseJson(Schema.Unknown));
+const stringify = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeStringArgument = Schema.decodeUnknownOption(Schema.String);
 const CommandItem = Schema.Struct({ id: Schema.String });
 const decodeCommandItem = Schema.decodeUnknownOption(CommandItem);
@@ -77,15 +77,15 @@ const toServerSyncError = (cause: unknown) =>
   });
 const isApiRequestError = Schema.is(
   Schema.Struct({
-    status: Schema.Number,
+    status: Schema.Finite,
     value: Schema.Unknown,
   }),
 );
-export const ServerSyncFeatureLive = Layer.scopedDiscard(
+export const ServerSyncFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const { runFork } = yield* Workbench;
-    const runtime = yield* Effect.runtime<never>();
+    const runtime = yield* Effect.context<never>();
     const vscodeApi = vscodeService.api;
 
     yield* Effect.log("[ServerSync] API received, checking workspace...");
@@ -186,7 +186,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               });
             }),
           ),
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(`[ServerSync] Failed to read file ${fileUri.path}:`, error),
           ),
         ),
@@ -210,7 +210,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               cancellable: false,
             },
             (progress) =>
-              Runtime.runPromise(runtime)(
+              Effect.runPromiseWith(runtime)(
                 Effect.gen(function* () {
                   progress.report({ message: "Saving files..." });
 
@@ -243,11 +243,11 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                   const commitMessage =
                     message ||
                     scm.inputBox.value ||
-                    `Workspace snapshot at ${DateTime.formatIso(DateTime.unsafeNow())}`;
+                    `Workspace snapshot at ${DateTime.formatIso(DateTime.nowUnsafe())}`;
 
                   // Generate unique name (slug) for the playground
                   // Format: workspace_YYYYMMDD_HHMMSS_milliseconds
-                  const now = DateTime.unsafeNow();
+                  const now = DateTime.nowUnsafe();
                   const nowDate = DateTime.toDate(now);
                   const playgroundName = `workspace_${nowDate.getFullYear()}${String(nowDate.getMonth() + 1).padStart(2, "0")}${String(nowDate.getDate()).padStart(2, "0")}_${String(nowDate.getHours()).padStart(2, "0")}${String(nowDate.getMinutes()).padStart(2, "0")}${String(nowDate.getSeconds()).padStart(2, "0")}_${nowDate.getMilliseconds()}`;
 
@@ -262,7 +262,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                   // We check with the server instead of just the local auth provider
                   // because the session cookie is the source of truth for authentication
                   const me = yield* httpApiMe.pipe(
-                    Effect.catchAll((error) =>
+                    Effect.catch((error) =>
                       Effect.logWarning("[ServerSync] Failed to check auth status:", error).pipe(
                         Effect.map(() => null),
                       ),
@@ -321,7 +321,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                         })
                   ).pipe(
                     Effect.map(Option.some),
-                    Effect.catchAll((error) =>
+                    Effect.catch((error) =>
                       Effect.gen(function* () {
                         yield* Effect.logError("[ServerSync] Commit failed:", error);
                         if (isApiRequestError(error) && error.status === 401) {
@@ -350,7 +350,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                                   ),
                                 ),
                               ),
-                              Effect.catchAll(() =>
+                              Effect.catch(() =>
                                 Effect.sync(() =>
                                   vscodeApi.window.showErrorMessage(
                                     "Authentication failed. Please try again.",
@@ -466,7 +466,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                             ),
                           ),
                         ),
-                        Effect.catchAll(() => Effect.void),
+                        Effect.ignore,
                       );
                     }
                   } else {
@@ -503,7 +503,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                     createIfNone: true,
                   }),
                 catch: toServerSyncError,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.ignore);
             }
           }),
         ),
@@ -562,7 +562,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
           }
           return Effect.void;
         }),
-        Effect.catchAll(() => {
+        Effect.catch(() => {
           // File might be deleted or unreadable
           const baselineContent = baselineFiles.get(uri.path);
           if (baselineContent !== undefined) {
@@ -596,7 +596,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
         const label = element.message || `Commit ${element.id.substring(0, 8)}`;
         const treeItem = new vscode.TreeItem(isCurrentCommit ? `✓ ${label}` : label);
         treeItem.id = element.id;
-        treeItem.description = DateTime.formatLocal(DateTime.unsafeMake(element.timestamp));
+        treeItem.description = DateTime.formatLocal(DateTime.makeUnsafe(element.timestamp));
         treeItem.tooltip = `${element.fileCount} file(s) • ${element.username || "Unknown user"} • ${element.id}${isCurrentCommit ? " (currently loaded)" : ""}`;
         treeItem.contextValue = "commit";
         treeItem.iconPath = new vscode.ThemeIcon(isCurrentCommit ? "circle-filled" : "git-commit");
@@ -609,7 +609,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
       }
 
       getChildren(element?: CommitHistoryItem): Promise<CommitHistoryItem[]> {
-        return Runtime.runPromise(runtime)(
+        return Effect.runPromiseWith(runtime)(
           Effect.gen(function* () {
             if (element || !currentPlaygroundHash) {
               if (!element) {
@@ -619,7 +619,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
             }
 
             const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 Effect.logError("[ServerSync] Error loading commits:", error).pipe(
                   Effect.map(() => null),
                 ),
@@ -691,8 +691,8 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
       }
 
       getChildren(element?: ForkHistoryItem): Promise<ForkHistoryItem[]> {
-        return Runtime.runPromise(runtime)(
-          Effect.gen(this, function* () {
+        return Effect.runPromiseWith(runtime)(
+          Effect.gen({ self: this }, function* () {
             if (element || !currentPlaygroundHash) return [];
 
             const chain: ForkHistoryItem[] = [];
@@ -700,7 +700,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
 
             while (currentHash) {
               const playground = yield* httpApiGetPlayground(currentHash).pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   Effect.logError("[ServerSync] Error loading fork history:", error).pipe(
                     Effect.map(() => null),
                   ),
@@ -720,16 +720,16 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                 hash: pg.hash,
                 name: pg.name ?? "Untitled",
                 owner: pipe(
-                  Option.fromNullable(pg.user),
-                  Option.flatMap((user) => Option.fromNullable(user.username)),
+                  Option.fromNullishOr(pg.user),
+                  Option.flatMap((user) => Option.fromNullishOr(user.username)),
                   Option.getOrUndefined,
                 ),
                 isCurrent: pg.hash === currentPlaygroundHash,
               });
 
               currentHash = pipe(
-                Option.fromNullable(pg.fork_of),
-                Option.flatMap((forkOf) => Option.fromNullable(forkOf.hash)),
+                Option.fromNullishOr(pg.fork_of),
+                Option.flatMap((forkOf) => Option.fromNullishOr(forkOf.hash)),
                 Option.getOrNull,
               );
             }
@@ -772,7 +772,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               );
             }),
           ),
-          Effect.catchAll(() => Effect.void),
+          Effect.ignore,
         ),
       );
     });
@@ -823,7 +823,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                 cancellable: false,
               },
               () =>
-                Runtime.runPromise(runtime)(
+                Effect.runPromiseWith(runtime)(
                   Effect.gen(function* () {
                     // Need to know which playground this commit belongs to
                     if (!currentPlaygroundHash) {
@@ -836,7 +836,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
                       currentPlaygroundHash,
                       parsed,
                     ).pipe(
-                      Effect.catchAll((error) =>
+                      Effect.catch((error) =>
                         Effect.sync(() => {
                           vscodeApi.window.showErrorMessage(
                             `Failed to load commit diff: ${isApiRequestError(error) ? `${error.status} ${stringify(error.value)}` : String(error)}`,
@@ -985,7 +985,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               );
             }),
           ),
-          Effect.catchAll(() => Effect.void),
+          Effect.ignore,
         ),
       );
     });
@@ -1045,7 +1045,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
             currentPlaygroundHash,
             commitId,
           ).pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.sync(() => {
                 void vscodeApi.window.showErrorMessage(
                   `Failed to load commit: ${isApiRequestError(error) ? `${error.status} ${stringify(error.value)}` : String(error)}`,
@@ -1073,7 +1073,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               try: () => vscodeApi.workspace.fs.delete(file),
               catch: toServerSyncError,
             }).pipe(
-              Effect.catchAll((err) => Effect.logWarning(`Failed to delete ${file.path}:`, err)),
+              Effect.catch((err) => Effect.logWarning(`Failed to delete ${file.path}:`, err)),
             ),
           );
 
@@ -1087,16 +1087,14 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               yield* Effect.tryPromise({
                 try: () => vscodeApi.workspace.fs.createDirectory(dirUri),
                 catch: toServerSyncError,
-              }).pipe(Effect.catchAll(() => Effect.void));
+              }).pipe(Effect.ignore);
 
               yield* Effect.tryPromise({
                 try: () => vscodeApi.workspace.fs.writeFile(uri, content),
                 catch: toServerSyncError,
               });
             }).pipe(
-              Effect.catchAll((err) =>
-                Effect.logWarning(`Failed to restore file ${file.path}:`, err),
-              ),
+              Effect.catch((err) => Effect.logWarning(`Failed to restore file ${file.path}:`, err)),
             ),
           );
 
@@ -1128,7 +1126,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               );
             }),
           ),
-          Effect.catchAll(() => Effect.void),
+          Effect.ignore,
         ),
       );
     });
@@ -1188,7 +1186,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
 
           // Update status bar
           yield* updateStatusBar();
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.ignore),
       );
     });
 
@@ -1242,7 +1240,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
       }
 
       const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
-        Effect.catchAll(() =>
+        Effect.catch(() =>
           Effect.sync(() => {
             scm.statusBarCommands = undefined;
             return null;
@@ -1280,7 +1278,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
           }
 
           const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
-            Effect.catchAll(() => {
+            Effect.catch(() => {
               void vscodeApi.window.showErrorMessage("Failed to load commits");
               return Effect.succeed(null);
             }),
@@ -1295,7 +1293,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
           const items: VersionQuickPickItem[] = commits.map((commit, index) => ({
             label: `${commit.id === currentCommitId ? "✓ " : ""}Version ${index + 1}`,
             description: commit.message || `Commit ${commit.id.substring(0, 8)}`,
-            detail: `${commit.username || "Unknown"} • ${DateTime.formatLocal(DateTime.unsafeMake(commit.timestamp))}`,
+            detail: `${commit.username || "Unknown"} • ${DateTime.formatLocal(DateTime.makeUnsafe(commit.timestamp))}`,
             commitId: commit.id,
           }));
 
@@ -1323,7 +1321,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
               );
             }),
           ),
-          Effect.catchAll(() => Effect.void),
+          Effect.ignore,
         ),
       );
     });
@@ -1401,7 +1399,7 @@ export const ServerSyncFeatureLive = Layer.scopedDiscard(
             baselineFiles.set(fileUri.path, textContent);
           }),
         ),
-        Effect.catchAll((err) =>
+        Effect.catch((err) =>
           Effect.logWarning(`[ServerSync] Failed to read initial file ${fileUri.path}:`, err),
         ),
       ),

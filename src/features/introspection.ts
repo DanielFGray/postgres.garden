@@ -19,7 +19,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
 
   refresh = (): Promise<void> =>
     Effect.runPromise(
-      Effect.gen(this, function* () {
+      Effect.gen({ self: this }, function* () {
         const results = yield* Effect.tryPromise({
           try: () =>
             vscode.commands.executeCommand<ExtendedResults[]>(
@@ -383,7 +383,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
 
       case "fnreturns": {
         const id = pipe(
-          Option.fromNullable(parent.id.split("-")[0]),
+          Option.fromNullishOr(parent.id.split("-")[0]),
           Option.getOrElse(() => ""),
         );
         if (!id) return [];
@@ -404,7 +404,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
 
       case "fnarguments": {
         const argId = pipe(
-          Option.fromNullable(parent.id.split("-")[0]),
+          Option.fromNullishOr(parent.id.split("-")[0]),
           Option.getOrElse(() => ""),
         );
         if (!argId) return [];
@@ -420,9 +420,9 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Entity>
               id: `${parent.id}-${arg}`,
               label: arg,
               description: pipe(
-                Option.fromNullable(types[i]),
+                Option.fromNullishOr(types[i]),
                 Option.flatMap((typeId) =>
-                  Option.fromNullable(introspection.getType({ id: typeId })),
+                  Option.fromNullishOr(introspection.getType({ id: typeId })),
                 ),
                 Option.map((type) => type.typname),
                 Option.getOrUndefined,

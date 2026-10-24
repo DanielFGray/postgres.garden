@@ -1,38 +1,42 @@
-import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
-import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
-import { resourceFromAttributes } from "@opentelemetry/resources";
-import { env } from "./assertEnv.js";
+/**
+ * Server metric instruments. Each `record*` function returns an Effect that
+ * adds one sample. `telemetry.ts` decides whether the samples are exported.
+ */
+import { Metric } from "effect";
 
-const meterProvider = new MeterProvider({
-  resource: resourceFromAttributes({
-    "service.name": "postgres-garden",
-  }),
-  readers: env.OTEL_EXPORTER_OTLP_ENDPOINT
-    ? [
-        new PeriodicExportingMetricReader({
-          exporter: new OTLPMetricExporter({
-            url: `${env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/metrics`,
-          }),
-          exportIntervalMillis: 60_000,
-        }),
-      ]
-    : [],
-});
-
-const meter = meterProvider.getMeter("postgres-garden");
-
-export const authAttempts = meter.createCounter("auth.attempts", {
+const authAttempts = Metric.counter("auth.attempts", {
   description: "Number of authentication attempts",
 });
 
-export const authActiveSessions = meter.createUpDownCounter("auth.active_sessions", {
+const authActiveSessions = Metric.counter("auth.active_sessions", {
   description: "Number of active sessions",
 });
 
-export const webhookReceived = meter.createCounter("webhook.received", {
+const webhookReceived = Metric.counter("webhook.received", {
   description: "Number of webhooks received",
 });
 
-export const httpErrors = meter.createCounter("http.errors", {
+const httpErrors = Metric.counter("http.errors", {
   description: "HTTP errors by route, status, and kind",
 });
+
+export const recordAuthAttempt = (attributes: {
+  readonly method: string;
+  readonly action: string;
+  readonly result: string;
+}) => Metric.update(Metric.withAttributes(authAttempts, attributes), 1);
+
+/** Adds `delta` to the live session count: +1 when a session starts, -1 when it ends. */
+export const recordActiveSessions = (delta: number) => Metric.update(authActiveSessions, delta);
+
+export const recordWebhook = (attributes: {
+  readonly provider: string;
+  readonly event: string;
+  readonly verified: string;
+}) => Metric.update(Metric.withAttributes(webhookReceived, attributes), 1);
+
+export const recordHttpError = (attributes: {
+  readonly route: string;
+  readonly status: string;
+  readonly kind: string;
+}) => Metric.update(Metric.withAttributes(httpErrors, attributes), 1);

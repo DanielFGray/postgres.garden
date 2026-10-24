@@ -1,7 +1,7 @@
 import type { QueryOptions } from "@electric-sql/pglite";
 import { live } from "@electric-sql/pglite/live";
 import { PGliteWorker } from "@electric-sql/pglite/worker";
-import { Effect, Ref, Schema } from "effect";
+import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect";
 import * as semicolons from "postgres-semicolons";
 
 class PGliteError extends Schema.TaggedError<PGliteError>()("PGliteError", {
@@ -65,7 +65,7 @@ function createFsChannel(worker: Worker): WorkerFsApi {
   };
 
   const send = (data: Record<string, WorkerMessageValue>, transfer?: Transferable[]) =>
-    Effect.async<Record<string, WorkerMessageValue>, PGliteError>((resume) => {
+    Effect.callback<Record<string, WorkerMessageValue>, PGliteError>((resume) => {
       const id = nextId++;
       pending.set(id, {
         resolve: (value) => resume(Effect.succeed(value)),
@@ -107,15 +107,13 @@ type PGliteState = {
 
 type PGliteRuntimeState = {
   readonly stateRef: Ref.Ref<PGliteState>;
-  readonly lock: Effect.Semaphore;
+  readonly lock: Semaphore.Semaphore;
 };
 
 // A hot replacement must not terminate the worker that owns the in-memory
 // database. Keep its coordination primitives in HMR data so the replacement
 // service reconnects to the same PGlite instance.
-let sharedRuntimeState = import.meta.hot?.data.pgliteRuntimeState as
-  | PGliteRuntimeState
-  | undefined;
+let sharedRuntimeState = import.meta.hot?.data.pgliteRuntimeState as PGliteRuntimeState | undefined;
 
 if (import.meta.hot) {
   import.meta.hot.dispose((data) => {
@@ -156,13 +154,13 @@ export type PGliteApi = {
   readonly fs: WorkerFsApi;
 };
 
-export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
-  scoped: Effect.gen(function* () {
+export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
+  make: Effect.gen(function* () {
     const runtimeState =
       sharedRuntimeState ??
       ({
         stateRef: yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null }),
-        lock: yield* Effect.makeSemaphore(1),
+        lock: yield* Semaphore.make(1),
       } satisfies PGliteRuntimeState);
     sharedRuntimeState = runtimeState;
 
@@ -291,7 +289,9 @@ export class PGlite extends Effect.Service<PGlite>()("app/PGlite", {
       fs,
     } satisfies PGliteApi;
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 const closeState = (state: PGliteState) =>
   Effect.promise(() => (state.db ? state.db.close() : Promise.resolve())).pipe(

@@ -111,7 +111,7 @@ function renderDiagram(code: string): Effect.Effect<void> {
       });
     }
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.gen(function* () {
         yield* Effect.logError("Mermaid render error:", cause);
         const message = Cause.pretty(cause);

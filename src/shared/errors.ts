@@ -1,4 +1,4 @@
-import { Match } from "effect";
+import { Exit } from "effect";
 import * as S from "effect/Schema";
 
 /**
@@ -6,34 +6,30 @@ import * as S from "effect/Schema";
  * I/O boundary where that unknown becomes a readable message or an Error.
  */
 
-const StringOrMessage = S.Union(S.String, S.Struct({ message: S.String }));
+const StringOrMessage = S.Union([S.String, S.Struct({ message: S.String })]);
 
 const ErrorCarrier = S.Struct({
-  error: S.Union(S.String, S.Struct({ message: S.String })),
+  error: S.Union([S.String, S.Struct({ message: S.String })]),
 });
 
 /** Decode an unknown thrown value into a single human-readable message. */
 export const toErrorMessage = (cause: unknown): string => {
   if (cause instanceof Error) return cause.message;
 
-  const direct = S.decodeUnknownEither(StringOrMessage)(cause);
-  const directMessage = Match.value(direct).pipe(
-    Match.tags({
-      Left: () => undefined,
-      Right: ({ right: value }) => (S.is(S.String)(value) ? value : value.message),
-    }),
-    Match.exhaustive,
-  );
+  const direct = S.decodeUnknownExit(StringOrMessage)(cause);
+  const directMessage = Exit.isSuccess(direct)
+    ? S.is(S.String)(direct.value)
+      ? direct.value
+      : direct.value.message
+    : undefined;
   if (directMessage !== undefined) return directMessage;
 
-  const nested = S.decodeUnknownEither(ErrorCarrier)(cause);
-  const nestedMessage = Match.value(nested).pipe(
-    Match.tags({
-      Left: () => undefined,
-      Right: ({ right }) => (S.is(S.String)(right.error) ? right.error : right.error.message),
-    }),
-    Match.exhaustive,
-  );
+  const nested = S.decodeUnknownExit(ErrorCarrier)(cause);
+  const nestedMessage = Exit.isSuccess(nested)
+    ? S.is(S.String)(nested.value.error)
+      ? nested.value.error
+      : nested.value.error.message
+    : undefined;
   if (nestedMessage !== undefined) return nestedMessage;
 
   return JSON.stringify(cause) ?? String(cause);

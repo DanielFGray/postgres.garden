@@ -1,116 +1,68 @@
 import pg from "pg";
 import runAll from "npm-run-all";
 import "dotenv/config";
-import { Config, Effect, Match, Schedule, pipe, Duration, Schema } from "effect";
+import { NodeRuntime } from "@effect/platform-node";
+import { Config, Duration, Effect, Schedule, Schema, pipe } from "effect";
 
-// Define custom error types for better error handling using Schema.TaggedError
 class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
   message: Schema.String,
   code: Schema.optional(Schema.String),
-  attempts: Schema.optional(Schema.Number),
 }) {}
 
 class ConfigurationError extends Schema.TaggedError<ConfigurationError>()("ConfigurationError", {
   message: Schema.String,
 }) {}
 
-interface DbTestOptions {
-  minDelay?: number;
-  maxTries?: number;
-  maxDelay?: number;
-  verbose?: boolean;
-}
+/** Postgres rejected the password. Retrying cannot fix that. */
+const AUTH_FAILED = "28P01";
 
 /**
- * Test database connection with Effect-based retry logic
+ * Connects and runs a trivial query, retrying with exponential backoff
+ * (`minDelay` * 1.8^n, capped at `maxDelay`) for at most `maxTries` retries.
  */
-export function dbTest(
+const dbTest = (
   url: string,
-  options: DbTestOptions = {},
-): Effect.Effect<boolean, DatabaseError | ConfigurationError> {
-  const { minDelay = 50, maxTries = Infinity, maxDelay = 30000, verbose = true } = options;
-
-  // Acquire and release the pool using Effect.acquireRelease
+  { minDelay = 50, maxTries = Infinity, maxDelay = 30000, verbose = true } = {},
+) => {
   const makePool = Effect.acquireRelease(
-    Effect.sync(
-      () =>
-        new pg.Pool({
-          connectionString: url,
-          connectionTimeoutMillis: 3000,
-        }),
-    ),
+    Effect.sync(() => new pg.Pool({ connectionString: url, connectionTimeoutMillis: 3000 })),
     (pool) => Effect.promise(() => pool.end()),
   );
 
-  // Scoped effect that performs the database test
   const performTest = Effect.gen(function* () {
     const pool = yield* makePool;
-
-    // Single test query wrapped in Effect.tryPromise
-    const queryEffect = Effect.tryPromise({
+    const result = yield* Effect.tryPromise({
       try: () => pool.query<{ test: boolean }>('select true as "test"'),
-      catch: (error) => {
-        const pgError = error as { code?: string; message?: string };
-        return new DatabaseError({
-          message: pgError.message || "Unknown database error",
-          code: pgError.code,
-        });
-      },
+      catch: (error) =>
+        new DatabaseError({
+          message: error instanceof Error ? error.message : String(error),
+          code: error instanceof pg.DatabaseError ? error.code : undefined,
+        }),
     });
-
-    // Execute query and validate result
-    const result = yield* queryEffect;
 
     if (result.rows[0]?.test === true) {
       return true;
     }
-
-    return yield* new DatabaseError({
-      message: "Database test query returned unexpected result",
-    });
+    return yield* new DatabaseError({ message: "Database test query returned unexpected result" });
   });
 
-  // Define retry policy with exponential backoff
-  // Formula from original: Math.floor((minDelay * 1.8 ** attempts) / 2)
-  const baseSchedule = Schedule.exponential(Duration.millis(minDelay), 1.8);
-
-  // Apply transformations to match original formula
-  const delaySchedule = pipe(
-    baseSchedule,
-    Schedule.union(Schedule.spaced(Duration.millis(maxDelay))),
-  );
-
+  const backoff = Schedule.min([
+    Schedule.exponential(Duration.millis(minDelay), 1.8),
+    Schedule.spaced(Duration.millis(maxDelay)),
+  ]);
   const retrySchedule =
-    maxTries !== Infinity
-      ? pipe(delaySchedule, Schedule.intersect(Schedule.recurs(maxTries)))
-      : delaySchedule;
+    maxTries === Infinity ? backoff : Schedule.max([backoff, Schedule.recurs(maxTries)]);
 
-  // Retry with custom error handling
-  const withRetry = pipe(
+  return pipe(
     performTest,
-    Effect.retry({
-      schedule: retrySchedule,
-      while: (error) => {
-        // Don't retry on authentication failures (code 28P01)
-        if (error._tag === "DatabaseError" && error.code === "28P01") {
-          return false;
-        }
-        return true;
-      },
-    }),
-    Effect.tapError((error) => {
-      if (verbose && error._tag === "DatabaseError") {
-        return Effect.logWarning(`Database is not ready yet: ${error.message}`);
-      }
-      return Effect.void;
-    }),
+    Effect.retry({ schedule: retrySchedule, while: (error) => error.code !== AUTH_FAILED }),
+    Effect.tapError((error) =>
+      verbose ? Effect.logWarning(`Database is not ready yet: ${error.message}`) : Effect.void,
+    ),
+    Effect.scoped,
   );
+};
 
-  // Run the scoped effect
-  return Effect.scoped(withRetry);
-}
-
-// Main script execution
 const runAllOpts = {
   stdin: process.stdin,
   stdout: process.stdout,
@@ -119,17 +71,10 @@ const runAllOpts = {
 };
 
 const mainProgram = Effect.gen(function* () {
-  // Check for DATABASE_URL
-  const databaseUrl = yield* Config.string("DATABASE_URL").pipe(Effect.option);
-  const url = yield* Match.value(databaseUrl).pipe(
-    Match.tags({
-      None: () => new ConfigurationError({ message: "DATABASE_URL is not set" }),
-      Some: ({ value }) => Effect.succeed(value),
-    }),
-    Match.exhaustive,
+  const url = yield* Config.String("DATABASE_URL").pipe(
+    Effect.mapError(() => new ConfigurationError({ message: "DATABASE_URL is not set" })),
   );
 
-  // Start database using npm-run-all
   yield* Effect.tryPromise({
     try: () => runAll(["db:up"], runAllOpts),
     catch: (error) =>
@@ -138,29 +83,19 @@ const mainProgram = Effect.gen(function* () {
       }),
   });
 
-  // Test database connection with retries
-  const result = yield* dbTest(url, {
-    maxTries: 7,
-    verbose: false,
-  });
+  const result = yield* dbTest(url, { maxTries: 7, verbose: false });
 
   yield* Effect.log("Database is ready");
   return result;
 });
 
-// Error handling for the main program
-const programWithErrorHandling = pipe(
-  mainProgram,
-  Effect.catchAll((error) =>
+const programWithErrorHandling = mainProgram.pipe(
+  Effect.catch((error) =>
     Effect.gen(function* () {
-      const errorMessage =
-        error._tag === "DatabaseError" || error._tag === "ConfigurationError"
-          ? error.message
-          : String(error);
+      yield* Effect.logError(error.message);
 
-      yield* Effect.logError(errorMessage);
-
-      // Try to run init on failure
+      // A database that never came up is probably a fresh checkout, so try `init`.
+      // A failed init is logged and not fatal: dev can still start without a database.
       yield* Effect.tryPromise({
         try: () => runAll(["init"], runAllOpts),
         catch: (initError) =>
@@ -169,7 +104,7 @@ const programWithErrorHandling = pipe(
           }),
       }).pipe(
         Effect.tapError((initError) => Effect.logError(initError.message)),
-        Effect.ignore, // Don't fail if init fails
+        Effect.ignore,
       );
 
       return false;
@@ -177,5 +112,4 @@ const programWithErrorHandling = pipe(
   ),
 );
 
-// Run the program
-Effect.runPromise(programWithErrorHandling).catch(console.error);
+NodeRuntime.runMain(programWithErrorHandling);

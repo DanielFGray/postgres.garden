@@ -7,7 +7,7 @@ import { VSCodeService } from "../vscode/service";
 /** Resolve when the LSP client is ready. Used by postgres.ts to sync schema. */
 let currentClient: LanguageClient | undefined;
 let resolveClient: ((client: LanguageClient) => void) | undefined;
-export const clientReady = Effect.async<LanguageClient>((resume) => {
+export const clientReady = Effect.callback<LanguageClient>((resume) => {
   if (currentClient) {
     resume(Effect.succeed(currentClient));
     return;
@@ -24,7 +24,7 @@ class LspStartError extends S.TaggedError<LspStartError>()("LspStartError", {
   message: S.String,
 }) {}
 
-export const LspFeatureLive = Layer.scopedDiscard(
+export const LspFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* VSCodeService;
 

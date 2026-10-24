@@ -1,24 +1,44 @@
-import { HttpApiBuilder, HttpApp, HttpServerResponse } from "@effect/platform";
 import { Effect, Layer, Redacted } from "effect";
-import { SessionService } from "./sessionService.js";
-import { sessionCookie, SessionMiddleware } from "../apiSchema.js";
+import { HttpEffect, HttpServerResponse } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
+import { CurrentSession, SessionMiddleware, sessionCookie, type SessionData } from "../apiSchema.js";
+import { withRequestTransaction } from "../db.js";
 import { env } from "../assertEnv.js";
+import { ServerError } from "../errors.js";
+import { SessionService } from "./sessionService.js";
 
+const noSession: SessionData = { user: null, session: null };
+
+/**
+ * Resolves the session cookie for an endpoint and runs the endpoint inside one
+ * shared database transaction, so every query the request makes sees the same
+ * RLS identity.
+ *
+ * A failed session lookup is treated as anonymous, so a database outage reads
+ * as a logged-out visitor.
+ */
 export const SessionMiddlewareLive = Layer.effect(
   SessionMiddleware,
   Effect.gen(function* () {
     const sessionService = yield* SessionService;
-    const noSession = { user: null, session: null } as const;
     return SessionMiddleware.of({
-      session: (redactedToken: Redacted.Redacted<string>) => {
-        const token = Redacted.value(redactedToken);
-        if (!token) {
-          return Effect.succeed(noSession);
-        }
-        return sessionService
-          .validateSessionToken(token)
-          .pipe(Effect.orElseSucceed(() => noSession));
-      },
+      session: Effect.fn(function* (httpEffect, { credential }) {
+        const token = Redacted.value(credential);
+        const session = token
+          ? yield* sessionService
+              .validateSessionToken(token)
+              .pipe(Effect.orElseSucceed(() => noSession))
+          : noSession;
+        return yield* withRequestTransaction(
+          Effect.provideService(httpEffect, CurrentSession, session),
+        ).pipe(
+          Effect.catchTag("DatabaseError", (cause) =>
+            Effect.logError(cause).pipe(
+              Effect.andThen(Effect.fail(new ServerError({ error: "Internal Server Error" }))),
+            ),
+          ),
+        );
+      }),
     });
   }),
 );
@@ -34,13 +54,13 @@ export const setSessionCookie = (token: string, expiresAt: Date) =>
     expires: expiresAt,
   });
 
-export const expireSessionCookie = HttpApp.appendPreResponseHandler((_req, response) =>
-  Effect.succeed(
-    HttpServerResponse.expireCookie(response, "session", {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: isSecure,
-      path: "/",
-    }),
-  ),
+// The cookie name and options are fixed literals, so a failure here is a
+// programming error and dies instead of surfacing as a typed error.
+export const expireSessionCookie = HttpEffect.appendPreResponseHandler((_req, response) =>
+  HttpServerResponse.expireCookie(response, "session", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isSecure,
+    path: "/",
+  }).pipe(Effect.orDie),
 );

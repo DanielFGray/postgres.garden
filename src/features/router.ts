@@ -1,4 +1,4 @@
-import { Effect, Layer, Runtime } from "effect";
+import { Effect, Layer } from "effect";
 import { parseRoute } from "../shared/routes";
 import { loadWorkspace, loadWorkspaceFromSharedUrl } from "./workspaceSwitcher";
 
@@ -26,14 +26,14 @@ const loadCurrentRoute = () => {
   }
 };
 
-export const RouterFeatureLive = Layer.scopedDiscard(
+export const RouterFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const runtime = yield* Effect.runtime<never>();
+    const runtime = yield* Effect.context<never>();
     const onPopState = () => {
-      Runtime.runFork(runtime)(
+      Effect.runForkWith(runtime)(
         loadCurrentRoute().pipe(
-          Effect.tapErrorCause((cause) => Effect.logError("Route loading failed", cause)),
-          Effect.catchAllCause(() => Effect.void),
+          Effect.tapCause((cause) => Effect.logError("Route loading failed", cause)),
+          Effect.ignoreCause,
         ),
       );
     };

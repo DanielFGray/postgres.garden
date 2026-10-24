@@ -1,9 +1,8 @@
-import crypto from "crypto";
-import { DateTime, Effect } from "effect";
-import { rootQuerier } from "../db.js";
+import { NodeCrypto } from "@effect/platform-node";
+import { Context, Crypto, DateTime, Effect, Layer } from "effect";
+import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
 import { valkey } from "../valkey.js";
-import { env } from "../assertEnv.js";
 
 export const sessionCookieName = "session";
 
@@ -14,20 +13,6 @@ const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 function sessionKey(id: string) {
   return `session:${id}`;
-}
-
-export function generateSecureRandomString(length = 32) {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-export function hashSecret(secret: string) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(secret);
-  return crypto.createHash("sha256").update(data).digest();
 }
 
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
@@ -42,37 +27,38 @@ export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
   return result === 0;
 }
 
-export function buildSessionCookie(token: string, expiresAt: Date) {
-  return {
-    value: token,
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: env.NODE_ENV === "production",
-    path: "/",
-    expires: expiresAt,
-  };
-}
-
-export class SessionService extends Effect.Service<SessionService>()("SessionService", {
-  effect: Effect.gen(function* () {
+export class SessionService extends Context.Service<SessionService>()("SessionService", {
+  make: Effect.gen(function* () {
     const runRoot = yield* rootQuerier;
+    const crypto = yield* Crypto.Crypto;
+
+    /** `length` random bytes as hex. A failing random source is a defect, not a typed error. */
+    const generateSecureRandomString = (length = 32) =>
+      crypto.randomBytes(length).pipe(
+        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
+        Effect.orDie,
+      );
+
+    const hashSecret = (secret: string) =>
+      crypto.digest("SHA-256", new TextEncoder().encode(secret)).pipe(Effect.orDie);
 
     return {
       createSession: Effect.fnUntraced(function* (userId: string) {
         const user = yield* runRoot((rootDb) =>
-          rootDb
-            .selectFrom("app_public.users")
-            .select(["id", "username", "role", "is_verified"])
-            .where("id", "=", userId)
-            .pipe(Effect.head),
+          runQuery(
+            rootDb
+              .selectFrom("app_public.users")
+              .select(["id", "username", "role", "is_verified"])
+              .where("id", "=", userId),
+          ).pipe(Effect.head),
         );
 
-        const id = generateSecureRandomString();
-        const secret = generateSecureRandomString();
-        const secretHash = hashSecret(secret).toString("hex");
-        const sessionUuid = crypto.randomUUID();
+        const id = yield* generateSecureRandomString();
+        const secret = yield* generateSecureRandomString();
+        const secretHash = Buffer.from(yield* hashSecret(secret)).toString("hex");
+        const sessionUuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
         const expiresAt = DateTime.toDate(
-          DateTime.add(DateTime.unsafeNow(), { millis: SESSION_TTL_MS }),
+          DateTime.add(DateTime.nowUnsafe(), { milliseconds: SESSION_TTL_MS }),
         );
 
         const key = sessionKey(id);
@@ -89,11 +75,13 @@ export class SessionService extends Effect.Service<SessionService>()("SessionSer
         yield* Effect.tryPromise(() => valkey.expire(key, SESSION_TTL_SECONDS));
 
         yield* runRoot((rootDb) =>
-          rootDb.insertInto("app_private.sessions").values({
-            id: sessionUuid,
-            user_id: user.id,
-            expires_at: expiresAt,
-          }),
+          runQuery(
+            rootDb.insertInto("app_private.sessions").values({
+              id: sessionUuid,
+              user_id: user.id,
+              expires_at: expiresAt,
+            }),
+          ),
         );
 
         return { token: `${id}.${secret}`, id, expiresAt };
@@ -112,7 +100,7 @@ export class SessionService extends Effect.Service<SessionService>()("SessionSer
         const data = yield* Effect.tryPromise(() => valkey.hgetall(sessionKey(id)));
         if (!data || !data.secret_hash) return anonymous;
 
-        const incomingHash = hashSecret(secret);
+        const incomingHash = yield* hashSecret(secret);
         const storedHash = Buffer.from(data.secret_hash, "hex");
         if (!constantTimeEqual(incomingHash, storedHash)) return anonymous;
 
@@ -123,16 +111,17 @@ export class SessionService extends Effect.Service<SessionService>()("SessionSer
         // immediately instead of waiting up to SESSION_TTL_MS for the cache
         // to expire.
         const dbSession = yield* runRoot((rootDb) =>
-          rootDb
-            .selectFrom("app_private.sessions")
-            .select(["expires_at"])
-            .where("id", "=", data.session_uuid ?? "")
-            .pipe(Effect.head, Effect.option),
+          runQuery(
+            rootDb
+              .selectFrom("app_private.sessions")
+              .select(["expires_at"])
+              .where("id", "=", data.session_uuid ?? ""),
+          ).pipe(Effect.head, Effect.option),
         );
         if (
           dbSession._tag === "None" ||
           dbSession.value.expires_at == null ||
-          dbSession.value.expires_at < DateTime.toDate(DateTime.unsafeNow())
+          dbSession.value.expires_at < DateTime.toDate(DateTime.nowUnsafe())
         ) {
           yield* Effect.tryPromise(() => valkey.del(sessionKey(id)));
           return anonymous;
@@ -159,11 +148,12 @@ export class SessionService extends Effect.Service<SessionService>()("SessionSer
         yield* Effect.tryPromise(() => valkey.del(key));
         if (sessionUuid) {
           yield* runRoot((rootDb) =>
-            rootDb.deleteFrom("app_private.sessions").where("id", "=", sessionUuid),
+            runQuery(rootDb.deleteFrom("app_private.sessions").where("id", "=", sessionUuid)),
           );
         }
       }),
     } as const;
   }),
-  accessors: true,
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(NodeCrypto.layer));
+}

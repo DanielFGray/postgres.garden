@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode";
 import * as S from "effect/Schema";
-import { Effect, Fiber, Layer, Match, Option, Runtime, Schedule } from "effect";
+import { Effect, Fiber, Layer, Option, Schedule } from "effect";
 import { httpApiLogout } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import type { User } from "../shared/schemas";
@@ -22,15 +22,13 @@ import { Workbench } from "../workbench";
 
 /** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
 const AuthMessage = S.Struct({
-  type: S.Literal("github-auth-success"),
+  type: S.Literals(["github-auth-success"]),
   user: S.Struct({ username: S.String }),
 });
 const isAuthMessage = S.is(AuthMessage);
+/** Stored text that is not a valid auth message reads as absent, and the caller keeps waiting. */
 const decodeStoredAuthMessage = (value: string) =>
-  Match.value(S.decodeUnknownEither(S.parseJson(AuthMessage))(value)).pipe(
-    Match.tags({ Left: () => undefined, Right: ({ right }) => right }),
-    Match.exhaustive,
-  );
+  Option.getOrUndefined(S.decodeOption(S.fromJsonString(AuthMessage))(value));
 
 const AUTH_PROVIDER_ID = "github-auth";
 
@@ -142,7 +140,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 
     // Open auth panel with login/register/GitHub options
     return Effect.runPromise(
-      Effect.async<vscode.AuthenticationSession, AuthError>((resume) => {
+      Effect.callback<vscode.AuthenticationSession, AuthError>((resume) => {
         if (!this.extensionUri) {
           resume(Effect.fail(new AuthError({ message: "Extension URI not set" })));
           return;
@@ -200,14 +198,14 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 
   removeSession(): Promise<void> {
     return Effect.runPromise(
-      Effect.gen(this, function* () {
+      Effect.gen({ self: this }, function* () {
         const username = this.currentUsername;
         if (!username) return;
 
         localStorage.removeItem(AuthProvider.storageKey);
         this.currentUsername = undefined;
         yield* httpApiLogout.pipe(
-          Effect.catchAll((error) => Effect.logError("Failed to sync logout with server", error)),
+          Effect.catch((error) => Effect.logError("Failed to sync logout with server", error)),
         );
         this._onDidChangeSessions.fire({
           removed: [new AuthSession(username, username)],
@@ -225,7 +223,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
     this.ensureInitialized();
 
     return Effect.runPromise(
-      Effect.async<AuthSession, AuthError>((resume) => {
+      Effect.callback<AuthSession, AuthError>((resume) => {
         // Access the actual browser window (not VSCode's window API)
         const browserWindow = globalThis.window;
 
@@ -385,15 +383,15 @@ interface AccountMenuItem extends vscode.QuickPickItem {
 }
 
 export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbench> =
-  Layer.scopedDiscard(
+  Layer.effectDiscard(
     Effect.gen(function* () {
       const vscodeService = yield* VSCodeService;
       const { runFork } = yield* Workbench;
       const { user: initialUser } = readInitialData();
-      const user = Option.fromNullable(initialUser);
+      const user = Option.fromNullishOr(initialUser);
       const vscodeApi = vscodeService.api;
       const extensionUri = vscodeService.extensionUri;
-      const runtime = yield* Effect.runtime<never>();
+      const runtime = yield* Effect.context<never>();
 
       // Register the authentication provider
       const provider = new AuthProvider(user);
@@ -427,7 +425,7 @@ export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbenc
       // Update status bar based on current auth state
       // Kept as plain async closure — fire-and-forget via void updateStatusBar()
       const updateStatusBar = () =>
-        Runtime.runPromise(runtime)(
+        Effect.runPromiseWith(runtime)(
           Effect.gen(function* () {
             // Use provider directly since vscode.authentication.getSession() may not
             // surface sessions from our provider without user interaction
@@ -499,7 +497,7 @@ export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbenc
                 );
               }),
             ),
-            Effect.catchAll(() => Effect.void),
+            Effect.ignore,
           ),
         );
       });
@@ -552,7 +550,7 @@ export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbenc
                 );
               }),
             ),
-            Effect.catchAll(() => Effect.void),
+            Effect.ignore,
           ),
         );
       });

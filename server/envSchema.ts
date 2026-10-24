@@ -1,7 +1,7 @@
 import * as S from "effect/Schema";
 
 export const envSchema = S.Struct({
-  NODE_ENV: S.Union(S.Literal("development"), S.Literal("production"), S.Literal("test")),
+  NODE_ENV: S.Union([S.Literals(["development"]), S.Literals(["production"]), S.Literals(["test"])]),
   ROOT_DATABASE_USER: S.String,
   ROOT_DATABASE_PASSWORD: S.String,
   ROOT_DATABASE_URL: S.String,
@@ -20,13 +20,13 @@ export const envSchema = S.Struct({
   SECRET: S.String,
   PORT: S.String,
   VITE_ROOT_URL: S.String,
-  GITHUB_CLIENT_ID: S.UndefinedOr(S.String),
-  GITHUB_CLIENT_SECRET: S.UndefinedOr(S.String),
-  GITHUB_PAT: S.UndefinedOr(S.String),
-  GITHUB_WEBHOOK_SECRET: S.UndefinedOr(S.String),
-  VALKEY_URL: S.UndefinedOr(S.String),
-  OTEL_EXPORTER_OTLP_ENDPOINT: S.UndefinedOr(S.String),
-  VITE_OTEL_COLLECTOR_URL: S.UndefinedOr(S.String),
+  GITHUB_CLIENT_ID: S.optionalKey(S.String),
+  GITHUB_CLIENT_SECRET: S.optionalKey(S.String),
+  GITHUB_PAT: S.optionalKey(S.String),
+  GITHUB_WEBHOOK_SECRET: S.optionalKey(S.String),
+  VALKEY_URL: S.optionalKey(S.String),
+  OTEL_EXPORTER_OTLP_ENDPOINT: S.optionalKey(S.String),
+  VITE_OTEL_COLLECTOR_URL: S.optionalKey(S.String),
 });
 
 export type Env = typeof envSchema.Type;

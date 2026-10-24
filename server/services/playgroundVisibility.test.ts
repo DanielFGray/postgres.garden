@@ -1,21 +1,22 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Layer, Match } from "effect";
+import { Effect, Layer, Random } from "effect";
 import { sql } from "kysely";
-import { asRoot, DatabaseLive } from "../db.js";
+import { asRoot, DatabaseLive, runQuery, unwrapPgError, type KyselyDB } from "../db.js";
 import { CurrentSession, type SessionData } from "../apiSchema.js";
-import { unwrapPgError } from "./authService.js";
 import { PlaygroundService } from "./playgroundService.js";
 import { SessionService } from "./sessionService.js";
-import crypto from "node:crypto";
 
-const TestLayer = Layer.mergeAll(SessionService.Default, PlaygroundService.Default).pipe(
+const TestLayer = Layer.mergeAll(SessionService.layer, PlaygroundService.layer).pipe(
   Layer.provideMerge(DatabaseLive),
 );
 
 /** No session at all: the anonymous visitor. */
 const anonymousSession: SessionData = { user: null, session: null };
 
-const randomSuffix = () => crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+/** Unique enough to keep concurrent test users apart. */
+const randomSuffix = Random.nextIntBetween(0, 0xffffffff).pipe(
+  Effect.map((n) => n.toString(16).padStart(8, "0")),
+);
 
 const playgroundHashes = (rows: ReadonlyArray<{ hash: string }>) =>
   rows.map(({ hash }) => hash).sort((a, b) => a.localeCompare(b));
@@ -31,7 +32,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
     Effect.gen(function* () {
       const sessionService = yield* SessionService;
       const playgroundService = yield* PlaygroundService;
-      const suffix = randomSuffix();
+      const suffix = yield* randomSuffix;
       const ownerUsername = `visibility_owner_${suffix}`;
       const otherUsername = `visibility_other_${suffix}`;
       // Sponsors, because these cases need a playground at every privacy level
@@ -59,7 +60,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
           const ownerSession = yield* sessionService.validateSessionToken(ownerToken.token);
           const otherSession = yield* sessionService.validateSessionToken(otherToken.token);
           if (!ownerSession.session || !otherSession.session) {
-            return yield* Effect.dieMessage("Failed to create test sessions");
+            return yield* Effect.die(new Error("Failed to create test sessions"));
           }
 
           const anonymous = yield* listAll(
@@ -120,7 +121,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
   it.effect("lists an anonymous playground with a null user", () =>
     Effect.gen(function* () {
       const playgroundService = yield* PlaygroundService;
-      const hash = `anon_public_${randomSuffix()}`;
+      const hash = `anon_public_${yield* randomSuffix}`;
 
       yield* asRoot((rootDb) =>
         rootDb
@@ -149,7 +150,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
   // to hold from.
   it.effect("rejects private playgrounds without a sponsor account", () =>
     Effect.gen(function* () {
-      const suffix = randomSuffix();
+      const suffix = yield* randomSuffix;
       const free = yield* asRoot((rootDb) => createUser(rootDb, `privacy_free_${suffix}`, "user"));
       const sponsor = yield* asRoot((rootDb) =>
         createUser(rootDb, `privacy_sponsor_${suffix}`, "sponsor"),
@@ -193,41 +194,38 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
   );
 });
 
-/** Assert an effect fails with the DNIED error code the entitlement trigger raises. */
+/**
+ * Assert an effect fails with the DNIED error code the entitlement trigger raises.
+ * Flipping makes success the failure, so a write that goes through fails the test.
+ */
 const expectDenied = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const outcome = yield* Effect.either(effect);
-    return yield* Match.value(outcome).pipe(
-      Match.tag("Right", () =>
-        Effect.dieMessage("Expected the write to be denied, but it succeeded"),
-      ),
-      Match.tag("Left", ({ left }) =>
-        Effect.sync(() => expect(unwrapPgError(left)?.code).toBe("DNIED")),
-      ),
-      Match.exhaustive,
-    );
-  });
+  effect.pipe(
+    Effect.flip,
+    Effect.flatMap(unwrapPgError),
+    Effect.map((dbErr) => expect(dbErr?.code).toBe("DNIED")),
+  );
 
-const createUser = (db: import("../db.js").KyselyDB, username: string, role: "user" | "sponsor") =>
-  db
-    .selectFrom(
-      sql<{ id: string; username: string }>`app_private.really_create_user(
+const createUser = (db: KyselyDB, username: string, role: "user" | "sponsor") =>
+  runQuery(
+    db
+      .selectFrom(
+        sql<{ id: string; username: string }>`app_private.really_create_user(
         username => ${username}::citext,
         email => ${`${username}@example.com`}::text,
         email_is_verified => true,
         password => ${"TestPassword123!"}::text
       )`.as("user"),
-    )
-    .selectAll()
-    .pipe(
-      Effect.head,
-      Effect.tap((user) =>
-        db.updateTable("app_public.users").set({ role }).where("id", "=", user.id),
-      ),
-    );
+      )
+      .selectAll(),
+  ).pipe(
+    Effect.head,
+    Effect.tap((user) =>
+      runQuery(db.updateTable("app_public.users").set({ role }).where("id", "=", user.id)),
+    ),
+  );
 
 const insertPlaygrounds = Effect.fnUntraced(function* (
-  db: import("../db.js").KyselyDB,
+  db: KyselyDB,
   userId: string,
   prefix: string,
   suffix: string,
@@ -237,22 +235,24 @@ const insertPlaygrounds = Effect.fnUntraced(function* (
     secret: `${prefix}_secret_${suffix}`,
     public: `${prefix}_public_${suffix}`,
   } as const;
-  yield* db.insertInto("app_public.playgrounds").values(
-    Object.entries(rows).map(([privacy, hash]) => ({
-      hash,
-      user_id: userId,
-      privacy: privacy as "private" | "secret" | "public",
-      name: hash,
-    })),
+  yield* runQuery(
+    db.insertInto("app_public.playgrounds").values(
+      Object.entries(rows).map(([privacy, hash]) => ({
+        hash,
+        user_id: userId,
+        privacy: privacy as "private" | "secret" | "public",
+        name: hash,
+      })),
+    ),
   );
   return rows;
 });
 
-const deleteUser = (db: import("../db.js").KyselyDB, userId: string) =>
-  db.deleteFrom("app_public.users").where("id", "=", userId);
+const deleteUser = (db: KyselyDB, userId: string) =>
+  runQuery(db.deleteFrom("app_public.users").where("id", "=", userId));
 
 const listAll = (
-  service: PlaygroundService,
+  service: (typeof PlaygroundService)["Service"],
   session: SessionData,
   username: string,
   fixtures: ReadonlySet<string>,

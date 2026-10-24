@@ -14,11 +14,11 @@ import type { Commit } from "./schemas.js";
 // PlaygroundRepo
 // =============================================================================
 
-export class PlaygroundRepo extends Context.Tag("PlaygroundRepo")<
+export class PlaygroundRepo extends Context.Service<
   PlaygroundRepo,
   {
     readonly getLatestCommit: (playgroundId: string) => Effect.Effect<Commit | null>;
 
     readonly getCommit: (playgroundId: string, commitId: string) => Effect.Effect<Commit | null>;
   }
->() {}
+>()("PlaygroundRepo") {}

@@ -77,9 +77,9 @@ const pluginLayers = Layer.mergeAll(
   PlaygroundExtensionLive,
   AiFeatureLive,
 ).pipe(
-  Layer.provide(VSCodeService.Default),
-  Layer.provide(PGlite.Default),
-  Layer.provide(Workbench.Default),
+  Layer.provide(VSCodeService.layer),
+  Layer.provide(PGlite.layer),
+  Layer.provide(Workbench.layer),
 );
 
 const program = Effect.gen(function* () {
@@ -90,12 +90,13 @@ const program = Effect.gen(function* () {
   if (previousCleanup) {
     yield* Effect.promise(() => previousCleanup);
   }
-  (globalThis as typeof globalThis & { __postgresGardenHmrReloading?: boolean })
-    .__postgresGardenHmrReloading = false;
+  (
+    globalThis as typeof globalThis & { __postgresGardenHmrReloading?: boolean }
+  ).__postgresGardenHmrReloading = false;
 
   yield* loadLocale;
   const root = document.getElementById("root");
-  if (!root) return yield* Effect.dieMessage("Missing #root element");
+  if (!root) return yield* Effect.die(new Error("Missing #root element"));
 
   // Solid renders synchronously, so the container the workbench mounts into is
   // in the DOM by the time this returns.
@@ -105,7 +106,9 @@ const program = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => Effect.sync(dispose));
   yield* Effect.forkScoped(
     Layer.launch(pluginLayers).pipe(
-      Effect.tapErrorCause((cause) => Console.error("[Plugins] Activation failed:", Cause.pretty(cause))),
+      Effect.tapCause((cause) =>
+        Console.error("[Plugins] Activation failed:", Cause.pretty(cause)),
+      ),
     ),
   );
   return yield* Effect.never;
@@ -115,7 +118,7 @@ const bootFiber = Effect.runFork(
   program.pipe(
     Effect.provide(TelemetryLive),
     Effect.scoped,
-    Effect.tapErrorCause((cause) => Console.error("[Boot] Fatal:", Cause.pretty(cause))),
+    Effect.tapCause((cause) => Console.error("[Boot] Fatal:", Cause.pretty(cause))),
   ),
 );
 
@@ -124,10 +127,9 @@ if (import.meta.hot) {
   // this promise before it creates any replacement registrations.
   import.meta.hot.accept();
   import.meta.hot.dispose((data) => {
-    (globalThis as typeof globalThis & { __postgresGardenHmrReloading?: boolean })
-      .__postgresGardenHmrReloading = true;
+    (
+      globalThis as typeof globalThis & { __postgresGardenHmrReloading?: boolean }
+    ).__postgresGardenHmrReloading = true;
     data.pluginCleanup = Effect.runPromise(Fiber.interrupt(bootFiber));
   });
 }
-
-export {};

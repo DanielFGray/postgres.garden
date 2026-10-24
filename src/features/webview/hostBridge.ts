@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { Cause, Effect, Layer } from "effect";
 import { getNetworkState } from "../network";
 import { generateNonce } from "../../utils/nonce";
@@ -67,7 +68,7 @@ export const handleWebviewApiRequest = (
       ).pipe(HttpClientRequest.setHeaders(headers));
       const request =
         body !== undefined
-          ? HttpClientRequest.bodyUnsafeJson(requestWithoutBody, body)
+          ? HttpClientRequest.bodyJsonUnsafe(requestWithoutBody, body)
           : requestWithoutBody;
 
       const response = yield* client.execute(request);
@@ -86,7 +87,7 @@ export const handleWebviewApiRequest = (
 
     post({ type: "data", id, data: responseBody });
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.sync(() => {
         post({ type: "error", id, error: { code: "NETWORK", message: Cause.pretty(cause) } });
       }),

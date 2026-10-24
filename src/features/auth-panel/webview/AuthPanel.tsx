@@ -6,36 +6,33 @@ import { ForgotPasswordView } from "./views/ForgotPasswordView";
 import { ResetPasswordView, setResetParams } from "./views/ResetPasswordView";
 import { VerifyEmailView, triggerVerification } from "./views/VerifyEmailView";
 import * as S from "effect/Schema";
-import { Match as EffectMatch } from "effect";
+import { Option } from "effect";
 
 type ViewId = "login" | "register" | "forgot-password" | "reset-password" | "verify-email";
 
-const ViewIdSchema = S.Literal(
+const ViewIdSchema = S.Literals([
   "login",
   "register",
   "forgot-password",
   "reset-password",
   "verify-email",
-);
-const HostMessage = S.Union(
+]);
+const HostMessage = S.Union([
   S.Struct({ type: S.Literal("github-complete"), username: S.String }),
   S.Struct({ type: S.Literal("github-error"), message: S.String }),
   S.Struct({
     type: S.Literal("init-view"),
     view: S.optional(ViewIdSchema),
-    params: S.optional(S.Record({ key: S.String, value: S.String })),
+    params: S.optional(S.Record(S.String, S.String)),
   }),
-);
+]);
 
 export const AuthPanel = () => {
   const [activeView, setActiveView] = createSignal<ViewId>("login");
   const [githubError, setGithubError] = createSignal<string | null>(null);
 
   const handleHostMessage = (message: MessageEvent) => {
-    const msg = EffectMatch.value(S.decodeUnknownOption(HostMessage)(message.data)).pipe(
-      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
-      EffectMatch.exhaustive,
-    );
+    const msg = Option.getOrUndefined(S.decodeUnknownOption(HostMessage)(message.data));
     if (msg === undefined) return;
     if (msg.type === "github-complete") {
       notifyAuthComplete(msg.username);
@@ -60,11 +57,7 @@ export const AuthPanel = () => {
 
   function onNavigate(view: string) {
     setGithubError(null);
-    const parsed = EffectMatch.value(S.decodeUnknownOption(ViewIdSchema)(view)).pipe(
-      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
-      EffectMatch.exhaustive,
-    );
-    if (parsed !== undefined) setActiveView(parsed);
+    Option.map(S.decodeUnknownOption(ViewIdSchema)(view), setActiveView);
   }
 
   return (

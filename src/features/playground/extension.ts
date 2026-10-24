@@ -99,7 +99,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
             );
           }),
         ),
-        Effect.catchAll(() => Effect.void),
+        Effect.ignore,
       ),
     );
   });
@@ -140,7 +140,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
             );
           }),
         ),
-        Effect.catchAll(() => Effect.void),
+        Effect.ignore,
       ),
     );
   });
@@ -154,6 +154,6 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   );
 });
 
-export const PlaygroundExtensionLive = Layer.scopedDiscard(
+export const PlaygroundExtensionLive = Layer.effectDiscard(
   activatePlaygroundExtension.pipe(Effect.withSpan("feature.playground")),
 );

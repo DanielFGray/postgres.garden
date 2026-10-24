@@ -12,7 +12,7 @@ A browser-based PostgreSQL development environment built on a full VSCode workbe
 ## Tech Stack
 
 - **Runtime**: [Bun](https://bun.sh)
-- **Server**: Elysia (Bun-native web framework) with SSR
+- **Server**: Effect HTTP (`effect/http`, `effect/http-api`) on Bun, with SSR
 - **Client**: VSCode workbench + Vite
 - **Database**: PostgreSQL 17, managed via [Kysely](https://kysely.dev) query builder + [Graphile Migrate](https://github.com/graphile/migrate)
 - **Cache**: [Valkey](https://valkey.io) (Redis-compatible)
@@ -75,9 +75,9 @@ bun run dev               # Start dev server
 ## Project Structure
 
 ```
-server/             Bun + Elysia backend
+server/             Bun + Effect HTTP backend
   index.ts          Entry point, routes dev/prod
-  app.ts            API routes (Elysia + TypeBox validation)
+  apiSchema.ts      API routes (Effect HTTP API + Schema validation)
   db.ts             Kysely connections + RLS auth context
 src/
   entry.ts          Client entry point

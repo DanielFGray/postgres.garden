@@ -1,6 +1,6 @@
 import { Effect, Schedule, pipe, Duration, Schema as S } from "effect";
 import { sql } from "kysely";
-import { asRoot, asVisitor, type KyselyDB } from "./db.js";
+import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { CurrentSession } from "./apiSchema.js";
 import { valkey } from "./valkey.js";
 
@@ -12,11 +12,14 @@ class ValkeyNotReady extends S.TaggedError<ValkeyNotReady>()("ValkeyNotReady", {
   message: S.String,
 }) {}
 
-const retrySchedule = pipe(
-  Schedule.exponential(Duration.millis(100)),
-  Schedule.either(Schedule.spaced(Duration.millis(5000))),
-  Schedule.compose(Schedule.recurs(20)),
-);
+/** Exponential backoff from 100ms, capped at 5s between attempts, for at most 20 retries. */
+const retrySchedule = Schedule.max([
+  Schedule.min([
+    Schedule.exponential(Duration.millis(100)),
+    Schedule.spaced(Duration.millis(5000)),
+  ]),
+  Schedule.recurs(20),
+]);
 
 const testDb = <A, E, R>(probe: Effect.Effect<A, E, R>, name: string) =>
   pipe(
@@ -34,7 +37,7 @@ const testDb = <A, E, R>(probe: Effect.Effect<A, E, R>, name: string) =>
     ),
   );
 
-const ping = (db: KyselyDB) => db.selectNoFrom([sql.lit(1).as("ready")]);
+const ping = (db: KyselyDB) => runQuery(db.selectNoFrom([sql.lit(1).as("ready")]));
 
 /**
  * Probes both pools. The visitor probe runs as an anonymous visitor, which

@@ -1,12 +1,13 @@
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "@effect/platform";
-import { Array as Arr, Effect, Option, pipe, Schema as S } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { Array as Arr, Context, Effect, Layer, Option, pipe, Schema as S } from "effect";
 import * as arctic from "arctic";
 import { sql } from "kysely";
 import { env } from "../assertEnv.js";
-import { asRoot } from "../db.js";
+import { asRoot, unwrapPgError } from "../db.js";
 import { SessionService } from "./sessionService.js";
 import { makeSetCookie } from "./cookies.js";
-import { AccountAlreadyLinkedError, unwrapPgError } from "./authService.js";
+import { AccountAlreadyLinkedError } from "./authService.js";
 
 type UserRole = "user" | "sponsor" | "admin";
 
@@ -29,7 +30,7 @@ const SponsorInfoSchema = S.Struct({
   data: S.NullOr(
     S.Struct({
       repository: S.Struct({
-        collaborators: S.Struct({ totalCount: S.Number }),
+        collaborators: S.Struct({ totalCount: S.Finite }),
       }),
       user: S.Struct({
         isSponsoringViewer: S.Boolean,
@@ -40,7 +41,7 @@ const SponsorInfoSchema = S.Struct({
             isOneTimePayment: S.Boolean,
             tier: S.Struct({
               name: S.String,
-              monthlyPriceInDollars: S.Number,
+              monthlyPriceInDollars: S.Finite,
             }),
           }),
         ),
@@ -107,8 +108,8 @@ const fetchGitHubJson = (url: string, token: string, errorPrefix: string) =>
     ),
   );
 
-export class OAuthService extends Effect.Service<OAuthService>()("OAuthService", {
-  effect: Effect.sync(() => {
+export class OAuthService extends Context.Service<OAuthService>()("OAuthService", {
+  make: Effect.sync(() => {
     const resolveRole = (login: string): Effect.Effect<Option.Option<UserRole>, never> => {
       if (!env.GITHUB_PAT) {
         return Effect.succeed(Option.none());
@@ -119,7 +120,7 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
         const request = HttpClientRequest.post("https://api.github.com/graphql", {
           headers: { Authorization: `Bearer ${env.GITHUB_PAT}` },
         }).pipe(
-          HttpClientRequest.bodyUnsafeJson({
+          HttpClientRequest.bodyJsonUnsafe({
             query: sponsorQuery,
             variables: {
               user: login,
@@ -133,7 +134,7 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
         return yield* response.json;
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
-        Effect.flatMap((sponsorJson) => S.decodeUnknown(SponsorInfoSchema)(sponsorJson)),
+        Effect.flatMap((sponsorJson) => S.decodeUnknownEffect(SponsorInfoSchema)(sponsorJson)),
         Effect.map((result) => result.data),
         Effect.map((sponsorInfo) => {
           if (!sponsorInfo) {
@@ -207,7 +208,7 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
             accessToken,
             "Failed to fetch GitHub user",
           );
-          const userInfo = yield* S.decodeUnknown(GitHubUserSchema)(userJson).pipe(
+          const userInfo = yield* S.decodeUnknownEffect(GitHubUserSchema)(userJson).pipe(
             mapDecodeError("Invalid GitHub user profile response"),
           );
 
@@ -220,7 +221,7 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
                   accessToken,
                   "Failed to fetch GitHub emails",
                 );
-                const emails = yield* S.decodeUnknown(GitHubEmailsSchema)(emailsJson).pipe(
+                const emails = yield* S.decodeUnknownEffect(GitHubEmailsSchema)(emailsJson).pipe(
                   mapDecodeError("Invalid GitHub emails response"),
                 );
                 return yield* pipe(
@@ -257,28 +258,30 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
                   username: string;
                   role: string;
                 }>`app_private.link_or_register_user(
-                f_user_id => ${currentUserId ?? null},
-                f_service => ${"github"},
-                f_identifier => ${userInfo.login},
-                f_profile => ${JSON.stringify(profile)}::json,
-                f_auth_details => ${JSON.stringify(tokens)}::json
-              )`.as("linked_user"),
+          f_user_id => ${currentUserId ?? null},
+          f_service => ${"github"},
+          f_identifier => ${userInfo.login},
+          f_profile => ${JSON.stringify(profile)}::json,
+          f_auth_details => ${JSON.stringify(tokens)}::json
+                        )`.as("linked_user"),
               )
-              .selectAll()
-              .pipe(
-                Effect.catchAll((e) => {
-                  const dbErr = unwrapPgError(e);
+              .selectAll(),
+          ).pipe(
+            Effect.catch((e) =>
+              unwrapPgError(e).pipe(
+                Effect.flatMap((dbErr) => {
                   const mapped =
                     dbErr?.code === "TAKEN"
                       ? new AccountAlreadyLinkedError({ message: dbErr.message, service: "github" })
                       : undefined;
                   return mapped ? Effect.fail(mapped) : Effect.die(e);
                 }),
-                Effect.head,
-                Effect.catchTag("NoSuchElementException", () =>
-                  callbackError("Failed to link or register user"),
-                ),
               ),
+            ),
+            Effect.head,
+            Effect.catchTag("NoSuchElementError", () =>
+              callbackError("Failed to link or register user"),
+            ),
           );
 
           const userId = linkedUser.id;
@@ -288,7 +291,7 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
           // 6. Create session if no existing session
           const setCookie = currentUserId
             ? undefined
-            : yield* SessionService.createSession(userId).pipe(
+            : yield* SessionService.use((service) => service.createSession(userId)).pipe(
                 Effect.map(({ token, expiresAt }) => makeSetCookie(token, expiresAt)),
               );
 
@@ -300,8 +303,8 @@ export class OAuthService extends Effect.Service<OAuthService>()("OAuthService",
         }),
     } as const;
   }),
-  dependencies: [SessionService.Default],
-  accessors: true,
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SessionService.layer));
+}
 
 export { OAuthNotConfiguredError, OAuthCallbackError };

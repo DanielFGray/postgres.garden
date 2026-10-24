@@ -1,19 +1,21 @@
 #!/usr/bin/env bun
 
-import crypto from "node:crypto";
 import dotenv from "dotenv";
-import { Prompt } from "@effect/cli";
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { FileSystem, Terminal } from "@effect/platform";
-import { Config, Effect } from "effect";
+import { Prompt } from "effect/cli";
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { Config, Crypto, Effect, FileSystem } from "effect";
 import * as S from "effect/Schema";
 import { envSchema } from "../server/envSchema.js";
 import packageJson from "../package.json" with { type: "json" };
 
 const DOTENV_PATH = ".env";
 
+/** A random failure is a defect: there is no safe fallback for a password. */
 const generatePassword = (len: number) =>
-  crypto.randomBytes(len).toString("base64").replace(/\W/g, "_");
+  Crypto.Crypto.use((crypto) => crypto.randomBytes(len)).pipe(
+    Effect.map((bytes) => Buffer.from(bytes).toString("base64").replace(/\W/g, "_")),
+    Effect.orDie,
+  );
 
 const validName = (s: string): Effect.Effect<string, string> =>
   s.length < 4
@@ -34,7 +36,7 @@ type Ctx = Record<string, string>;
 interface FieldDef {
   prompt?: { message: string; validate?: (s: string) => Effect.Effect<string, string> };
   derive?: (ctx: Ctx) => string;
-  generate?: () => string;
+  generate?: () => Effect.Effect<string, never, Crypto.Crypto>;
 }
 
 // Fields are resolved in declaration order - dependencies must come first
@@ -109,7 +111,7 @@ const resolveField = (
   resolved: Ctx,
   interactive: boolean,
   defaults: Ctx,
-): Effect.Effect<string | undefined, never, Terminal.Terminal> => {
+): Effect.Effect<string | undefined, never, Prompt.Environment | Crypto.Crypto> => {
   // Keep existing value
   if (existing[key]) return Effect.succeed(existing[key]);
 
@@ -120,18 +122,18 @@ const resolveField = (
   if (!def) return Effect.succeed(undefined);
 
   // Generated fields (passwords) - always auto-generate
-  if (def.generate) return Effect.succeed(def.generate());
+  if (def.generate) return def.generate();
 
   // Interactive prompt for user-facing fields
   if (interactive && def.prompt) {
     const defaultValue = defaults[key] ?? def.derive?.(resolved);
-    return Prompt.text({
+    return Prompt.String({
       message: def.prompt.message,
       default: defaultValue,
       validate: def.prompt.validate ?? ((x) => Effect.succeed(x)),
     }).pipe(
       // Handle QuitException by returning undefined
-      Effect.catchTag("QuitException", () => Effect.sync(() => process.exit(0))),
+      Effect.catchTag("QuitError", () => Effect.sync(() => process.exit(0))),
     );
   }
 
@@ -143,10 +145,13 @@ const resolveField = (
 };
 
 const resolveAllFields = (existing: Ctx, interactive: boolean, defaults: Ctx) =>
-  Effect.reduce(fieldOrder, {} as Ctx, (resolved, key) =>
-    resolveField(key, existing, resolved, interactive, defaults).pipe(
-      Effect.map((value) => (value ? { ...resolved, [key]: value } : resolved)),
-    ),
+  Effect.reduce(
+    fieldOrder,
+    (): Ctx => ({}),
+    (resolved, key) =>
+      resolveField(key, existing, resolved, interactive, defaults).pipe(
+        Effect.map((value) => (value ? { ...resolved, [key]: value } : resolved)),
+      ),
   );
 
 // --- File I/O ---
@@ -154,14 +159,14 @@ const resolveAllFields = (existing: Ctx, interactive: boolean, defaults: Ctx) =>
 const readDotenv = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.readFileString(DOTENV_PATH).pipe(
-    Effect.map(dotenv.parse),
-    Effect.orElseSucceed(() => ({})),
+    Effect.map((raw): Ctx => dotenv.parse(raw)),
+    Effect.orElseSucceed((): Ctx => ({})),
   );
 });
 
 const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const interactive = yield* Config.string("NOCONFIRM").pipe(
+  const interactive = yield* Config.String("NOCONFIRM").pipe(
     Effect.map(() => false),
     Effect.orElseSucceed(() => true),
   );
@@ -195,4 +200,4 @@ const program = Effect.gen(function* () {
   yield* Effect.log(`.env ${action}`);
 });
 
-program.pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain);
+program.pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);

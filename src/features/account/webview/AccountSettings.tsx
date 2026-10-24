@@ -24,13 +24,13 @@ const sections: NavSection[] = [
   { id: "danger-zone", label: "Danger Zone", icon: "codicon-warning" },
 ];
 
-const SectionIdSchema = S.Literal(
+const SectionIdSchema = S.Literals([
   "profile",
   "emails",
   "security",
   "linked-accounts",
   "danger-zone",
-);
+]);
 const InitStateMessage = S.Struct({
   type: S.Literal("init-state"),
   section: S.optional(SectionIdSchema),

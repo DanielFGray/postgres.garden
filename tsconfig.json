@@ -57,7 +57,10 @@
           "preferSchemaOverJson": "warning",
           "processEnv": "warning",
           "processEnvInEffect": "warning",
-          "unsafeEffectTypeAssertion": "warning"
+          "unsafeEffectTypeAssertion": "warning",
+          // effect/http, effect/http-api and effect/ai are unstable throughout Effect 4.0.x.
+          // Turn this back on when they are marked stable.
+          "unstableApiUsage": "off"
         }
       }
     ]
@@ -66,8 +69,7 @@
     "node_modules",
     "dist",
     "src/features/notebook/renderer/pev2",
-    "src/sw.ts",
-    "server/vendor"
+    "src/sw.ts"
   ],
   "include": ["src", "server", "lib", "scripts"]
 }

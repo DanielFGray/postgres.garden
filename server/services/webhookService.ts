@@ -1,4 +1,4 @@
-import { Effect, Schema as S } from "effect";
+import { Context, Effect, Layer, Schema as S } from "effect";
 import { sql } from "kysely";
 import { env } from "../assertEnv.js";
 import { asRoot } from "../db.js";
@@ -17,8 +17,8 @@ class WebhookVerificationError extends S.TaggedError<WebhookVerificationError>()
   },
 ) {}
 
-export class WebhookService extends Effect.Service<WebhookService>()("WebhookService", {
-  effect: Effect.sync(() => {
+export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
+  make: Effect.sync(() => {
     return {
       handleGitHubSponsor: (signature: string | null, body: string, event: string | null) =>
         Effect.gen(function* () {
@@ -69,7 +69,8 @@ export class WebhookService extends Effect.Service<WebhookService>()("WebhookSer
         }),
     } as const;
   }),
-  accessors: true,
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 export { WebhookNotConfiguredError, WebhookVerificationError };

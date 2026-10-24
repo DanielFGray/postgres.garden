@@ -1,5 +1,5 @@
-import { WebSdk } from "@effect/opentelemetry";
-import { DevTools } from "@effect/experimental";
+import * as WebSdk from "@effect/opentelemetry/WebSdk";
+import { DevTools } from "effect/devtools";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";

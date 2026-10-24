@@ -92,7 +92,7 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
   }
 
   private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       switch (message.type) {
         case "request":
           yield* handleWebviewApiRequest((msg) => this._view?.webview.postMessage(msg), message);

@@ -1,4 +1,4 @@
-import { Effect, Fiber, Layer, Runtime, Scope } from "effect";
+import { Effect, Fiber, Layer, Scope } from "effect";
 import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { getCurrentPlaygroundId } from "../shared/routes.js";
@@ -116,14 +116,14 @@ const runCommand = (effect: Effect.Effect<void, Error, never>, label: string): P
   Effect.runPromise(
     effect.pipe(
       Effect.tapError((error) => Effect.logError(label, error)),
-      Effect.catchAll(() => Effect.void),
+      Effect.ignore,
     ),
   );
 
 const activatePostgresFeature = Effect.gen(function* () {
   const vscodeService = yield* VSCodeService;
   const vscodeApi = vscodeService.api;
-  const runtime = yield* Effect.runtime<never>();
+  const runtime = yield* Effect.context<never>();
 
   yield* registerFeatureAssets(vscodeService);
 
@@ -162,7 +162,7 @@ const activatePostgresFeature = Effect.gen(function* () {
       Effect.tapError((error) =>
         Effect.logError("[Postgres] loadWorkspaceFromInitialData failed", error),
       ),
-      Effect.catchAll(() => Effect.void),
+      Effect.ignore,
     ),
   );
 
@@ -188,7 +188,7 @@ const activatePostgresFeature = Effect.gen(function* () {
         }),
       ),
       Effect.tapError((error) => Effect.logError("[PGlite] startup query failed", error)),
-      Effect.catchAll(() => Effect.void),
+      Effect.ignore,
     ),
   );
 
@@ -271,7 +271,7 @@ const activatePostgresFeature = Effect.gen(function* () {
 
   yield* vscodeService.registerCommand(PGLITE_EXECUTE, (...args) => {
     const sql = typeof args[0] === "string" ? args[0] : "";
-    return Runtime.runPromise(runtime)(
+    return Effect.runPromiseWith(runtime)(
       Effect.gen(function* () {
         const usesCopy = /\bCOPY\b/i.test(sql);
 
@@ -288,7 +288,7 @@ const activatePostgresFeature = Effect.gen(function* () {
             Effect.tapError((err) =>
               Effect.logWarning("[Postgres] workspace→emscripten sync failed", err),
             ),
-            Effect.catchAll(() => Effect.void),
+            Effect.ignore,
           );
         }
 
@@ -313,7 +313,7 @@ const activatePostgresFeature = Effect.gen(function* () {
             Effect.tapError((err) =>
               Effect.logWarning("[Postgres] emscripten→workspace sync failed", err),
             ),
-            Effect.catchAll(() => Effect.void),
+            Effect.ignore,
           );
         }
 
@@ -336,7 +336,7 @@ const activatePostgresFeature = Effect.gen(function* () {
             pgliteOutputChannel.appendLine(`Error: ${error.message}`);
           }),
         ),
-        Effect.catchAll((error) => Effect.succeed([{ error, statement: sql }])),
+        Effect.catch((error) => Effect.succeed([{ error, statement: sql }])),
       ),
     );
   });
@@ -449,7 +449,7 @@ const activatePostgresFeature = Effect.gen(function* () {
       Effect.sync(() => {
         ERDPanelProvider.createOrShow(vscodeApi.Uri.parse(window.location.origin), {
           query: <T>(sql: string, params?: unknown[]) =>
-            Runtime.runPromise(runtime)(pglite.query<T>(sql, params)),
+            Effect.runPromiseWith(runtime)(pglite.query<T>(sql, params)),
         });
       }),
       "[Postgres] ERD command failed",
@@ -488,7 +488,7 @@ const activatePostgresFeature = Effect.gen(function* () {
   }
 });
 
-export const PostgresFeatureLive = Layer.scopedDiscard(
+export const PostgresFeatureLive = Layer.effectDiscard(
   activatePostgresFeature.pipe(Effect.withSpan("feature.postgres")),
 );
 
@@ -555,7 +555,7 @@ const syncEmscriptenFsToWorkspace = (
               vscodeApi.workspace.fs.createDirectory(
                 vscodeApi.Uri.file(path.substring(0, lastSlash)),
               ),
-            ).pipe(Effect.catchAll(() => Effect.void));
+            ).pipe(Effect.ignore);
           }
           yield* fromPromise(() => vscodeApi.workspace.fs.writeFile(uri, content));
         }),

@@ -94,7 +94,7 @@ export class PlaygroundBrowserPanel {
   }
 
   private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       switch (message.type) {
         case "request":
           yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);

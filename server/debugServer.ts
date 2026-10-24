@@ -3,6 +3,8 @@ import Docker from "dockerode";
 import { Effect } from "effect";
 import * as S from "effect/Schema";
 import net from "node:net";
+// dockerode's modem exchanges Node streams, and Effect has no equivalent to hand it.
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import stream from "node:stream";
 
 const PORT = 5555;
@@ -10,7 +12,7 @@ const http = process.getBuiltinModule("http");
 const fs = process.getBuiltinModule("fs");
 const tryPromise = <A>(run: () => PromiseLike<A>) =>
   Effect.tryPromise({ try: run, catch: (cause) => String(cause) });
-const Init = S.Struct({ main: S.String, files: S.Record({ key: S.String, value: S.String }) });
+const Init = S.Struct({ main: S.String, files: S.Record(S.String, S.String) });
 
 /** Typed wrapper for dockerode's untyped `container.modem.demuxStream` */
 function demuxStream(
@@ -69,7 +71,7 @@ wss.on("connection", (ws) => {
         Effect.gen(function* () {
           if (!initialized) {
             initialized = true;
-            const init = yield* S.decodeUnknown(S.parseJson(Init))(message);
+            const init = yield* S.decodeEffect(S.fromJsonString(Init))(message);
             for (const [file, content] of Object.entries(init.files)) {
               yield* tryPromise(() => fs.promises.writeFile("/tmp/" + file, content));
             }
@@ -110,7 +112,7 @@ wss.on("connection", (ws) => {
             return;
           }
           socket.sendMessage(message);
-        }).pipe(Effect.catchAll((err) => Effect.logError("Failed to initialize", err))),
+        }).pipe(Effect.catch((err) => Effect.logError("Failed to initialize", err))),
       ),
     ),
   );
@@ -126,7 +128,7 @@ function createContainer() {
   return Effect.runPromise(
     Effect.gen(function* () {
       const stream = yield* tryPromise(() => docker.pull(image));
-      yield* Effect.async<void, string>((resume) => {
+      yield* Effect.callback<void, string>((resume) => {
         docker.modem.followProgress(stream, (err) =>
           resume(err == null ? Effect.void : Effect.fail(String(err))),
         );
@@ -178,7 +180,7 @@ function prepareContainer(container: Docker.Container) {
         }),
       );
       execStream.pipe(process.stdout);
-      yield* Effect.async<void>((resume) => {
+      yield* Effect.callback<void>((resume) => {
         execStream.on("end", () => resume(Effect.void));
       });
 
@@ -201,7 +203,7 @@ function exitHandler() {
         }),
       );
     }).pipe(
-      Effect.catchAll((err) => Effect.logError(err)),
+      Effect.catch((err) => Effect.logError(err)),
       Effect.ensuring(Effect.sync(() => process.exit())),
     ),
   );
@@ -275,7 +277,7 @@ const TWO_CRLF = "\r\n\r\n";
 const HEADER_LINESEPARATOR = /\r?\n/;
 const HEADER_FIELDSEPARATOR = /: */;
 
-const findPortFree = Effect.async<number>((resume) => {
+const findPortFree = Effect.callback<number>((resume) => {
   const srv = net.createServer();
   srv.listen(0, () => {
     const port = (srv.address() as net.AddressInfo).port;

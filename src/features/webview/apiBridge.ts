@@ -81,7 +81,7 @@ export const createWebviewApiBridge = (options: CreateBridgeOptions) => {
     body?: WebviewValue,
     telemetry?: Omit<RequestTelemetryContext, "requestId">,
   ): Effect.Effect<T, WebviewRequestError> =>
-    Effect.async<T, WebviewRequestError>((resume) => {
+    Effect.callback<T, WebviewRequestError>((resume) => {
       const id = String(++requestId);
 
       const context = createRequestTelemetryContext({
@@ -103,9 +103,12 @@ export const createWebviewApiBridge = (options: CreateBridgeOptions) => {
         pending.delete(id);
       });
     }).pipe(
-      Effect.timeoutFail({
+      Effect.timeoutOrElse({
         duration: "15 seconds",
-        onTimeout: () => new WebviewRequestError({ message: "Request timed out", code: "TIMEOUT" }),
+        orElse: () =>
+          Effect.fail(
+            (() => new WebviewRequestError({ message: "Request timed out", code: "TIMEOUT" }))(),
+          ),
       }),
       Effect.withSpan(`${options.spanPrefix} ${method.toUpperCase()} ${endpoint}`),
     );

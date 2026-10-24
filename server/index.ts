@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 
-import { HttpApiBuilder, HttpMiddleware, HttpServer } from "@effect/platform";
-import * as FS from "@effect/platform/FileSystem";
-import { layer as NodeFileSystem } from "@effect/platform-node/NodeFileSystem";
+import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Config, Effect, Layer, ManagedRuntime } from "effect";
+import * as FS from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { HttpRouter, HttpServer } from "effect/http";
 import * as S from "effect/Schema";
 import { createServer as createViteServer, type Connect, type ViteDevServer } from "vite";
 import { env } from "./assertEnv.js";
@@ -13,10 +14,8 @@ import { TelemetryLive } from "./telemetry.js";
 import { getPageData } from "./layers/getPageData.js";
 import { PageStateSchema, type PageState } from "../src/shared/dehydrate.js";
 import { HttpApiLive } from "./apiHandlers.js";
-import * as Path from "@effect/platform/Path";
-import { layer as NodePath } from "@effect/platform-node/NodePath";
 
-const path = Effect.runSync(Path.Path.pipe(Effect.provide(NodePath)));
+const path = Effect.runSync(Path.Path.pipe(Effect.provide(NodePath.layer)));
 const { IncomingMessage, ServerResponse: ServerResponseConstructor } = await import("node:http");
 const { Socket } = await import("node:net");
 type ServerResponseInstance = InstanceType<typeof ServerResponseConstructor>;
@@ -29,7 +28,7 @@ type NonApiResponder = {
 };
 
 const PORT = Number(env.PORT);
-const HOST = Effect.runSync(Config.string("HOST").pipe(Effect.orElseSucceed(() => "0.0.0.0")));
+const HOST = Effect.runSync(Config.String("HOST").pipe(Effect.orElseSucceed(() => "0.0.0.0")));
 
 const applySecurityHeaders = (response: Response): Response => {
   const headers = new Headers(response.headers);
@@ -44,7 +43,7 @@ const applySecurityHeaders = (response: Response): Response => {
 };
 
 const serializeInitialData = (state: PageState): string =>
-  S.encodeSync(S.parseJson(PageStateSchema))(state)
+  S.encodeSync(S.fromJsonString(PageStateSchema))(state)
     .replace(/</g, "\\u003c")
     .replace(/-->/g, "--\\u003e");
 
@@ -61,7 +60,7 @@ const injectInitialData = (html: string, state: PageState): string => {
 
 const makeRuntime = () => {
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(SessionService.Default, NodeFileSystem).pipe(Layer.provideMerge(DatabaseLive)),
+    Layer.mergeAll(SessionService.layer, NodeFileSystem.layer).pipe(Layer.provideMerge(DatabaseLive)),
   );
   return {
     getPageState: (pathname: string, cookieHeader: string | null) =>
@@ -76,7 +75,7 @@ const runViteMiddleware = (
   request: Request,
 ): Promise<Response | null> =>
   Effect.runPromise(
-    Effect.async((resume) => {
+    Effect.callback((resume) => {
       const url = new URL(request.url);
       const socket = new Socket();
       const req = new IncomingMessage(socket);
@@ -206,13 +205,10 @@ class ServerSetupError extends S.TaggedError<ServerSetupError>()("ServerSetupErr
   message: S.String,
 }) {}
 
-const ManifestSchema = S.Record({
-  key: S.String,
-  value: S.Struct({
-    file: S.String,
-    css: S.optional(S.Array(S.String)),
-  }),
-});
+const ManifestSchema = S.Record(S.String, S.Struct({
+  file: S.String,
+  css: S.optional(S.Array(S.String)),
+}));
 
 // Read Vite's built index.html rather than reconstructing it from the manifest.
 // This keeps prod aligned with index.html (the same source dev reads through
@@ -244,7 +240,7 @@ const createProdResponder = (runtime: Runtime): Promise<NonApiResponder> => {
     }
 
     const manifestText = yield* fs.readFileString(manifestPath);
-    const manifest: Manifest = yield* S.decodeUnknown(S.parseJson(ManifestSchema))(manifestText);
+    const manifest: Manifest = yield* S.decodeEffect(S.fromJsonString(ManifestSchema))(manifestText);
     const htmlTemplate = yield* readHtmlTemplate(distDir);
 
     const staticPaths = new Set<string>();
@@ -321,17 +317,20 @@ const isApiPath = (pathname: string): boolean =>
 const runWebServer = () => {
   const runtime = makeRuntime();
 
-  const apiWebHandler = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(HttpApiLive, HttpServer.layerContext, TelemetryLive).pipe(
-      Layer.provide(DatabaseLive),
+  const apiWebHandler = HttpRouter.toWebHandler(
+    Layer.mergeAll(HttpApiLive, TelemetryLive).pipe(
+      Layer.provide(HttpServer.layerServices),
+      Layer.provide(NodeFileSystem.layer),
+      Layer.provide(NodePath.layer),
     ),
-    { middleware: HttpMiddleware.logger },
   );
 
   // Wire testing endpoints in dev only
   const testingHandler =
     env.NODE_ENV !== "production"
-      ? import("./testing.js").then(({ testingServer }) => testingServer)
+      ? import("./testing.js").then(({ TestingRoutesLive }) =>
+          HttpRouter.toWebHandler(Layer.mergeAll(TestingRoutesLive, TelemetryLive)),
+        )
       : null;
 
   const responderPromise =
@@ -346,7 +345,7 @@ const runWebServer = () => {
 
           if (testingHandler && pathname.startsWith("/api/testing")) {
             return testingHandler
-              .then((handler) => handler.handle(request))
+              .then((handler) => handler.handler(request))
               .then(applySecurityHeaders);
           }
 
@@ -375,7 +374,12 @@ const runWebServer = () => {
         }
         shuttingDown = true;
         Effect.runSync(Effect.log(`\n${signal} received, shutting down...`));
-        Promise.all([responder.close(), apiWebHandler.dispose(), runtime.dispose()])
+        Promise.all([
+          responder.close(),
+          apiWebHandler.dispose(),
+          testingHandler?.then((handler) => handler.dispose()),
+          runtime.dispose(),
+        ])
           .then(() => {
             void server.stop();
             process.exit(0);

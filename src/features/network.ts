@@ -20,7 +20,7 @@ function setState(next: NetworkState) {
   emitter.fire(next);
 }
 
-export const NetworkFeatureLive = Layer.scopedDiscard(
+export const NetworkFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* VSCodeService;
 

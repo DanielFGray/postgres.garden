@@ -10,20 +10,9 @@
  * browser can import it. `SessionMiddleware` is declared here as a bare tag;
  * its implementation lives in `services/sessionMiddleware.ts`.
  */
-import {
-  HttpApi,
-  HttpApiEndpoint,
-  HttpApiGroup,
-  HttpApiMiddleware,
-  HttpApiSchema,
-  HttpApiSecurity,
-} from "@effect/platform";
-import { Context, Schema as S } from "effect";
-import { User } from "../generated/user.js";
-import { Playground } from "../generated/playground.js";
-import { UserEmail } from "../generated/userEmail.js";
-import { UserAuthentication } from "../generated/userAuthentication.js";
-import { Privacy } from "../generated/privacy.js";
+import { Context, Schema as S, Struct } from "effect";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
+import { Playground, Privacy, User, UserAuthentication, UserEmail } from "./models.js";
 import {
   ApiError,
   Conflict,
@@ -63,89 +52,81 @@ export type SessionData = {
   readonly session: SessionInfo | null;
 };
 
-export class CurrentSession extends Context.Tag("CurrentSession")<CurrentSession, SessionData>() {}
+export class CurrentSession extends Context.Service<CurrentSession, SessionData>()("CurrentSession") {}
 
-export class SessionMiddleware extends HttpApiMiddleware.Tag<SessionMiddleware>()(
-  "SessionMiddleware",
-  {
-    provides: CurrentSession,
-    security: { session: sessionCookie },
-  },
-) {}
+export class SessionMiddleware extends HttpApiMiddleware.Service<SessionMiddleware, {
+  provides: CurrentSession;
+}>()("SessionMiddleware", {
+  security: { session: sessionCookie },
+  error: ServerError,
+}) {}
 
 // ---------------------------------------------------------------------------
 // Response schemas
 // ---------------------------------------------------------------------------
 
-// -- Derived from generated models ------------------------------------------
+// -- Derived from the row models in ./models.ts ------------------------------------------
 
-const SessionUser = User.json.pipe(S.pick("id", "username", "role", "is_verified"));
+const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
 
-export const UserProfile = User.json;
+export const UserProfile = User;
 
-const UserEmailResponse = UserEmail.json;
+const UserEmailResponse = UserEmail;
 
-const UserAuthenticationResponse = UserAuthentication.json.pipe(
-  S.pick("id", "service", "identifier", "created_at"),
+const UserAuthenticationResponse = UserAuthentication.mapFields(
+  Struct.pick(["id", "service", "identifier", "created_at"]),
 );
 
 const HasPasswordResponse = S.Struct({ has_password: S.Boolean });
 
 const PlaygroundFile = S.Struct({ path: S.String, content: S.String });
 
-export const PlaygroundListItem = Playground.json.pipe(
-  S.pick("hash", "fork_hash", "name", "description", "created_at", "updated_at"),
-  S.extend(S.Struct({ stars: S.BigInt })),
+const PlaygroundSummary = Playground.mapFields(
+  Struct.pick(["hash", "fork_hash", "name", "description", "created_at", "updated_at"]),
 );
 
-const PlaygroundListItemWithUser = Playground.json.pipe(
-  S.pick("hash", "fork_hash", "name", "description", "created_at", "updated_at"),
-  S.extend(
+export const PlaygroundListItem = S.Struct({
+  ...PlaygroundSummary.fields,
+  stars: S.BigIntFromString,
+});
+
+const PlaygroundListItemWithUser = S.Struct({
+  ...PlaygroundSummary.fields,
+  stars: S.BigIntFromString,
+  user: S.NullOr(S.Struct({ username: S.String })),
+});
+
+const PlaygroundDetail = S.Struct({
+  ...Playground.mapFields(Struct.omit(["expires_at"])).fields,
+  expires_at: S.NullOr(S.DateTimeUtcFromString),
+  user: S.NullOr(S.Struct({ username: S.String })),
+  stars: S.BigIntFromString,
+  is_starred: S.Boolean,
+  fork_of: S.NullOr(
     S.Struct({
-      stars: S.BigInt,
-      user: S.NullOr(S.Struct({ username: S.String })),
+      hash: S.NullOr(S.String),
+      name: S.NullOr(S.String),
+      owner: S.NullOr(S.String),
     }),
   ),
-);
+});
 
-const PlaygroundDetail = Playground.json.pipe(
-  S.omit("expires_at"),
-  S.extend(
-    S.Struct({
-      expires_at: S.NullOr(S.DateTimeUtc),
-      user: S.NullOr(S.Struct({ username: S.String })),
-      stars: S.BigInt,
-      is_starred: S.Boolean,
-      fork_of: S.NullOr(
-        S.Struct({
-          hash: S.NullOr(S.String),
-          name: S.NullOr(S.String),
-          owner: S.NullOr(S.String),
-        }),
-      ),
-    }),
-  ),
-);
-
-const PlaygroundRow = Playground.json.pipe(
-  S.omit("expires_at"),
-  S.extend(S.Struct({ expires_at: S.NullOr(S.DateTimeUtc) })),
-);
+const PlaygroundRow = Playground;
 
 export const CreatePlaygroundResult = S.Struct({
   commit_id: S.String,
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtc,
+  created_at: S.DateTimeUtcFromString,
 });
 
 const ForkPlaygroundResult = S.Struct({
   commit_id: S.String,
-  playground_id: S.Number,
+  playground_id: S.Finite,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtc,
+  created_at: S.DateTimeUtcFromString,
 });
 
 export const CreateCommitResult = S.Struct({
@@ -153,14 +134,14 @@ export const CreateCommitResult = S.Struct({
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtc,
+  created_at: S.DateTimeUtcFromString,
   forked: S.Boolean,
 });
 
 const CommitListItem = S.Struct({
   id: S.String,
   message: S.String,
-  timestamp: S.Number,
+  timestamp: S.Finite,
   parent_id: S.NullOr(S.String),
   user_id: S.NullOr(S.String),
   username: S.optional(S.String),
@@ -169,18 +150,18 @@ const CommitListItem = S.Struct({
 export const CommitDetail = S.Struct({
   id: S.String,
   message: S.String,
-  created_at: S.DateTimeUtc,
+  created_at: S.DateTimeUtcFromString,
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   files: S.Array(PlaygroundFile),
   activeFile: S.NullOr(S.String),
-  timestamp: S.Number,
+  timestamp: S.Finite,
 });
 
 export const CommitHistoryItem = S.Struct({
   id: S.String,
   message: S.String,
-  timestamp: S.Number,
+  timestamp: S.Finite,
   parent_id: S.NullOr(S.String),
   playground_hash: S.String,
 });
@@ -205,319 +186,296 @@ const DeletePlaygroundResponse = S.Struct({ hash: S.String });
 // Endpoint definitions
 // ---------------------------------------------------------------------------
 const queryPagination = S.Struct({
-  offset: S.optional(S.NumberFromString),
-  limit: S.optional(S.NumberFromString),
-  sort: S.optional(S.Union(S.Literal("created_at"), S.Literal("updated_at"), S.Literal("stars"))),
+  offset: S.optional(S.FiniteFromString),
+  limit: S.optional(S.FiniteFromString),
+  sort: S.optional(S.Union([S.Literals(["created_at"]), S.Literals(["updated_at"]), S.Literals(["stars"])])),
 });
 
-const userPath = HttpApiSchema.param("username", S.String);
-const hashPath = HttpApiSchema.param("hash", S.String);
-const emailIdPath = HttpApiSchema.param("id", S.String);
-const commitIdPath = HttpApiSchema.param("commit_id", S.String);
 const SuccessResponse = S.Struct({ success: S.Boolean });
+
 const apiUsers = HttpApiGroup.make("apiUsers")
   .add(
-    HttpApiEndpoint.get("me", "/me")
-      .addSuccess(S.Struct({ user: S.NullOr(UserProfile) }))
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("me", "/me", {
+      success: S.Struct({ user: S.NullOr(UserProfile) }),
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.del("deleteMe", "/me")
-      .setUrlParams(S.Struct({ token: S.optional(S.String) }))
-      .addSuccess(SuccessResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.delete("deleteMe", "/me", {
+      query: S.Struct({ token: S.optional(S.String) }),
+      success: SuccessResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.patch("patchMe", "/me")
-      .setPayload(
-        S.Struct({
-          username: S.optional(S.String),
-          name: S.optional(S.NullOr(S.String)),
-          bio: S.optional(S.String),
-          avatar_url: S.optional(S.NullOr(S.String)),
-        }),
-      )
-      .addSuccess(UserProfile)
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.patch("patchMe", "/me", {
+      payload: S.Struct({
+        username: S.optional(S.String),
+        name: S.optional(S.NullOr(S.String)),
+        bio: S.optional(S.String),
+        avatar_url: S.optional(S.NullOr(S.String)),
+      }),
+      success: UserProfile,
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("meEmails", "/me/emails")
-      .addSuccess(S.Array(UserEmailResponse))
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("meEmails", "/me/emails", {
+      success: S.Array(UserEmailResponse),
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("createMeEmail", "/me/emails")
-      .setPayload(S.Struct({ email: S.String }))
-      .addSuccess(UserEmailResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("createMeEmail", "/me/emails", {
+      payload: S.Struct({ email: S.String }),
+      success: UserEmailResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.del("deleteMeEmail")`/me/emails/${emailIdPath}`
-      .addSuccess(UserEmailResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.delete("deleteMeEmail", "/me/emails/:id", {
+      params: { id: S.String },
+      success: UserEmailResponse,
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("meAuthentications", "/me/authentications")
-      .addSuccess(S.Array(UserAuthenticationResponse))
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("meAuthentications", "/me/authentications", {
+      success: S.Array(UserAuthenticationResponse),
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.del(
-      "deleteMeAuthentication",
-    )`/me/authentications/${HttpApiSchema.param("id", S.String)}`
-      .addSuccess(S.Struct({ id: S.String }))
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.delete("deleteMeAuthentication", "/me/authentications/:id", {
+      params: { id: S.String },
+      success: S.Struct({ id: S.String }),
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("meHasPassword", "/me/has-password")
-      .addSuccess(HasPasswordResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("meHasPassword", "/me/has-password", {
+      success: HasPasswordResponse,
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("forgotPassword", "/forgotPassword")
-      .setPayload(S.Struct({ email: S.String }))
-      .addSuccess(SuccessResponse)
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("forgotPassword", "/forgotPassword", {
+      payload: S.Struct({ email: S.String }),
+      success: SuccessResponse,
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("resetPassword", "/resetPassword")
-      .setPayload(S.Struct({ userId: S.String, token: S.String, password: S.String }))
-      .addSuccess(SuccessResponse)
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("resetPassword", "/resetPassword", {
+      payload: S.Struct({ userId: S.String, token: S.String, password: S.String }),
+      success: SuccessResponse,
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("changePassword", "/changePassword")
-      .setPayload(S.Struct({ oldPassword: S.String, newPassword: S.String }))
-      .addSuccess(SuccessResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("changePassword", "/changePassword", {
+      payload: S.Struct({ oldPassword: S.String, newPassword: S.String }),
+      success: SuccessResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("verifyEmail", "/verifyEmail")
-      .setPayload(S.Struct({ emailId: S.String, token: S.String }))
-      .addSuccess(SuccessResponse)
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("verifyEmail", "/verifyEmail", {
+      payload: S.Struct({ emailId: S.String, token: S.String }),
+      success: SuccessResponse,
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("makeEmailPrimary", "/makeEmailPrimary")
-      .setPayload(S.Struct({ emailId: S.String }))
-      .addSuccess(UserEmailResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("makeEmailPrimary", "/makeEmailPrimary", {
+      payload: S.Struct({ emailId: S.String }),
+      success: UserEmailResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("resendEmailVerificationCode", "/resendEmailVerificationCode")
-      .setPayload(S.Struct({ emailId: S.String }))
-      .addSuccess(SuccessResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("resendEmailVerificationCode", "/resendEmailVerificationCode", {
+      payload: S.Struct({ emailId: S.String }),
+      success: SuccessResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .middleware(SessionMiddleware)
   .prefix("/api");
 
 const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
   .add(
-    HttpApiEndpoint.get("userPlaygrounds")`/user/${userPath}`
-      .setUrlParams(queryPagination)
-      .addSuccess(S.Array(PlaygroundListItem))
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("userPlaygrounds", "/user/:username", {
+      params: { username: S.String },
+      query: queryPagination,
+      success: S.Array(PlaygroundListItem),
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("playgrounds", "/playgrounds")
-      .setUrlParams(queryPagination)
-      .addSuccess(S.Array(PlaygroundListItemWithUser))
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("playgrounds", "/playgrounds", {
+      query: queryPagination,
+      success: S.Array(PlaygroundListItemWithUser),
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("createPlayground", "/playgrounds")
-      .setPayload(
-        S.Struct({
-          name: S.optional(S.NullOr(S.String)),
-          message: S.String,
-          description: S.optional(S.NullOr(S.String)),
-          files: S.Array(PlaygroundFile),
-          activeFile: S.optional(S.NullOr(S.String)),
-        }),
-      )
-      .addSuccess(CreatePlaygroundResult)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("createPlayground", "/playgrounds", {
+      payload: S.Struct({
+        name: S.optional(S.NullOr(S.String)),
+        message: S.String,
+        description: S.optional(S.NullOr(S.String)),
+        files: S.Array(PlaygroundFile),
+        activeFile: S.optional(S.NullOr(S.String)),
+      }),
+      success: CreatePlaygroundResult,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("playgroundByHash")`/playgrounds/${hashPath}`
-      .addSuccess(PlaygroundDetail)
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("playgroundByHash", "/playgrounds/:hash", {
+      params: { hash: S.String },
+      success: PlaygroundDetail,
+      error: [NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("forkPlayground")`/playgrounds/${hashPath}/fork`
-      .setPayload(S.Struct({ name: S.optional(S.NullOr(S.String)) }))
-      .addSuccess(ForkPlaygroundResult)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("forkPlayground", "/playgrounds/:hash/fork", {
+      params: { hash: S.String },
+      payload: S.Struct({ name: S.optional(S.NullOr(S.String)) }),
+      success: ForkPlaygroundResult,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.put("updatePlayground")`/playgrounds/${hashPath}`
-      .setPayload(
-        S.Struct({
-          name: S.optional(S.NullOr(S.String)),
-          description: S.optional(S.NullOr(S.String)),
-          privacy: S.optional(Privacy),
-        }),
-      )
-      .addSuccess(PlaygroundRow)
-      .addError(Unauthorized, { status: 401 })
-      .addError(Forbidden, { status: 403 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.put("updatePlayground", "/playgrounds/:hash", {
+      params: { hash: S.String },
+      payload: S.Struct({
+        name: S.optional(S.NullOr(S.String)),
+        description: S.optional(S.NullOr(S.String)),
+        privacy: S.optional(Privacy),
+      }),
+      success: PlaygroundRow,
+      error: [Unauthorized, Forbidden, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("createCommit")`/playgrounds/${hashPath}/commits`
-      .setPayload(
-        S.Struct({
-          message: S.String,
-          files: S.Array(PlaygroundFile),
-          activeFile: S.optional(S.NullOr(S.String)),
-        }),
-      )
-      .addSuccess(CreateCommitResult)
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("createCommit", "/playgrounds/:hash/commits", {
+      params: { hash: S.String },
+      payload: S.Struct({
+        message: S.String,
+        files: S.Array(PlaygroundFile),
+        activeFile: S.optional(S.NullOr(S.String)),
+      }),
+      success: CreateCommitResult,
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("listCommits")`/playgrounds/${hashPath}/commits`
-      .addSuccess(S.Array(CommitListItem))
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("listCommits", "/playgrounds/:hash/commits", {
+      params: { hash: S.String },
+      success: S.Array(CommitListItem),
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("getCommit")`/playgrounds/${hashPath}/commits/${commitIdPath}`
-      .addSuccess(CommitDetail)
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("getCommit", "/playgrounds/:hash/commits/:commit_id", {
+      params: { hash: S.String, commit_id: S.String },
+      success: CommitDetail,
+      error: [NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get(
-      "getCommitHistory",
-    )`/playgrounds/${hashPath}/commits/${commitIdPath}/history`
-      .setUrlParams(S.Struct({ limit: S.optional(S.NumberFromString) }))
-      .addSuccess(CommitHistoryResponse)
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("getCommitHistory", "/playgrounds/:hash/commits/:commit_id/history", {
+      params: { hash: S.String, commit_id: S.String },
+      query: S.Struct({ limit: S.optional(S.FiniteFromString) }),
+      success: CommitHistoryResponse,
+      error: [ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("getCommitDiff")`/playgrounds/${hashPath}/commits/${commitIdPath}/diff`
-      .addSuccess(CommitDiffResponse)
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("getCommitDiff", "/playgrounds/:hash/commits/:commit_id/diff", {
+      params: { hash: S.String, commit_id: S.String },
+      success: CommitDiffResponse,
+      error: [NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("togglePlaygroundStar")`/playgrounds/${hashPath}/star`
-      .addSuccess(ToggleStarResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("togglePlaygroundStar", "/playgrounds/:hash/star", {
+      params: { hash: S.String },
+      success: ToggleStarResponse,
+      error: [Unauthorized, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.del("deletePlayground")`/playgrounds/${hashPath}`
-      .addSuccess(DeletePlaygroundResponse)
-      .addError(Unauthorized, { status: 401 })
-      .addError(NotFound, { status: 404 })
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.delete("deletePlayground", "/playgrounds/:hash", {
+      params: { hash: S.String },
+      success: DeletePlaygroundResponse,
+      error: [Unauthorized, NotFound, ApiError, ServerError],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("searchPlaygrounds", "/playgrounds/search")
-      .setUrlParams(
-        S.Struct({
-          q: S.optional(S.String),
-          limit: S.optional(S.NumberFromString),
-          offset: S.optional(S.NumberFromString),
-        }),
-      )
-      .addSuccess(S.Array(PlaygroundListItemWithUser))
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.get("searchPlaygrounds", "/playgrounds/search", {
+      query: S.Struct({
+        q: S.optional(S.String),
+        limit: S.optional(S.FiniteFromString),
+        offset: S.optional(S.FiniteFromString),
+      }),
+      success: S.Array(PlaygroundListItemWithUser),
+      error: [ApiError, ServerError],
+    }),
   )
   .middleware(SessionMiddleware)
   .prefix("/api");
 
 const systemGroup = HttpApiGroup.make("system").add(
-  HttpApiEndpoint.get("healthz", "/healthz").addSuccess(S.Struct({ ok: S.Boolean })),
+  HttpApiEndpoint.get("healthz", "/healthz", {
+    success: S.Struct({ ok: S.Boolean }),
+  }),
 );
 
 const authGroup = HttpApiGroup.make("auth")
   .add(
-    HttpApiEndpoint.post("register", "/register")
-      .setPayload(S.Struct({ username: S.String, email: S.String, password: S.String }))
-      .addSuccess(UserProfile)
-      .addError(ApiError, { status: 400 })
-      .addError(Conflict, { status: 409 }),
+    HttpApiEndpoint.post("register", "/register", {
+      payload: S.Struct({ username: S.String, email: S.String, password: S.String }),
+      success: UserProfile,
+      error: [ApiError, Conflict],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("login", "/login")
-      .setPayload(S.Struct({ id: S.String, password: S.String }))
-      .addSuccess(UserProfile)
-      .addError(Unauthorized, { status: 401 })
-      .addError(Locked, { status: 423 }),
-  )
-  .add(HttpApiEndpoint.get("authMe", "/me").addSuccess(S.NullOr(SessionUser)))
-  .add(
-    HttpApiEndpoint.post("logout", "/logout")
-      .addSuccess(SuccessResponse)
-      .addError(ApiError, { status: 400 })
-      .addError(ServerError, { status: 500 }),
+    HttpApiEndpoint.post("login", "/login", {
+      payload: S.Struct({ id: S.String, password: S.String }),
+      success: UserProfile,
+      error: [Unauthorized, Locked],
+    }),
   )
   .add(
-    HttpApiEndpoint.get("authGithubStart", "/auth/github")
-      .setUrlParams(S.Struct({ redirectTo: S.optional(S.String), mode: S.optional(S.String) }))
-      .addSuccess(S.Unknown),
+    HttpApiEndpoint.get("authMe", "/me", {
+      success: S.NullOr(SessionUser),
+    }),
   )
   .add(
-    HttpApiEndpoint.get("authGithubCallback", "/auth/github/callback")
-      .setUrlParams(S.Struct({ code: S.String, state: S.String }))
-      .addSuccess(S.Unknown),
+    HttpApiEndpoint.post("logout", "/logout", {
+      success: SuccessResponse,
+      error: [ApiError, ServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("authGithubStart", "/auth/github", {
+      query: S.Struct({ redirectTo: S.optional(S.String), mode: S.optional(S.String) }),
+      success: S.Unknown,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("authGithubCallback", "/auth/github/callback", {
+      query: S.Struct({ code: S.String, state: S.String }),
+      success: S.Unknown,
+    }),
   )
   .middleware(SessionMiddleware);
+
 const webhookGroup = HttpApiGroup.make("webhooks")
-  .add(HttpApiEndpoint.post("githubSponsorWebhook", "/gh_sponsor").addSuccess(S.Unknown))
+  .add(HttpApiEndpoint.post("githubSponsorWebhook", "/gh_sponsor", { success: S.Unknown }))
   .prefix("/webhooks");
 
 export class PgGardenApi extends HttpApi.make("PgGardenApi")

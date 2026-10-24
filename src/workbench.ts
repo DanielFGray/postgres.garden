@@ -1,7 +1,7 @@
 import { initialize as initializeMonacoService } from "@codingame/monaco-vscode-api";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
 import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-service-override";
-import { Effect, FiberSet, Schema } from "effect";
+import { Context, Effect, FiberSet, Layer, Schema } from "effect";
 import { commonServices, constructOptions, envOptions, initializeCommon } from "./setup.common";
 
 class WorkbenchInitError extends Schema.TaggedError<WorkbenchInitError>()("WorkbenchInitError", {
@@ -62,8 +62,8 @@ const initializeWorkbench = (workbenchElement: HTMLDivElement) =>
     );
   });
 
-export class Workbench extends Effect.Service<Workbench>()("app/Workbench", {
-  scoped: Effect.gen(function* () {
+export class Workbench extends Context.Service<Workbench>()("app/Workbench", {
+  make: Effect.gen(function* () {
     yield* initializeCommon.pipe(
       Effect.withSpan("workbench.initializeCommon"),
       Effect.mapError(
@@ -95,4 +95,6 @@ export class Workbench extends Effect.Service<Workbench>()("app/Workbench", {
 
     return { runFork, runPromise } as const;
   }).pipe(Effect.withSpan("workbench.boot")),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

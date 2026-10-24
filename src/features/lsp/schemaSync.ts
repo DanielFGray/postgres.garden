@@ -10,93 +10,93 @@ import type { LanguageClient } from "vscode-languageclient/browser";
 // ─── Effect Schema definitions for PGLS SchemaCache ─────────────────────────
 
 const PglsSchema = S.Struct({
-  id: S.Number,
+  id: S.Finite,
   name: S.String,
   owner: S.String,
   allowed_users: S.Array(S.String),
   allowed_creators: S.Array(S.String),
-  table_count: S.Number,
-  view_count: S.Number,
-  function_count: S.Number,
+  table_count: S.Finite,
+  view_count: S.Finite,
+  function_count: S.Finite,
   total_size: S.String,
   comment: S.NullOr(S.String),
 });
 
-const ReplicaIdentity = S.Literal("Default", "Index", "Full", "Nothing");
-const TableKind = S.Literal("Ordinary", "View", "MaterializedView", "Partitioned");
+const ReplicaIdentity = S.Literals(["Default", "Index", "Full", "Nothing"]);
+const TableKind = S.Literals(["Ordinary", "View", "MaterializedView", "Partitioned"]);
 
 const PglsTable = S.Struct({
-  id: S.Number,
+  id: S.Finite,
   schema: S.String,
   name: S.String,
   rls_enabled: S.Boolean,
   rls_forced: S.Boolean,
   replica_identity: ReplicaIdentity,
   table_kind: TableKind,
-  bytes: S.Number,
+  bytes: S.Finite,
   size: S.String,
-  live_rows_estimate: S.Number,
-  dead_rows_estimate: S.Number,
+  live_rows_estimate: S.Finite,
+  dead_rows_estimate: S.Finite,
   comment: S.NullOr(S.String),
 });
 
-const ColumnClassKind = S.Literal(
+const ColumnClassKind = S.Literals([
   "OrdinaryTable",
   "View",
   "MaterializedView",
   "ForeignTable",
   "PartitionedTable",
-);
+]);
 
 const PglsColumn = S.Struct({
   name: S.String,
   table_name: S.String,
-  table_oid: S.Number,
+  table_oid: S.Finite,
   class_kind: ColumnClassKind,
-  number: S.Number,
+  number: S.Finite,
   schema_name: S.String,
-  type_id: S.Number,
+  type_id: S.Finite,
   type_name: S.NullOr(S.String),
   is_nullable: S.Boolean,
   is_primary_key: S.Boolean,
   is_unique: S.Boolean,
   default_expr: S.NullOr(S.String),
-  varchar_length: S.NullOr(S.Number),
+  varchar_length: S.NullOr(S.Finite),
   comment: S.NullOr(S.String),
 });
 
 const PglsFunctionArg = S.Struct({
   mode: S.String,
   name: S.String,
-  type_id: S.Number,
+  type_id: S.Finite,
   has_default: S.NullOr(S.Boolean),
 });
 
 const PglsFunction = S.Struct({
-  id: S.Number,
+  id: S.Finite,
   schema: S.String,
   name: S.String,
   language: S.String,
-  kind: S.Literal("Function", "Aggregate", "Window", "Procedure"),
+  kind: S.Literals(["Function", "Aggregate", "Window", "Procedure"]),
   body: S.NullOr(S.String),
   definition: S.NullOr(S.String),
   args: S.Struct({ args: S.Array(PglsFunctionArg) }),
   argument_types: S.NullOr(S.String),
   identity_argument_types: S.NullOr(S.String),
-  return_type_id: S.NullOr(S.Number),
+  return_type_id: S.NullOr(S.Finite),
   return_type: S.NullOr(S.String),
-  return_type_relation_id: S.NullOr(S.Number),
+  return_type_relation_id: S.NullOr(S.Finite),
   is_set_returning_function: S.Boolean,
-  behavior: S.Literal("Immutable", "Stable", "Volatile"),
+  behavior: S.Literals(["Immutable", "Stable", "Volatile"]),
   security_definer: S.Boolean,
 });
 
 const PglsVersion = S.Struct({
   version: S.NullOr(S.String),
-  version_num: S.NullOr(S.Number),
-  major_version: S.NullOr(S.Number),
-  active_connections: S.NullOr(S.Number),
-  max_connections: S.NullOr(S.Number),
+  version_num: S.NullOr(S.Finite),
+  major_version: S.NullOr(S.Finite),
+  active_connections: S.NullOr(S.Finite),
+  max_connections: S.NullOr(S.Finite),
 });
 
 export const SchemaCache = S.Struct({
@@ -176,10 +176,11 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
 
   // Build a lookup: class _id → namespace name
   const classToNs = new Map(
-    Array.filterMap(introspection.classes, (cls) =>
+    Array.flatMap(introspection.classes, (cls) =>
       pipe(
         Array.findFirst(introspection.namespaces, (n) => n._id === cls.relnamespace),
         Option.map((ns) => [cls._id, ns.nspname] as const),
+        Option.toArray,
       ),
     ),
   );
@@ -302,14 +303,14 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
       return {
         id: Number(p._id),
         schema: pipe(
-          Option.fromNullable(ns),
+          Option.fromNullishOr(ns),
           Option.map((namespace) => namespace.nspname),
           Option.getOrElse(() => "public"),
         ),
         name: p.proname,
         language: pipe(
-          Option.fromNullable(lang),
-          Option.flatMap((language) => Option.fromNullable(language.lanname)),
+          Option.fromNullishOr(lang),
+          Option.flatMap((language) => Option.fromNullishOr(language.lanname)),
           Option.getOrElse(() => "sql"),
         ),
         kind: prokindToPglsKind(p.prokind),
@@ -319,12 +320,12 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
         argument_types: null,
         identity_argument_types: null,
         return_type_id: pipe(
-          Option.fromNullable(p.prorettype),
+          Option.fromNullishOr(p.prorettype),
           Option.map((typeId) => Number(typeId)),
           Option.getOrNull,
         ),
         return_type: pipe(
-          Option.fromNullable(p.prorettype),
+          Option.fromNullishOr(p.prorettype),
           Option.flatMap((returnTypeId) =>
             Array.findFirst(introspection.types, (type) => type._id === returnTypeId),
           ),

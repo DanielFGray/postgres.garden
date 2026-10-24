@@ -1,8 +1,7 @@
-import { FetchHttpClient, HttpApiClient } from "@effect/platform";
-import type * as HttpClientError from "@effect/platform/HttpClientError";
-import type { HttpApiDecodeError } from "@effect/platform/HttpApiError";
-import { Effect, Match } from "effect";
-import type * as ParseResult from "effect/ParseResult";
+import type * as HttpClientError from "effect/http/HttpClientError";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { HttpApiClient, HttpApiError } from "effect/http-api";
+import { Effect, Exit } from "effect";
 import * as S from "effect/Schema";
 import { PgGardenApi } from "../server/apiSchema";
 import {
@@ -19,11 +18,11 @@ type HttpApiClientFailure =
   | ApiError
   | Conflict
   | Forbidden
-  | HttpApiDecodeError
+  | HttpApiError.HttpApiSchemaError
   | HttpClientError.HttpClientError
   | Locked
   | NotFound
-  | ParseResult.ParseError
+  | S.SchemaError
   | ServerError
   | Unauthorized;
 
@@ -32,40 +31,32 @@ const client = HttpApiClient.make(PgGardenApi, {
 }).pipe(Effect.provide(FetchHttpClient.layer));
 
 const ApiErrorPayload = S.Struct({
-  status: S.optional(S.Number),
+  status: S.optional(S.Finite),
   body: S.optional(S.Unknown),
   response: S.optional(
     S.Struct({
-      status: S.optional(S.Number),
+      status: S.optional(S.Finite),
       body: S.optional(S.Unknown),
     }),
   ),
 });
 
 const readStatus = (error: HttpApiClientFailure): number => {
-  const decoded = S.decodeUnknownEither(ApiErrorPayload)(error);
-  return Match.value(decoded).pipe(
-    Match.tags({
-      Left: () => 500,
-      Right: ({ right }) => right.status ?? right.response?.status ?? 500,
-    }),
-    Match.exhaustive,
-  );
+  const decoded = S.decodeUnknownExit(ApiErrorPayload)(error);
+  return Exit.isSuccess(decoded)
+    ? (decoded.value.status ?? decoded.value.response?.status ?? 500)
+    : 500;
 };
 
 const readBody = (error: HttpApiClientFailure): unknown => {
-  const decoded = S.decodeUnknownEither(ApiErrorPayload)(error);
-  return Match.value(decoded).pipe(
-    Match.tags({
-      Left: () => error,
-      Right: ({ right }) => right.body ?? right.response?.body ?? error,
-    }),
-    Match.exhaustive,
-  );
+  const decoded = S.decodeUnknownExit(ApiErrorPayload)(error);
+  return Exit.isSuccess(decoded)
+    ? (decoded.value.body ?? decoded.value.response?.body ?? error)
+    : error;
 };
 
 export class ApiRequestError extends S.TaggedError<ApiRequestError>()("ApiRequestError", {
-  status: S.Number,
+  status: S.Finite,
   value: S.Unknown,
 }) {
   static from(error: HttpApiClientFailure): ApiRequestError {
@@ -75,7 +66,7 @@ export class ApiRequestError extends S.TaggedError<ApiRequestError>()("ApiReques
 
 const request = <A, E extends HttpApiClientFailure>(
   spanName: string,
-  run: (httpApiClient: Effect.Effect.Success<typeof client>) => Effect.Effect<A, E, never>,
+  run: (httpApiClient: Effect.Success<typeof client>) => Effect.Effect<A, E, never>,
 ): Effect.Effect<A, ApiRequestError, never> =>
   client.pipe(
     Effect.flatMap(run),
@@ -94,7 +85,7 @@ export const httpApiListPlaygrounds = (options?: {
 }) =>
   request("httpapi.playgrounds.list", (api) =>
     api.apiPlaygrounds.playgrounds({
-      urlParams: {
+      query: {
         sort: options?.sort,
         offset: options?.offset,
         limit: options?.limit,
@@ -104,7 +95,7 @@ export const httpApiListPlaygrounds = (options?: {
 
 export const httpApiGetPlayground = (hash: string) =>
   request("httpapi.playgrounds.get", (api) =>
-    api.apiPlaygrounds.playgroundByHash({ path: { hash } }),
+    api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
   );
 
 export const httpApiCreatePlayground = (payload: {
@@ -125,22 +116,22 @@ export const httpApiUpdatePlayground = (
   },
 ) =>
   request("httpapi.playgrounds.update", (api) =>
-    api.apiPlaygrounds.updatePlayground({ path: { hash }, payload }),
+    api.apiPlaygrounds.updatePlayground({ params: { hash }, payload }),
   );
 
 export const httpApiDeletePlayground = (hash: string) =>
   request("httpapi.playgrounds.delete", (api) =>
-    api.apiPlaygrounds.deletePlayground({ path: { hash } }),
+    api.apiPlaygrounds.deletePlayground({ params: { hash } }),
   );
 
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   request("httpapi.playgrounds.star", (api) =>
-    api.apiPlaygrounds.togglePlaygroundStar({ path: { hash } }),
+    api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }),
   );
 
 export const httpApiForkPlayground = (hash: string, payload: { name?: string | null }) =>
   request("httpapi.playgrounds.fork", (api) =>
-    api.apiPlaygrounds.forkPlayground({ path: { hash }, payload }),
+    api.apiPlaygrounds.forkPlayground({ params: { hash }, payload }),
   );
 
 export const httpApiCreatePlaygroundCommit = (
@@ -152,20 +143,20 @@ export const httpApiCreatePlaygroundCommit = (
   },
 ) =>
   request("httpapi.playgrounds.commits.create", (api) =>
-    api.apiPlaygrounds.createCommit({ path: { hash }, payload }),
+    api.apiPlaygrounds.createCommit({ params: { hash }, payload }),
   );
 
 export const httpApiListPlaygroundCommits = (hash: string) =>
   request("httpapi.playgrounds.commits.list", (api) =>
-    api.apiPlaygrounds.listCommits({ path: { hash } }),
+    api.apiPlaygrounds.listCommits({ params: { hash } }),
   );
 
 export const httpApiGetPlaygroundCommit = (hash: string, commit_id: string) =>
   request("httpapi.playgrounds.commits.get", (api) =>
-    api.apiPlaygrounds.getCommit({ path: { hash, commit_id } }),
+    api.apiPlaygrounds.getCommit({ params: { hash, commit_id } }),
   );
 
 export const httpApiGetPlaygroundCommitDiff = (hash: string, commit_id: string) =>
   request("httpapi.playgrounds.commits.diff", (api) =>
-    api.apiPlaygrounds.getCommitDiff({ path: { hash, commit_id } }),
+    api.apiPlaygrounds.getCommitDiff({ params: { hash, commit_id } }),
   );

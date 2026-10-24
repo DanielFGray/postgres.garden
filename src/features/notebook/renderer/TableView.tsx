@@ -110,7 +110,7 @@ function formatCellValue(value: SqlValue, typeId: number | undefined) {
     case "jsonb":
       return Option.match(
         S.is(S.String)(value)
-          ? (S.decodeUnknownOption(S.parseJson(S.Unknown))(value) as Option.Option<SqlValue>)
+          ? (S.decodeUnknownOption(S.fromJsonString(S.Unknown))(value) as Option.Option<SqlValue>)
           : Option.some(value),
         {
           onNone: () => stringifyCell(value),

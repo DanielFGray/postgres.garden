@@ -1,13 +1,13 @@
 import type * as vscode from "vscode";
-import { Clock, Effect, Layer, Match, Option, Random, Runtime, pipe } from "effect";
+import { Clock, Effect, Layer, Match, Option, Random, pipe } from "effect";
 import { VSCodeService } from "../vscode/service";
 
-export const TestingFeatureLive = Layer.scopedDiscard(
+export const TestingFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const api = vscodeService.api;
-    const runtime = yield* Effect.runtime<never>();
-    const runPromise = Runtime.runPromise(runtime);
+    const runtime = yield* Effect.context<never>();
+    const runPromise = Effect.runPromiseWith(runtime);
 
     const testRe = /^([0-9]+)\s*([+*/-])\s*([0-9]+)\s*=\s*([0-9]+)/;
     const headingRe = /^(#+)\s*(.+)$/;
@@ -155,7 +155,7 @@ export const TestingFeatureLive = Layer.scopedDiscard(
       }
 
       run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
-        const effect = Effect.gen(this, function* () {
+        const effect = Effect.gen({ self: this }, function* () {
           const start = yield* Clock.currentTimeMillis;
           yield* Effect.sleep(1000 + (yield* Random.next) * 1000);
           const actual = this.evaluate();
@@ -375,7 +375,7 @@ export const TestingFeatureLive = Layer.scopedDiscard(
         cancellation.onCancellationRequested(() => watchingTests.delete("ALL"));
       } else {
         const include = pipe(
-          Option.fromNullable(request.include),
+          Option.fromNullishOr(request.include),
           Option.getOrElse(() => [] as vscode.TestItem[]),
         );
         include.forEach((item) => watchingTests.set(item, request.profile));

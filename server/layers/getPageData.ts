@@ -12,10 +12,11 @@ import type { PageState } from "../../src/shared/dehydrate.js";
 import { CurrentSession } from "../apiSchema.js";
 import { PlaygroundRepoServer } from "./playgroundRepo.js";
 import { SessionService, sessionCookieName } from "../services/sessionService.js";
+import { withRequestTransaction } from "../db.js";
 
 const parseSessionToken = (cookieHeader: string | null): string | undefined =>
   pipe(
-    Option.fromNullable(cookieHeader),
+    Option.fromNullishOr(cookieHeader),
     Option.flatMap((header) =>
       pipe(
         header.split(";"),
@@ -38,7 +39,8 @@ export const getPageData = (pathname: string, cookieHeader: string | null) =>
   Effect.gen(function* () {
     // 1. Validate the session; `asVisitor` reads it to scope RLS
     const token = parseSessionToken(cookieHeader);
-    const sessionResult = yield* SessionService.validateSessionToken(token);
+    const sessionService = yield* SessionService;
+    const sessionResult = yield* sessionService.validateSessionToken(token);
 
     // 2. Match the application route
     const route = parseRoute(pathname);
@@ -73,4 +75,5 @@ export const getPageData = (pathname: string, cookieHeader: string | null) =>
     Effect.orElseSucceed(
       () => ({ user: null, commit: null, route: parseRoute(pathname) }) satisfies PageState,
     ),
+    withRequestTransaction,
   );

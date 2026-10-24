@@ -71,7 +71,7 @@ export class AccountSettingsPanelProvider {
   }
 
   private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       switch (message.type) {
         case "initialized":
           yield* this._postInitState(this._initState);
@@ -90,7 +90,7 @@ export class AccountSettingsPanelProvider {
   }
 
   private _postInitState(state?: AccountSettingsInitState): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       if (!state) return;
       yield* Effect.promise(() =>
         this._panel.webview.postMessage({

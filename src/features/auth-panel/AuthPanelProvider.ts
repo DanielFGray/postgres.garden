@@ -77,7 +77,7 @@ export class AuthPanelProvider {
   }
 
   private _handleMessage(message: AuthWebviewMessage): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       switch (message.type) {
         case "initialized":
           this._sendInitView();

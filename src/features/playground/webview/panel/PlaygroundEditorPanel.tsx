@@ -10,11 +10,11 @@ type PlaygroundResponse = Playground & {
   is_starred?: boolean;
 };
 
-const BridgeMessage = S.Union(
+const BridgeMessage = S.Union([
   S.Struct({ type: S.Literal("setPlaygroundId"), data: S.Struct({ playgroundId: S.String }) }),
   S.Struct({ type: S.Literal("clearPlayground") }),
   S.Struct({ type: S.Literal("triggerSave") }),
-);
+]);
 
 const [playground, setPlayground] = createSignal<Playground | null>(null);
 const [isDirty, setIsDirty] = createSignal(false);
@@ -56,7 +56,7 @@ function doSave() {
           showSaveStatus("Saved", "success");
         }),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.sync(() => showSaveStatus(error.message || "Save failed", "error")),
       ),
     ),
@@ -73,7 +73,7 @@ function loadPlayground(playgroundId: string) {
           setStarInfo({ starred: data.is_starred ?? false, count: Number(data.stars ?? 0) });
         }),
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.sync(() => {
           Effect.runFork(Effect.logError("Failed to load playground:", error));
           showSaveStatus("Failed to load", "error");
@@ -106,7 +106,7 @@ function handleToggleStar() {
         Effect.sync(() => setStarInfo((info) => ({ ...info, starred: result.starred }))),
       ),
       // Revert optimistic update
-      Effect.catchAll(() => Effect.sync(() => setStarInfo(current))),
+      Effect.catch(() => Effect.sync(() => setStarInfo(current))),
     ),
   );
 }
@@ -117,7 +117,7 @@ function handleFork() {
   Effect.runFork(
     apiRequest<Playground>(`/api/playgrounds/${pg.hash}/fork`, "POST").pipe(
       Effect.tap((fork) => Effect.sync(() => sendCommand("fork", { hash: fork.hash }))),
-      Effect.catchAll((error) => Effect.logError("Failed to fork:", error)),
+      Effect.catch((error) => Effect.logError("Failed to fork:", error)),
     ),
   );
 }
@@ -227,7 +227,7 @@ export const PlaygroundEditorPanel = () => {
 
             <div class="form-group">
               <span class="meta-text">
-                Created {DateTime.toDate(DateTime.unsafeMake(pg().created_at)).toLocaleDateString()}
+                Created {DateTime.toDate(DateTime.makeUnsafe(pg().created_at)).toLocaleDateString()}
               </span>
             </div>
 
