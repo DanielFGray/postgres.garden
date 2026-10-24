@@ -18,9 +18,9 @@ global.TEST_EMAILS = [];
 const { readFile } = fs;
 
 // @ts-expect-error json import assertions were a mistake
-const fromEmail = packageJson.fromEmail;
+const fromEmail = process.env.EMAIL_FROM || packageJson.fromEmail;
 if (!fromEmail)
-  throw new Error(`Warning: no email address configured. Please set "fromEmail" in package.json`);
+  throw new Error("Warning: no sender address configured. Please set EMAIL_FROM or \"fromEmail\" in package.json");
 // @ts-expect-error json import assertions were a mistake
 const projectName = packageJson.projectName ?? packageJson.name;
 if (!projectName)
@@ -51,7 +51,7 @@ export default async (inPayload) => {
   const transport = await getTransport();
   const { options: inOptions, template, variables } = payload;
   const options = {
-    from: packageJson.fromEmail ?? packageJson.author ?? "changeme@example.com",
+    from: fromEmail,
     ...inOptions,
   };
   if (template) {
@@ -64,6 +64,9 @@ export default async (inPayload) => {
     Object.assign(options, { html, text });
   }
   const info = await transport.sendMail(options);
+  if (info.rejected?.length) {
+    throw new Error(`The mail provider rejected: ${info.rejected.join(", ")}`);
+  }
   if (isTest) {
     global.TEST_EMAILS.push(info);
   } else if (isDev) {

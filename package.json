@@ -32,8 +32,8 @@
     "pw:ui": "bunx playwright test --ui",
     "pw:headed": "bunx playwright test --headed --project=chromium",
     "ast-grep": "ast-grep scan --globs '!tools/ast-grep/tests/**'",
-    "test:unit": "bun --env-file=.env vitest run server/",
-    "test:watch": "bun --env-file=.env vitest --watch server/",
+    "test:unit": "bun --env-file=.env vitest run",
+    "test:watch": "bun --env-file=.env vitest --watch",
     "test:e2e": "bunx playwright test --project=chromium",
     "test": "run-s -c typecheck lint ast-grep test:unit test:e2e",
     "worker": "bun --cwd=worker --env-file=../.env graphile-worker",
@@ -58,7 +58,6 @@
     "prepare": "effect-tsgo patch --typescript --oxlint"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.997.0",
     "@codingame/monaco-vscode-accessibility-service-override": "36.0.0",
     "@codingame/monaco-vscode-ai-service-override": "36.0.0",
     "@codingame/monaco-vscode-all-default-extensions": "36.0.0",
