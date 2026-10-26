@@ -32,6 +32,8 @@
       ],
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
+        { "name": "OTEL_TRACES_EXPORTER", "value": "otlp" },
+        { "name": "OTEL_LOGS_EXPORTER", "value": "otlp" },
         { "name": "PORT", "value": "3000" },
         { "name": "VITE_ROOT_URL", "value": "https://postgres.garden" },
         { "name": "DATABASE_NAME", "value": "postgres_garden" },
