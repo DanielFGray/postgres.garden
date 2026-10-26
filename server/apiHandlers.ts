@@ -92,7 +92,7 @@ const reportHttpError = (args: {
         route: args.route,
         status: args.status,
         kind: args.kind,
-        error: args.error instanceof Error ? args.error.message : String(args.error),
+        error: args.error instanceof Error ? errorChain(args.error) : String(args.error),
         requestId: args.context?.requestId,
         uiAction: args.context?.uiAction,
         uiFeature: args.context?.uiFeature,
@@ -100,6 +100,11 @@ const reportHttpError = (args: {
       }),
     ),
   );
+
+// The message of each error in the cause chain: Effect.tryPromise wraps the thrown error in
+// a generic one whose own message names only tryPromise.
+const errorChain = (error: Error): string =>
+  error.cause instanceof Error ? `${error.message}: ${errorChain(error.cause)}` : error.message;
 
 // ---------------------------------------------------------------------------
 // Kysely → Effect type bridge
