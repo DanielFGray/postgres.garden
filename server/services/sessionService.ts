@@ -11,8 +11,9 @@ const anonymous: SessionData = { user: null, session: null };
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
-function sessionKey(id: string) {
-  return `session:${id}`;
+// The platform's Valkey user may touch only keys under the app's name.
+export function sessionKey(id: string) {
+  return `postgres-garden:session:${id}`;
 }
 
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {

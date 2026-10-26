@@ -15,6 +15,7 @@ import { HttpRouter, HttpServer } from "effect/http";
 import { asRoot, DatabaseLive } from "./db.js";
 import { HttpApiLive } from "./apiHandlers.js";
 import { valkey } from "./valkey.js";
+import { sessionKey } from "./services/sessionService.js";
 import { TestingRoutesLive } from "./testing.js";
 
 // ---------------------------------------------------------------------------
@@ -279,7 +280,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             const id = sessionIdFromCookie(cookie);
 
             // Simulate expiration by deleting the Valkey key
-            yield* Effect.tryPromise(() => valkey.del(`session:${id}`));
+            yield* Effect.tryPromise(() => valkey.del(sessionKey(id)));
 
             const res = yield* http("GET", "/me", { cookie });
             const body = yield* res.json();

@@ -12,7 +12,7 @@ import { sql, type ExpressionBuilder } from "kysely";
 import { valkey } from "./valkey.js";
 import { env } from "./assertEnv.js";
 import type { DB, AppPublicUsers as User } from "../generated/db.js";
-import { SessionService } from "./services/sessionService.js";
+import { SessionService, sessionKey } from "./services/sessionService.js";
 import { makeSetCookie } from "./services/cookies.js";
 import { DatabaseLive, rootQuerier, runQuery } from "./db.js";
 
@@ -135,7 +135,7 @@ const clearTestUsers = Effect.gen(function* () {
     runQuery(db.deleteFrom("app_public.users").where("username", "like", "test%")),
   );
   const keys = yield* Effect.tryPromise({
-    try: () => valkey.keys("session:*"),
+    try: () => valkey.keys(sessionKey("*")),
     catch: (cause) => new ValkeyError({ cause }),
   });
   if (keys.length > 0) {
