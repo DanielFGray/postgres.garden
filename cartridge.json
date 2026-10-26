@@ -1,0 +1,91 @@
+{
+  "apiVersion": "server-ansible/v2",
+  "name": "postgres-garden",
+  "postgres": [
+    {
+      "database": "postgres_garden",
+      "extensions": ["btree_gin", "citext", "fuzzystrmatch", "pg_trgm", "pgcrypto", "uuid-ossp"]
+    }
+  ],
+  "valkey": {},
+  "services": [
+    {
+      "name": "postgres-garden-server",
+      "image": "registry.cluster:5000/postgres-garden",
+      "hostPort": "dynamic",
+      "containerPort": 3000,
+      "healthCheck": { "type": "http", "path": "/healthz" },
+      "cpu": 300,
+      "memoryMB": 512,
+      "networkMode": "bridge",
+      "command": "bun",
+      "args": ["run", "start:prod"],
+      "routes": [
+        {
+          "host": "postgres.garden",
+          "responseHeaders": [
+            { "name": "Cross-Origin-Embedder-Policy", "value": "credentialless" },
+            { "name": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+            { "name": "Cross-Origin-Resource-Policy", "value": "cross-origin" }
+          ]
+        }
+      ],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "VITE_ROOT_URL", "value": "https://postgres.garden" },
+        { "name": "DATABASE_NAME", "value": "postgres_garden" },
+        { "name": "DATABASE_OWNER", "database": "postgres_garden", "role": "owner" },
+        { "name": "DATABASE_VISITOR", "database": "postgres_garden", "role": "visitor" }
+      ],
+      "connections": [],
+      "secrets": [
+        {
+          "_tag": "PostgresCredentials",
+          "database": "postgres_garden",
+          "login": "migration",
+          "urlEnv": "DATABASE_URL"
+        },
+        {
+          "_tag": "PostgresCredentials",
+          "database": "postgres_garden",
+          "login": "api",
+          "urlEnv": "AUTH_DATABASE_URL"
+        },
+        { "_tag": "ValkeyCredentials", "urlEnv": "VALKEY_URL" }
+      ]
+    },
+    {
+      "name": "postgres-garden-worker",
+      "image": "registry.cluster:5000/postgres-garden",
+      "hostPort": "dynamic",
+      "containerPort": 3000,
+      "cpu": 200,
+      "memoryMB": 256,
+      "networkMode": "bridge",
+      "command": "bun",
+      "args": ["run", "worker:prod"],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "VITE_ROOT_URL", "value": "https://postgres.garden" },
+        { "name": "MAIL_PROVIDER", "value": "cloudflare" },
+        { "name": "EMAIL_FROM", "value": "postgres.garden <noreply@postgres.garden>" }
+      ],
+      "connections": [],
+      "secrets": [
+        {
+          "_tag": "PostgresCredentials",
+          "database": "postgres_garden",
+          "login": "migration",
+          "urlEnv": "DATABASE_URL"
+        },
+        {
+          "_tag": "KvSecret",
+          "path": "secret/data/postgres-garden",
+          "key": "cloudflare_email_api_token",
+          "env": "CLOUDFLARE_EMAIL_API_TOKEN"
+        }
+      ]
+    }
+  ]
+}
