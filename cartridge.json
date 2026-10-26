@@ -52,7 +52,25 @@
           "login": "api",
           "urlEnv": "AUTH_DATABASE_URL"
         },
-        { "_tag": "ValkeyCredentials", "urlEnv": "VALKEY_URL" }
+        { "_tag": "ValkeyCredentials", "urlEnv": "VALKEY_URL" },
+        {
+          "_tag": "KvSecret",
+          "path": "secret/data/postgres-garden",
+          "key": "github_client_id",
+          "env": "GITHUB_CLIENT_ID"
+        },
+        {
+          "_tag": "KvSecret",
+          "path": "secret/data/postgres-garden",
+          "key": "github_client_secret",
+          "env": "GITHUB_CLIENT_SECRET"
+        },
+        {
+          "_tag": "KvSecret",
+          "path": "secret/data/postgres-garden",
+          "key": "github_pat",
+          "env": "GITHUB_PAT"
+        }
       ]
     },
     {
