@@ -86,7 +86,7 @@
     {
       "_": "command",
       "shadow": false,
-      "command": "bun db:types --url $GM_DBURL"
+      "command": "bun db:types --url 'env(GM_DBURL)'"
     }
   ],
 
