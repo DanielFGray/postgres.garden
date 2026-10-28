@@ -32,7 +32,7 @@ const decodeStoredAuthMessage = (value: string) =>
 
 const AUTH_PROVIDER_ID = "github-auth";
 
-class AuthError extends S.TaggedError<AuthError>()("AuthError", {
+class AuthError extends S.TaggedError<AuthError, { readonly brand: unique symbol }>()("AuthError", {
   message: S.String,
 }) {}
 

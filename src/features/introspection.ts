@@ -4,7 +4,10 @@ import { Introspection, makeIntrospectionQuery, parseIntrospectionResults } from
 import { PGLITE_EXECUTE, type ExtendedResults } from "./constants.js";
 import { toError } from "../shared/index.js";
 
-class IntrospectionError extends Schema.TaggedError<IntrospectionError>()("IntrospectionError", {
+class IntrospectionError extends Schema.TaggedError<
+  IntrospectionError,
+  { readonly brand: unique symbol }
+>()("IntrospectionError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Unknown),
 }) {}

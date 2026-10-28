@@ -1,27 +1,24 @@
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { LanguageModel, Response } from "effect/ai";
-import { Effect, Layer, Match, Option, Redacted, Stream } from "effect";
+import { LanguageModel, type Prompt } from "effect/ai";
+import { Effect, Layer, Match, Option, Stream } from "effect";
 import type * as vscode from "vscode";
-import { languageModelLayer, Providers, type ProviderId } from "../../lib/ai/providers";
+import { languageModelLayer, type ProviderId } from "../../lib/ai/providers";
 import { VSCodeService } from "../vscode/service";
-import { AiCredentials } from "./aiCredentials";
+import { ModelRequestError, rejectionMessage, runAgentChat } from "./ai/agentLoop";
+import { describeUnsupported, toPrompt } from "./ai/messages";
 import {
-  AI_CHAT_PARTICIPANT,
-  AI_CLEAR_PROVIDER,
-  AI_CONFIGURE_PROVIDER,
-  AI_MODEL_VENDOR,
-} from "./constants";
-
-const MAX_INPUT_TOKENS = 200_000;
-const MAX_OUTPUT_TOKENS = 32_000;
-
-const apiKeyProviders = (Object.keys(Providers) as ProviderId[]).filter(
-  (id) => Providers[id].auth === "apiKey",
-);
-
-interface ProviderPick extends vscode.QuickPickItem {
-  readonly provider: ProviderId;
-}
+  apiKeyProviderIds,
+  byokVendorId,
+  decodeByokConfiguration,
+  loadCatalog,
+  toByokModels,
+  type ByokModel,
+} from "./ai/providerSetup";
+import { AgentRuns } from "./ai/runs";
+import { decodeToolCall, invokeAgentTool, toolkitFor, agentToolNames } from "./ai/tools";
+import { AI_CHAT_PARTICIPANT } from "./constants";
+import type { LoadedWorkspace } from "./loadedWorkspace";
+import { PGlite } from "./pglite";
 
 const toAbortSignal = (token: vscode.CancellationToken): AbortSignal | undefined => {
   if (token.isCancellationRequested) return AbortSignal.abort();
@@ -30,310 +27,179 @@ const toAbortSignal = (token: vscode.CancellationToken): AbortSignal | undefined
   return controller.signal;
 };
 
-const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+export const AiFeatureLive: Layer.Layer<never, never, VSCodeService | PGlite | LoadedWorkspace> =
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const vscodeService = yield* VSCodeService;
+      const runs = yield* AgentRuns;
+      const vscodeApi = vscodeService.api;
+      const runtime = yield* Effect.context<AgentRuns | LoadedWorkspace | PGlite>();
+      const catalog = yield* Effect.cached(loadCatalog);
 
-export const AiFeatureLive: Layer.Layer<never, never, VSCodeService> = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const vscodeService = yield* VSCodeService;
-    const credentials = yield* AiCredentials;
-    const vscodeApi = vscodeService.api;
-    const runtime = yield* Effect.context<never>();
-
-    const onDidChangeModels = new vscodeApi.EventEmitter<void>();
-
-    // Streaming hooks the provider catalog up to VSCode's model picker. The
-    // model `family` is the ProviderId and `id` is the model name, so the
-    // response handler can rebuild the right client layer from the selection.
-    const languageModelProvider: vscode.LanguageModelChatProvider = {
-      onDidChangeLanguageModelChatInformation: onDidChangeModels.event,
-
-      provideLanguageModelChatInformation(_options, _token) {
-        return Effect.runPromiseWith(runtime)(
-          credentials.list().pipe(Effect.orElseSucceed(() => [])),
-        ).then((stored) =>
-          stored.map((credential) => ({
-            id: credential.model,
-            name: `${Providers[credential.provider].displayName} · ${credential.model}`,
-            family: credential.provider,
-            version: "1.0.0",
-            maxInputTokens: MAX_INPUT_TOKENS,
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-            capabilities: { toolCalling: false },
-            isUserSelectable: true,
-            isBYOK: true,
-          })),
-        );
-      },
-
-      provideTokenCount(_model, text, _token) {
-        const value =
-          typeof text === "string"
-            ? text
-            : text.content
-                .filter(
-                  (part): part is vscode.LanguageModelTextPart =>
-                    part instanceof vscodeApi.LanguageModelTextPart,
-                )
-                .map((part) => part.value)
-                .join("");
-        return Promise.resolve(Math.ceil(value.length / 4));
-      },
-
-      provideLanguageModelChatResponse(model, messages, _options, progress, token) {
-        return Effect.runPromiseWith(runtime)(
-          Effect.gen(function* () {
-            const provider = model.family as ProviderId;
-            if (!(provider in Providers)) {
-              progress.report(
-                new vscodeApi.LanguageModelTextPart(`Unknown provider "${model.family}".`),
-              );
-              return;
-            }
-            const credential = yield* credentials.get(provider).pipe(
-              Effect.tapError((error) =>
-                Effect.sync(() =>
-                  progress.report(
-                    new vscodeApi.LanguageModelTextPart(
-                      `Failed to read credentials: ${errorMessage(error)}`,
-                    ),
-                  ),
-                ),
+      // The workbench's Manage Models window owns setup and storage (see
+      // ai/providerSetup.ts). It asks once per configured group, passing that
+      // group's resolved settings, and hands the model back on each request.
+      const languageModelProvider = (
+        provider: ProviderId,
+      ): vscode.LanguageModelChatProvider<ByokModel> => ({
+        provideLanguageModelChatInformation(options, _token) {
+          if (options.configuration === undefined) return [];
+          return Effect.runPromiseWith(runtime)(
+            decodeByokConfiguration(options.configuration).pipe(
+              Effect.flatMap((credential) =>
+                catalog.pipe(Effect.map((models) => toByokModels(provider, credential, models))),
               ),
-              Effect.orElseSucceed(() => Option.none()),
-            );
-            if (Option.isNone(credential)) {
-              progress.report(
-                new vscodeApi.LanguageModelTextPart(
-                  `No API key for ${Providers[provider].displayName}. Run the "AI: Configure Provider" command first.`,
-                ),
-              );
-              return;
-            }
-            yield* streamText(credential.value, messagesToPrompt(messages), progress).pipe(
+              // The workbench also asks with only the schema defaults filled in, so an
+              // incomplete group lists no models rather than failing. The user can edit it in
+              // Manage Models.
               Effect.catch((error) =>
-                token.isCancellationRequested
-                  ? Effect.void
-                  : Effect.sync(() =>
-                      progress.report(
-                        new vscodeApi.LanguageModelTextPart(
-                          `Request failed: ${errorMessage(error)}`,
-                        ),
-                      ),
-                    ),
-              ),
-            );
-          }),
-          { signal: toAbortSignal(token) },
-        );
-      },
-    };
-
-    const streamText = (
-      credential: {
-        provider: ProviderId;
-        model: string;
-        apiKey: Redacted.Redacted;
-      },
-      prompt: string,
-      progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
-    ) =>
-      LanguageModel.streamText({ prompt }).pipe(
-        Stream.runForEach((part) => Effect.sync(() => reportPart(part, progress))),
-        Effect.provide(
-          languageModelLayer({
-            provider: credential.provider,
-            model: credential.model,
-            credential: { apiKey: credential.apiKey },
-            // Browser-direct inference: the fetch client talks straight to
-            // the vendor, nothing routes through our server.
-            httpClient: FetchHttpClient.layer,
-          }),
-        ),
-      );
-
-    const reportPart = (
-      part: Response.StreamPart<{}>,
-      progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
-    ) =>
-      Match.value(part).pipe(
-        Match.when({ type: "text-delta" }, (p) =>
-          progress.report(new vscodeApi.LanguageModelTextPart(p.delta)),
-        ),
-        Match.when({ type: "reasoning-delta" }, (p) =>
-          progress.report(new vscodeApi.LanguageModelThinkingPart(p.delta, p.id)),
-        ),
-        Match.orElse(() => undefined),
-      );
-
-    const messagesToPrompt = (messages: readonly vscode.LanguageModelChatRequestMessage[]) =>
-      messages
-        .map((message) => {
-          const role =
-            message.role === vscodeApi.LanguageModelChatMessageRole.User ? "User" : "Assistant";
-          const content = message.content
-            .filter(
-              (part): part is vscode.LanguageModelTextPart =>
-                part instanceof vscodeApi.LanguageModelTextPart,
-            )
-            .map((part) => part.value)
-            .join("");
-          return content ? `${role}: ${content}` : "";
-        })
-        .filter((entry) => entry.length > 0)
-        .join("\n\n");
-
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        vscodeApi.lm.registerLanguageModelChatProvider(AI_MODEL_VENDOR, languageModelProvider),
-      ),
-      (disposable) => Effect.sync(() => disposable.dispose()),
-    );
-    onDidChangeModels.fire();
-
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        vscodeApi.chat.createChatParticipant(
-          AI_CHAT_PARTICIPANT,
-          (request, _context, response, token) =>
-            Effect.runPromiseWith(runtime)(
-              Effect.gen(function* () {
-                const modelResponse = yield* Effect.tryPromise({
-                  try: () =>
-                    request.model.sendRequest(
-                      [vscodeApi.LanguageModelChatMessage.User(request.prompt)],
-                      undefined,
-                      token,
-                    ),
-                  catch: errorMessage,
-                });
-                const iterator = modelResponse.stream[Symbol.asyncIterator]();
-                yield* Effect.callback<void, string>((resume) => {
-                  const read = (): void => {
-                    void iterator.next().then(
-                      (result) => {
-                        if (result.done) {
-                          resume(Effect.void);
-                          return;
-                        }
-                        const part = result.value;
-                        if (part instanceof vscodeApi.LanguageModelTextPart)
-                          response.markdown(part.value);
-                        else if (part instanceof vscodeApi.LanguageModelThinkingPart) {
-                          response.thinkingProgress({
-                            text: part.value,
-                            id: part.id,
-                            metadata: part.metadata,
-                          });
-                        }
-                        read();
-                      },
-                      (error) => resume(Effect.fail(errorMessage(error))),
-                    );
-                  };
-                  read();
-                });
-              }).pipe(
-                Effect.catch((error) =>
-                  token.isCancellationRequested
-                    ? Effect.void
-                    : Effect.sync(() => response.markdown(`**Error:** ${errorMessage(error)}`)),
+                Effect.logDebug("[AI] ignoring an incomplete model group", error.message).pipe(
+                  Effect.as([]),
                 ),
               ),
             ),
-        ),
-      ),
-      (participant) => Effect.sync(() => participant.dispose()),
-    );
+          );
+        },
 
-    const configureFlow = Effect.gen(function* () {
-      const items: ProviderPick[] = apiKeyProviders.map((provider) => ({
-        label: Providers[provider].displayName,
-        description: Providers[provider].suggestedModels.join(", "),
-        provider,
-      }));
+        provideTokenCount(_model, text, _token) {
+          const value =
+            typeof text === "string"
+              ? text
+              : text.content
+                  .filter(
+                    (part): part is vscode.LanguageModelTextPart =>
+                      part instanceof vscodeApi.LanguageModelTextPart,
+                  )
+                  .map((part) => part.value)
+                  .join("");
+          return Promise.resolve(Math.ceil(value.length / 4));
+        },
 
-      const picked = yield* Effect.promise(() =>
-        vscodeApi.window.showQuickPick(items, {
-          placeHolder: "Select an AI provider",
-        }),
-      );
-      if (!picked) return;
-
-      const info = Providers[picked.provider];
-      const suggested = info.suggestedModels[0] ?? "";
-
-      const model = yield* Effect.promise(() =>
-        vscodeApi.window.showInputBox({
-          prompt: `Model to use with ${info.displayName}`,
-          value: suggested,
-          valueSelection: suggested ? [0, suggested.length] : undefined,
-          placeHolder: "Any model the provider accepts",
-        }),
-      );
-      if (!model) return;
-
-      const apiKey = yield* Effect.promise(() =>
-        vscodeApi.window.showInputBox({
-          prompt: `${info.displayName} API key`,
-          password: true,
-          placeHolder: "Stored locally, sent only to the provider",
-        }),
-      );
-      if (!apiKey) return;
-
-      yield* credentials.set({
-        provider: picked.provider,
-        model,
-        apiKey: Redacted.make(apiKey),
+        // Makes one model request and reports its text, reasoning and tool
+        // calls. Failures reject, so the caller's response stream fails too.
+        provideLanguageModelChatResponse(model, messages, options, progress, token) {
+          return Effect.runPromiseWith(runtime)(
+            Effect.gen(function* () {
+              const translation = yield* toPrompt(vscodeApi, messages);
+              yield* Option.match(describeUnsupported(translation.unsupported), {
+                onNone: () => Effect.void,
+                onSome: (note) => Effect.fail(new ModelRequestError({ cause: note })),
+              });
+              yield* streamModel(
+                model,
+                translation.prompt,
+                new Set((options.tools ?? []).map((tool) => tool.name)),
+                progress,
+              );
+            }),
+            { signal: toAbortSignal(token) },
+          );
+        },
       });
-      yield* Effect.promise(() =>
-        vscodeApi.window.showInformationMessage(`Configured ${info.displayName} (${model}).`),
-      );
-      onDidChangeModels.fire();
-    });
 
-    const clearFlow = Effect.gen(function* () {
-      const configured = yield* credentials.list();
-      if (configured.length === 0) {
-        yield* Effect.promise(() =>
-          vscodeApi.window.showInformationMessage("No AI providers configured."),
-        );
-        return;
-      }
-
-      const items: ProviderPick[] = configured.map((credential) => ({
-        label: `${Providers[credential.provider].displayName} — ${credential.model}`,
-        provider: credential.provider,
-      }));
-
-      const picked = yield* Effect.promise(() =>
-        vscodeApi.window.showQuickPick(items, {
-          placeHolder: "Select credentials to clear",
-        }),
-      );
-      if (!picked) return;
-
-      yield* credentials.delete(picked.provider);
-      yield* Effect.promise(() =>
-        vscodeApi.window.showInformationMessage(
-          `Cleared ${Providers[picked.provider].displayName} credentials.`,
-        ),
-      );
-      onDidChangeModels.fire();
-    });
-
-    const runCommand = (effect: Effect.Effect<void, Error, never>) =>
-      Effect.runPromiseWith(runtime)(
-        effect.pipe(
-          Effect.catch((error) =>
-            Effect.sync(() => {
-              void vscodeApi.window.showErrorMessage(errorMessage(error));
+      const streamModel = (
+        model: ByokModel,
+        prompt: Prompt.Prompt,
+        toolNames: ReadonlySet<string>,
+        progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
+      ) =>
+        LanguageModel.streamText({
+          prompt,
+          toolkit: toolkitFor(toolNames),
+          // The chat participant runs tools through vscode.lm.invokeTool.
+          // Strict validation still rejects calls to undeclared tools and
+          // parameters that do not match a tool's schema.
+          disableToolCallResolution: true,
+        }).pipe(
+          Stream.runForEach((part) =>
+            Match.value(part).pipe(
+              Match.when({ type: "text-delta" }, (p) =>
+                Effect.sync(() => progress.report(new vscodeApi.LanguageModelTextPart(p.delta))),
+              ),
+              Match.when({ type: "reasoning-delta" }, (p) =>
+                Effect.sync(() =>
+                  progress.report(new vscodeApi.LanguageModelThinkingPart(p.delta, p.id)),
+                ),
+              ),
+              Match.when({ type: "tool-call" }, (p) =>
+                Effect.sync(() =>
+                  progress.report(new vscodeApi.LanguageModelToolCallPart(p.id, p.name, p.params)),
+                ),
+              ),
+              Match.when({ type: "error" }, (p) =>
+                Effect.fail(new ModelRequestError({ cause: rejectionMessage(p.error) })),
+              ),
+              Match.orElse(() => Effect.void),
+            ),
+          ),
+          Effect.provide(
+            languageModelLayer({
+              model: model.catalogModel.id,
+              route: model.catalogModel.route,
+              credential: { apiKey: model.credential.apiKey },
+              // Browser-direct inference: the fetch client talks straight to
+              // the vendor, nothing routes through our server.
+              httpClient: FetchHttpClient.layer,
             }),
           ),
-        ),
-      );
+        );
 
-    yield* vscodeService.registerCommand(AI_CONFIGURE_PROVIDER, () => runCommand(configureFlow));
-    yield* vscodeService.registerCommand(AI_CLEAR_PROVIDER, () => runCommand(clearFlow));
-  }).pipe(Effect.withSpan("feature.ai")),
-).pipe(Layer.provide(AiCredentials.layer));
+      for (const provider of apiKeyProviderIds) {
+        yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            vscodeApi.lm.registerLanguageModelChatProvider(
+              byokVendorId(provider),
+              languageModelProvider(provider),
+            ),
+          ),
+          (disposable) => Effect.sync(() => disposable.dispose()),
+        );
+      }
+
+      // A tool finds its run by the chat request id the participant passes
+      // to invokeTool; see AgentRuns.
+      for (const name of agentToolNames()) {
+        const tool: vscode.LanguageModelTool<unknown> = {
+          invoke: (options, token) =>
+            Effect.runPromiseWith(runtime)(
+              runs.lookup(Option.fromNullishOr(options.chatRequestId)).pipe(
+                Effect.flatMap((run) =>
+                  decodeToolCall(name, options).pipe(
+                    Effect.flatMap((call) => invokeAgentTool(vscodeApi, call, run)),
+                  ),
+                ),
+                Effect.map(
+                  (text) =>
+                    new vscodeApi.LanguageModelToolResult([
+                      new vscodeApi.LanguageModelTextPart(text),
+                    ]),
+                ),
+              ),
+              { signal: toAbortSignal(token) },
+            ),
+        };
+        yield* Effect.acquireRelease(
+          Effect.sync(() => vscodeApi.lm.registerTool(name, tool)),
+          (disposable) => Effect.sync(() => disposable.dispose()),
+        );
+      }
+
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vscodeApi.chat.createChatParticipant(
+            AI_CHAT_PARTICIPANT,
+            (request, context, response, token) =>
+              Effect.runPromiseWith(runtime)(
+                runAgentChat(vscodeApi, request, context, response, token).pipe(
+                  Effect.catch((error) =>
+                    Effect.sync(() => response.markdown(`\n\n**Error:** ${error.message}`)),
+                  ),
+                ),
+                { signal: toAbortSignal(token) },
+              ),
+          ),
+        ),
+        (participant) => Effect.sync(() => participant.dispose()),
+      );
+    }).pipe(Effect.withSpan("feature.ai")),
+  ).pipe(Layer.provide(AgentRuns.layer));

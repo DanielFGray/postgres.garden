@@ -155,10 +155,10 @@ window.MonacoEnvironment = {
 
 let commonInitialized = false;
 
-class CommonInitializationError extends Schema.TaggedError<CommonInitializationError>()(
-  "CommonInitializationError",
-  { message: Schema.String, cause: Schema.Unknown },
-) {}
+class CommonInitializationError extends Schema.TaggedError<
+  CommonInitializationError,
+  { readonly brand: unique symbol }
+>()("CommonInitializationError", { message: Schema.String, cause: Schema.Unknown }) {}
 
 export const initializeCommon = Effect.suspend(() =>
   commonInitialized

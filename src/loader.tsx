@@ -3,6 +3,7 @@ import { Cause, Console, Effect, Fiber, Layer, Schema } from "effect";
 import { TelemetryLive } from "./telemetry";
 import { AuthFeatureLive } from "./features/auth";
 import { AiFeatureLive } from "./features/ai";
+import { LoadedWorkspace } from "./features/loadedWorkspace";
 import { LspFeatureLive } from "./features/lsp";
 import { NetworkFeatureLive } from "./features/network";
 import { PGlite } from "./features/pglite";
@@ -35,7 +36,10 @@ import "@codingame/monaco-vscode-theme-seti-default-extension";
 const locale = new URLSearchParams(window.location.search).get("locale");
 type LocaleLoaders = Partial<Record<string, () => Promise<void>>>;
 
-class LocaleLoadError extends Schema.TaggedError<LocaleLoadError>()("LocaleLoadError", {
+class LocaleLoadError extends Schema.TaggedError<
+  LocaleLoadError,
+  { readonly brand: unique symbol }
+>()("LocaleLoadError", {
   cause: Schema.Unknown,
 }) {}
 
@@ -79,6 +83,7 @@ const pluginLayers = Layer.mergeAll(
 ).pipe(
   Layer.provide(VSCodeService.layer),
   Layer.provide(PGlite.layer),
+  Layer.provide(LoadedWorkspace.layer),
   Layer.provide(Workbench.layer),
 );
 

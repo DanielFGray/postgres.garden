@@ -45,13 +45,16 @@ export const WORKBENCH_ACTION_CLOSE_ALL_EDITORS = "workbench.action.closeAllEdit
 
 // Account Commands
 export const ACCOUNT_SETTINGS_OPEN = "account.openSettings";
-export const AI_CONFIGURE_PROVIDER = "ai.configureProvider";
-export const AI_CLEAR_PROVIDER = "ai.clearProvider";
 
 // Chat
+/** Default chat participant in agent mode; request.tools decides which tools it may call. */
 export const AI_CHAT_PARTICIPANT = "postgres.garden.chat";
-/** VSCode only surfaces models from a provider registered under this vendor. */
-export const AI_MODEL_VENDOR = "copilot";
+/**
+ * Prefix of the vendor id each bring-your-own-key provider registers under
+ * (see ai/providerSetup.ts). The workbench names a new model group after its
+ * vendor, so one vendor per provider names the group after the provider.
+ */
+export const AI_MODEL_VENDOR_PREFIX = "byok-";
 
 // View IDs
 export const DATABASE_EXPLORER = "databaseExplorer";

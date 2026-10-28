@@ -5,11 +5,10 @@ import {
 } from "@codingame/monaco-vscode-api/extensions";
 import { Context, Effect, Layer, Scope } from "effect";
 import type * as vscode from "vscode";
+import { byokModelProviders } from "../features/ai/providerSetup";
+import { languageModelToolContributions } from "../features/ai/tools";
 import {
   AI_CHAT_PARTICIPANT,
-  AI_CLEAR_PROVIDER,
-  AI_CONFIGURE_PROVIDER,
-  AI_MODEL_VENDOR,
   DATABASE_EXPLORER,
   DATABASE_MIGRATE,
   ERD_SHOW,
@@ -90,16 +89,13 @@ const manifest: Parameters<typeof registerExtension>[0] = {
         fullName: "postgres.garden",
         name: "postgres",
         isDefault: true,
-        modes: ["ask", "agent"],
+        modes: ["agent"],
         locations: ["panel", "editor"],
       },
     ],
-    languageModelChatProviders: [
-      { vendor: AI_MODEL_VENDOR, displayName: "postgres.garden (bring your own key)" },
-    ],
+    languageModelChatProviders: byokModelProviders,
+    languageModelTools: languageModelToolContributions(),
     commands: [
-      { command: AI_CONFIGURE_PROVIDER, title: "AI: Configure Provider", icon: "$(key)" },
-      { command: AI_CLEAR_PROVIDER, title: "AI: Clear Stored Credentials", icon: "$(trash)" },
       { command: PGLITE_RESET, title: "Reset database", icon: "$(trash)" },
       { command: PGLITE_EXECUTE, title: "Execute SQL", icon: "$(notebook-execute)" },
       { command: SERVER_SYNC_COMMIT, title: "Save", icon: "$(cloud-upload)" },

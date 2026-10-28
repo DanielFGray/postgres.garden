@@ -61,3 +61,13 @@ body {
 :root {
   --product-icon: url(product-icon.png);
 }
+
+/*
+ * The Language Models window's "Install Model Providers" button opens a
+ * marketplace search for model-provider extensions. None of them run in this
+ * app, and bring-your-own-key setup (see features/ai/providerSetup.ts) replaces
+ * them.
+ */
+.monaco-button.models-browse-marketplace-button {
+  display: none;
+}

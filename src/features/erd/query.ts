@@ -9,7 +9,10 @@ export interface ERDQueryClient {
   query<T>(sql: string, params?: unknown[], opts?: QueryOptions): Promise<{ rows: readonly T[] }>;
 }
 
-export class ErdQueryError extends S.TaggedError<ErdQueryError>()("ErdQueryError", {
+export class ErdQueryError extends S.TaggedError<
+  ErdQueryError,
+  { readonly brand: unique symbol }
+>()("ErdQueryError", {
   cause: S.optional(S.Unknown),
 }) {}
 

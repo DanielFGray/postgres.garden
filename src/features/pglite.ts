@@ -4,9 +4,12 @@ import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect";
 import * as semicolons from "postgres-semicolons";
 
-class PGliteError extends Schema.TaggedError<PGliteError>()("PGliteError", {
-  cause: Schema.optional(Schema.String),
-}) {}
+class PGliteError extends Schema.TaggedError<PGliteError, { readonly brand: unique symbol }>()(
+  "PGliteError",
+  {
+    cause: Schema.optional(Schema.String),
+  },
+) {}
 
 type WorkerMessageValue =
   | string
@@ -103,6 +106,8 @@ type PGliteState = {
   readonly worker: Worker | null;
   readonly db: PGliteWorker | null;
   readonly fs: WorkerFsApi | null;
+  /** Identity of the database instance; reinitialize increments it. */
+  readonly generation: number;
 };
 
 type PGliteRuntimeState = {
@@ -152,14 +157,38 @@ export type PGliteApi = {
   >;
   /** Emscripten FS operations (initializes PGlite first if needed) */
   readonly fs: WorkerFsApi;
+  /**
+   * The database instance active now. Its `exec` refuses to run once a reset
+   * has replaced that instance.
+   */
+  readonly sandbox: Effect.Effect<PGliteSandbox>;
 };
+
+export type PGliteSandbox = {
+  readonly generation: number;
+  readonly exec: (
+    sql: string,
+    opts?: QueryOptions,
+  ) => Effect.Effect<ExecResults, PGliteError | SandboxReplacedError, never>;
+};
+
+type ExecResults = Effect.Success<ReturnType<PGliteApi["exec"]>>;
+
+export class SandboxReplacedError extends Schema.TaggedError<
+  SandboxReplacedError,
+  { readonly brand: unique symbol }
+>()("SandboxReplacedError", { expected: Schema.Int, actual: Schema.Int }) {
+  override get message() {
+    return `The database was reset or replaced (instance ${this.expected} is now ${this.actual}).`;
+  }
+}
 
 export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
   make: Effect.gen(function* () {
     const runtimeState =
       sharedRuntimeState ??
       ({
-        stateRef: yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null }),
+        stateRef: yield* Ref.make<PGliteState>({ worker: null, db: null, fs: null, generation: 0 }),
         lock: yield* Semaphore.make(1),
       } satisfies PGliteRuntimeState);
     sharedRuntimeState = runtimeState;
@@ -173,7 +202,7 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
       }
 
       const next = yield* createInstance;
-      yield* Ref.set(stateRef, next);
+      yield* Ref.set(stateRef, { ...next, generation: state.generation });
       return next.db;
     });
 
@@ -185,24 +214,40 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
       Effect.gen(function* () {
         const state = yield* Ref.get(stateRef);
         yield* closeState(state);
-        yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
+        yield* Ref.set(stateRef, {
+          worker: null,
+          db: null,
+          fs: null,
+          generation: state.generation + 1,
+        });
         yield* initializeUnlocked;
       }),
     );
 
-    const query = <T>(sql: string, params?: unknown[], opts?: QueryOptions) =>
-      Effect.gen(function* () {
-        const db = yield* initialize;
-        const result = yield* Effect.tryPromise({
-          try: () => db.query<T>(sql, params, opts),
-          catch: (cause) => new PGliteError({ cause: String(cause) }),
-        });
+    // Every statement runs while it holds `lock`, so a reset waits for the
+    // statement to finish. PGliteWorker.close terminates the worker without
+    // settling pending calls, so a statement must not lose the lock (by
+    // interruption) before its promise settles.
+    const runStatement = <A, E extends Error>(
+      admit: (state: PGliteState) => Effect.Effect<void, E>,
+      use: (db: PGliteWorker) => Promise<A>,
+    ) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* admit(yield* Ref.get(stateRef));
+          const db = yield* initializeUnlocked;
+          return yield* Effect.tryPromise({
+            try: () => use(db),
+            catch: (cause) => new PGliteError({ cause: String(cause) }),
+          }).pipe(Effect.uninterruptible);
+        }),
+      );
 
-        return {
-          ...result,
-          statement: statementFromQuery(sql),
-        };
-      }).pipe(
+    const admitAny = () => Effect.void;
+
+    const query = <T>(sql: string, params?: unknown[], opts?: QueryOptions) =>
+      runStatement(admitAny, (db) => db.query<T>(sql, params, opts)).pipe(
+        Effect.map((result) => ({ ...result, statement: statementFromQuery(sql) })),
         Effect.tapError((err) =>
           Effect.annotateCurrentSpan({
             error: true,
@@ -214,20 +259,19 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
         }),
       );
 
-    const exec: PGliteApi["exec"] = (sql, opts) =>
-      Effect.gen(function* () {
-        const db = yield* initialize;
-        const result = yield* Effect.tryPromise({
-          try: () => db.exec(sql, opts),
-          catch: (cause) => new PGliteError({ cause: String(cause) }),
-        });
-        const metadata = metadataFromQueries(sql);
-
-        return result.map((row, index) => ({
-          ...row,
-          ...(metadata[index] ?? { statement: "", query: "" }),
-        }));
-      }).pipe(
+    const execAdmitted = <E extends Error>(
+      admit: (state: PGliteState) => Effect.Effect<void, E>,
+      sql: string,
+      opts?: QueryOptions,
+    ) =>
+      runStatement(admit, (db) => db.exec(sql, opts)).pipe(
+        Effect.map((result) => {
+          const metadata = metadataFromQueries(sql);
+          return result.map((row, index) => ({
+            ...row,
+            ...(metadata[index] ?? { statement: "", query: "" }),
+          }));
+        }),
         Effect.tapError((err) =>
           Effect.annotateCurrentSpan({
             error: true,
@@ -237,6 +281,20 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
         Effect.withSpan("pglite.exec", { attributes: { "db.statement": statementFromQuery(sql) } }),
       );
 
+    const exec: PGliteApi["exec"] = (sql, opts) => execAdmitted(admitAny, sql, opts);
+
+    const sandbox = Ref.get(stateRef).pipe(
+      Effect.map(({ generation }): PGliteSandbox => {
+        const admitSame = (state: PGliteState) =>
+          state.generation === generation
+            ? Effect.void
+            : Effect.fail(
+                new SandboxReplacedError({ expected: generation, actual: state.generation }),
+              );
+        return { generation, exec: (sql, opts) => execAdmitted(admitSame, sql, opts) };
+      }),
+    );
+
     yield* Effect.addFinalizer(() =>
       isHmrReloading()
         ? Effect.void
@@ -244,7 +302,12 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
             Effect.gen(function* () {
               const state = yield* Ref.get(stateRef);
               yield* closeState(state);
-              yield* Ref.set(stateRef, { worker: null, db: null, fs: null });
+              yield* Ref.set(stateRef, {
+                worker: null,
+                db: null,
+                fs: null,
+                generation: state.generation + 1,
+              });
             }),
           ),
     );
@@ -287,6 +350,7 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
       query,
       exec,
       fs,
+      sandbox,
     } satisfies PGliteApi;
   }),
 }) {

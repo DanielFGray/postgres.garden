@@ -20,9 +20,12 @@ export function updateSchema(introspection: Introspection): void {
   Effect.runFork(Effect.map(clientReady, (client) => syncSchema(client, introspection)));
 }
 
-class LspStartError extends S.TaggedError<LspStartError>()("LspStartError", {
-  message: S.String,
-}) {}
+class LspStartError extends S.TaggedError<LspStartError, { readonly brand: unique symbol }>()(
+  "LspStartError",
+  {
+    message: S.String,
+  },
+) {}
 
 export const LspFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {

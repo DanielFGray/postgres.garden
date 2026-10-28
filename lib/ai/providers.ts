@@ -10,11 +10,14 @@ import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient";
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel";
 import * as OpenAiClient from "@effect/ai-openai/OpenAiClient";
 import * as OpenAiLanguageModel from "@effect/ai-openai/OpenAiLanguageModel";
+import * as OpenAiCompatClient from "@effect/ai-openai-compat/OpenAiClient";
+import * as OpenAiCompatLanguageModel from "@effect/ai-openai-compat/OpenAiLanguageModel";
 import * as OpenRouterClient from "@effect/ai-openrouter/OpenRouterClient";
 import * as OpenRouterLanguageModel from "@effect/ai-openrouter/OpenRouterLanguageModel";
 import type { LanguageModel } from "effect/ai";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { Config, Layer, type Redacted } from "effect";
+import type { ModelRoute } from "./modelCatalogSchema";
 
 export type ProviderId = keyof typeof Providers;
 
@@ -30,82 +33,77 @@ export type AuthKind =
 
 export interface ProviderInfo {
   readonly displayName: string;
-  /** Absent when the endpoint is only known after the OAuth handshake. */
+  /** Default endpoint. The catalog generator copies it onto models that name none. */
   readonly apiUrl?: string;
   readonly auth: AuthKind;
-  /** Seeds the model picker; users may type any model the vendor accepts. */
-  readonly suggestedModels: readonly string[];
 }
 
+/**
+ * Provider ids match models.dev, so `modelCatalog.json` is keyed by them.
+ * Only `apiKey` providers have catalog models.
+ */
 export const Providers = {
   anthropic: {
     displayName: "Anthropic",
     apiUrl: "https://api.anthropic.com",
     auth: "apiKey",
-    suggestedModels: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
   },
   openai: {
     displayName: "OpenAI",
     apiUrl: "https://api.openai.com/v1",
     auth: "apiKey",
-    suggestedModels: ["gpt-5.2", "gpt-5.2-mini", "gpt-4o"],
   },
   openrouter: {
     displayName: "OpenRouter",
     apiUrl: "https://openrouter.ai/api/v1",
     auth: "apiKey",
-    suggestedModels: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.2"],
-  },
-  "github-copilot": {
-    displayName: "GitHub Copilot",
-    apiUrl: "https://api.githubcopilot.com",
-    auth: "oauth",
-    suggestedModels: ["gpt-5.2", "claude-sonnet-4.6"],
   },
   opencode: {
-    displayName: "opencode",
-    auth: "oauth",
-    suggestedModels: [],
+    displayName: "OpenCode Zen",
+    auth: "apiKey",
+  },
+  "opencode-go": {
+    displayName: "OpenCode Go",
+    auth: "apiKey",
   },
 } as const satisfies Record<string, ProviderInfo>;
 
 export interface ProviderCredential {
   readonly apiKey: Redacted.Redacted;
-  /** Overrides the catalog URL. Required for providers with no fixed endpoint. */
-  readonly apiUrl?: string;
 }
 
 /**
- * Build the `LanguageModel` layer for one provider/model pair.
+ * Build the `LanguageModel` layer for one model.
  *
- * `httpClient` decides where the request is issued from; pass
- * `FetchHttpClient.layer` in the browser and a platform client on the server.
+ * `route.protocol` selects the client. `httpClient` decides where the request
+ * is issued from; pass `FetchHttpClient.layer` in the browser and a platform
+ * client on the server.
  */
 export const languageModelLayer = ({
-  provider,
   model,
+  route,
   credential,
   httpClient,
 }: {
-  readonly provider: ProviderId;
   readonly model: string;
+  readonly route: ModelRoute;
   readonly credential: ProviderCredential;
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>;
 }): Layer.Layer<LanguageModel.LanguageModel, Config.ConfigError> => {
   const apiKey = Config.succeed(credential.apiKey);
+  const apiUrl = Config.succeed(route.apiUrl);
+
   // Each branch pairs a model with its own client. Splitting the two apart
   // breaks inference: the compiler can no longer tell which client satisfies
   // which model's requirement.
-  const url = (fallback: string) => Config.succeed(credential.apiUrl ?? fallback);
-
-  switch (provider) {
+  switch (route.protocol) {
     case "anthropic":
       return Layer.provide(
         AnthropicLanguageModel.model(model),
         Layer.provide(
           AnthropicClient.layerConfig({
             apiKey,
-            apiUrl: url(Providers.anthropic.apiUrl),
+            apiUrl,
             // Anthropic rejects browser-origin requests unless they opt in.
             // The key is the user's own and travels only to Anthropic, which
             // is the whole point of bring-your-own-key.
@@ -117,40 +115,17 @@ export const languageModelLayer = ({
     case "openrouter":
       return Layer.provide(
         OpenRouterLanguageModel.model(model),
-        Layer.provide(
-          OpenRouterClient.layerConfig({ apiKey, apiUrl: url(Providers.openrouter.apiUrl) }),
-          httpClient,
-        ),
+        Layer.provide(OpenRouterClient.layerConfig({ apiKey, apiUrl }), httpClient),
       );
-    // Copilot and opencode both speak the OpenAI chat protocol; only the base
-    // URL and auth headers differ.
-    case "github-copilot":
-      return Layer.provide(
-        OpenAiLanguageModel.model(model),
-        Layer.provide(
-          OpenAiClient.layerConfig({
-            apiKey,
-            apiUrl: url(Providers["github-copilot"].apiUrl),
-            // Copilot's API rejects requests that carry no integration identity.
-            transformClient: setHeaders({
-              "Copilot-Integration-Id": "vscode-chat",
-              "Editor-Version": "vscode/1.128.0",
-            }),
-          }),
-          httpClient,
-        ),
-      );
-    case "opencode":
     case "openai":
       return Layer.provide(
         OpenAiLanguageModel.model(model),
-        Layer.provide(
-          // opencode has no fixed endpoint: its gateway URL arrives with the
-          // account config after the OAuth handshake, so the credential must
-          // carry it.
-          OpenAiClient.layerConfig({ apiKey, apiUrl: url(Providers.openai.apiUrl) }),
-          httpClient,
-        ),
+        Layer.provide(OpenAiClient.layerConfig({ apiKey, apiUrl }), httpClient),
+      );
+    case "openai-compat":
+      return Layer.provide(
+        OpenAiCompatLanguageModel.model(model),
+        Layer.provide(OpenAiCompatClient.layerConfig({ apiKey, apiUrl }), httpClient),
       );
   }
 };
