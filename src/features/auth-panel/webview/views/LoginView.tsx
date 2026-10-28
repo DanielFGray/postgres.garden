@@ -1,37 +1,36 @@
 import { createSignal, Show } from "solid-js";
-import { apiRequest, notifyAuthComplete, signInWithGitHub } from "../api";
+import { apiCall, notifyAuthComplete, signInWithGitHub } from "../api";
+import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
-import { extractErrorMessage } from "../../../webview/errorMessage";
 
 const readFormString = (value: FormDataEntryValue | null): string =>
-  typeof value === "string" ? value : "";
+  value instanceof File ? "" : (value ?? "");
 
 export const LoginView = (props: { onNavigate: (view: string) => void }) => {
   const [error, setError] = createSignal<string | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
 
-  function handleSubmit(e: SubmitEvent) {
+  function handleSubmit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
+    const data = new FormData(e.currentTarget);
     setError(null);
     setSubmitting(true);
     void runRequest(
-      apiRequest<{ username: string }>(
-        "/login",
-        "POST",
-        {
-          id: readFormString(data.get("id")),
-          password: readFormString(data.get("password")),
-        },
-        { action: "auth.login.submit" },
+      apiCall("auth.login.submit", (api) =>
+        api.auth.login({
+          payload: {
+            id: readFormString(data.get("id")),
+            password: readFormString(data.get("password")),
+          },
+        }),
+      ).pipe(
+        Effect.match({
+          onFailure: (error) => setError(error.message),
+          onSuccess: (user) => notifyAuthComplete(user.username),
+        }),
+        Effect.ensuring(Effect.sync(() => setSubmitting(false))),
       ),
-    )
-      .then(
-        (user) => notifyAuthComplete(user.username),
-        (reason) => setError(extractErrorMessage(reason)),
-      )
-      .finally(() => setSubmitting(false));
+    );
   }
 
   return (

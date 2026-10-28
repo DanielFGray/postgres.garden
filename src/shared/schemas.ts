@@ -11,7 +11,7 @@ import * as S from "effect/Schema";
 // User
 // =============================================================================
 
-export class User extends S.Class<User>("User")({
+export class User extends S.Class<User, { readonly brand: unique symbol }>("User")({
   id: S.String,
   username: S.String,
   role: S.optional(S.String),
@@ -26,7 +26,7 @@ export const FileEntry = S.Struct({
   content: S.String,
 });
 
-export class Commit extends S.Class<Commit>("Commit")({
+export class Commit extends S.Class<Commit, { readonly brand: unique symbol }>("Commit")({
   id: S.String,
   message: S.String,
   created_at: S.String,

@@ -1,34 +1,35 @@
-import type { Selectable } from "kysely";
-import type { AppPublicUsers as User } from "../../../generated/db.js";
-import type { RequestTelemetryContext } from "../webview/requestTelemetry";
+import * as S from "effect/Schema";
+import { RelayRequest } from "../webview/relayProtocol";
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
+export const SectionId = S.Literals([
+  "profile",
+  "emails",
+  "security",
+  "linked-accounts",
+  "danger-zone",
+]);
+export type SectionId = typeof SectionId.Type;
 
-/** User profile returned by /api/me */
-export type UserProfile = Selectable<User>;
+/** The webview has mounted and can receive `init-state`. */
+export class Initialized extends S.Class<Initialized, { readonly brand: unique symbol }>(
+  "Initialized",
+)({
+  type: S.Literal("initialized"),
+}) {}
 
-/** Webview → Extension host messages */
-export type WebviewMessage =
-  | { type: "initialized" }
-  | { type: "account-deleted" }
-  | {
-      type: "request";
-      id: string;
-      endpoint: string;
-      method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-      body?: JsonValue;
-      telemetry?: RequestTelemetryContext;
-    };
+/** The account is gone, so the host closes the panel and leaves the session. */
+export class AccountDeleted extends S.Class<AccountDeleted, { readonly brand: unique symbol }>(
+  "AccountDeleted",
+)({
+  type: S.Literal("account-deleted"),
+}) {}
 
-/** Extension host → Webview messages */
-export type ExtensionMessage =
-  | { type: "data"; id: string; data: unknown }
-  | { type: "error"; id: string; error: { code: string; message: string } }
-  | { type: "offline" }
-  | { type: "init-state"; section?: string; deleteToken?: string };
+/** Webview → extension host messages. */
+export const AccountWebviewMessage = S.Union([Initialized, AccountDeleted, RelayRequest]);
+
+/** Extension host → webview: which section to open, and a deletion token from an email link. */
+export class InitState extends S.Class<InitState, { readonly brand: unique symbol }>("InitState")({
+  type: S.Literal("init-state"),
+  section: S.OptionFromOptional(SectionId),
+  deleteToken: S.OptionFromOptional(S.String),
+}) {}

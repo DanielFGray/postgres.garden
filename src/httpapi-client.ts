@@ -1,7 +1,9 @@
 import type * as HttpClientError from "effect/http/HttpClientError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { HttpApiClient, HttpApiError } from "effect/http-api";
-import { Effect, Exit } from "effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import { HttpApiClient, type HttpApiError } from "effect/http-api";
+import { Context, Effect, Layer, Match, Option, type Schema } from "effect";
 import * as S from "effect/Schema";
 import { PgGardenApi } from "../server/apiSchema";
 import {
@@ -13,8 +15,10 @@ import {
   ServerError,
   Unauthorized,
 } from "../server/errors";
+import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
-type HttpApiClientFailure =
+/** Everything a call through the generated client can fail with. */
+type ClientFailure =
   | ApiError
   | Conflict
   | Forbidden
@@ -22,141 +26,193 @@ type HttpApiClientFailure =
   | HttpClientError.HttpClientError
   | Locked
   | NotFound
-  | S.SchemaError
+  | Schema.SchemaError
   | ServerError
   | Unauthorized;
 
-const client = HttpApiClient.make(PgGardenApi, {
-  baseUrl: window.location.origin,
-}).pipe(Effect.provide(FetchHttpClient.layer));
+/**
+ * One failed server call, in the shape the UI needs: a status to branch on and
+ * a message to show. `status` is 0 when the request never reached the server.
+ */
+export class ApiRequestError extends S.TaggedError<
+  ApiRequestError,
+  { readonly brand: unique symbol }
+>()("ApiRequestError", {
+  status: S.Int,
+  message: S.String,
+}) {}
 
-const ApiErrorPayload = S.Struct({
-  status: S.optional(S.Finite),
-  body: S.optional(S.Unknown),
-  response: S.optional(
-    S.Struct({
-      status: S.optional(S.Finite),
-      body: S.optional(S.Unknown),
-    }),
+const toApiRequestError = Match.type<ClientFailure>().pipe(
+  Match.tag("ApiError", (error) => new ApiRequestError({ status: 400, message: error.error })),
+  Match.tag("Unauthorized", (error) => new ApiRequestError({ status: 401, message: error.error })),
+  Match.tag("Forbidden", (error) => new ApiRequestError({ status: 403, message: error.error })),
+  Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.error })),
+  Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.error })),
+  Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.error })),
+  Match.tag("ServerError", (error) => new ApiRequestError({ status: 500, message: error.error })),
+  Match.tag(
+    "HttpClientError",
+    (error) => new ApiRequestError({ status: 0, message: error.message }),
   ),
-});
+  // The server answered with something the contract does not describe, so the
+  // two sides disagree. Nothing the visitor did can fix it.
+  Match.tag(
+    "HttpApiSchemaError",
+    (error) =>
+      new ApiRequestError({
+        status: 500,
+        message: `The server's ${error.kind.toLowerCase()} did not match the contract: ${error.cause.message}`,
+      }),
+  ),
+  Match.tag("SchemaError", (error) => new ApiRequestError({ status: 500, message: error.message })),
+  Match.exhaustive,
+);
 
-const readStatus = (error: HttpApiClientFailure): number => {
-  const decoded = S.decodeUnknownExit(ApiErrorPayload)(error);
-  return Exit.isSuccess(decoded)
-    ? (decoded.value.status ?? decoded.value.response?.status ?? 500)
-    : 500;
-};
+/**
+ * Observability context for the call in flight. Whoever starts a call provides
+ * it; the client turns it into request headers the server reads back. None
+ * means there is no UI action to attribute the call to.
+ */
+export const CurrentRequestTelemetry = Context.Reference<Option.Option<RequestTelemetry>>(
+  "postgres-garden/CurrentRequestTelemetry",
+  { defaultValue: Option.none },
+);
 
-const readBody = (error: HttpApiClientFailure): unknown => {
-  const decoded = S.decodeUnknownExit(ApiErrorPayload)(error);
-  return Exit.isSuccess(decoded)
-    ? (decoded.value.body ?? decoded.value.response?.body ?? error)
-    : error;
-};
-
-export class ApiRequestError extends S.TaggedError<ApiRequestError>()("ApiRequestError", {
-  status: S.Finite,
-  value: S.Unknown,
-}) {
-  static from(error: HttpApiClientFailure): ApiRequestError {
-    return new ApiRequestError({ status: readStatus(error), value: readBody(error) });
-  }
-}
-
-const request = <A, E extends HttpApiClientFailure>(
-  spanName: string,
-  run: (httpApiClient: Effect.Success<typeof client>) => Effect.Effect<A, E, never>,
-): Effect.Effect<A, ApiRequestError, never> =>
-  client.pipe(
-    Effect.flatMap(run),
-    Effect.withSpan(spanName),
-    Effect.mapError((error) => ApiRequestError.from(error)),
+const withTelemetryHeaders = (httpClient: HttpClient.HttpClient) =>
+  HttpClient.mapRequestEffect(httpClient, (request) =>
+    Effect.map(
+      CurrentRequestTelemetry,
+      Option.match({
+        onNone: () => request,
+        onSome: (telemetry) => HttpClientRequest.setHeaders(request, telemetryHeaders(telemetry)),
+      }),
+    ),
   );
 
-export const httpApiMe = request("httpapi.me", (api) => api.apiUsers.me({}));
+/**
+ * Builds the typed client for `PgGardenApi` over one transport.
+ *
+ * The workbench talks to the server with `fetch`; a sandboxed webview cannot,
+ * so it passes a transport that relays each request through the extension host
+ * (`features/webview/relayTransport.ts`). Both sides get the same client, so
+ * both decode the server's answer with the contract instead of trusting a
+ * shape they wrote by hand.
+ */
+export const makePgGardenClient = (options: {
+  readonly baseUrl: string;
+  readonly transport: Layer.Layer<HttpClient.HttpClient>;
+}) =>
+  HttpApiClient.make(PgGardenApi, {
+    baseUrl: options.baseUrl,
+    transformClient: withTelemetryHeaders,
+  }).pipe(Effect.provide(options.transport));
 
-export const httpApiLogout = request("httpapi.logout", (api) => api.auth.logout({}));
+export type PgGardenClient = Effect.Success<ReturnType<typeof makePgGardenClient>>;
+
+/**
+ * Makes `run`'s call as one named UI action: attributes it for tracing and
+ * flattens every way the call can fail into `ApiRequestError`.
+ */
+export const makeApiCaller =
+  (options: { readonly client: Effect.Effect<PgGardenClient>; readonly feature: string }) =>
+  <A, E extends ClientFailure>(
+    action: string,
+    run: (api: PgGardenClient) => Effect.Effect<A, E>,
+  ): Effect.Effect<A, ApiRequestError> =>
+    Effect.gen(function* () {
+      const telemetry = yield* makeRequestTelemetry({ action, feature: options.feature });
+      const api = yield* options.client;
+      return yield* run(api).pipe(
+        Effect.provideService(CurrentRequestTelemetry, Option.some(telemetry)),
+      );
+    }).pipe(Effect.withSpan(`api ${action}`), Effect.mapError(toApiRequestError));
+
+// Suspended so that importing this module reads no browser global: the
+// workbench's own origin is needed only when a call is actually made.
+const client = Effect.suspend(() =>
+  makePgGardenClient({
+    baseUrl: window.location.origin,
+    transport: Layer.mergeAll(
+      FetchHttpClient.layer,
+      // The workbench is served from this origin, so the session cookie
+      // travels with every call.
+      Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
+    ),
+  }),
+);
+
+const call = makeApiCaller({ client, feature: "workbench" });
+
+// --- Session ---------------------------------------------------------------
+
+export const httpApiMe = call("me", (api) => api.apiUsers.me({}));
+
+export const httpApiLogout = call("logout", (api) => api.auth.logout({}));
+
+// --- Playgrounds -----------------------------------------------------------
 
 export const httpApiListPlaygrounds = (options?: {
-  sort?: "created_at" | "stars";
-  offset?: number;
-  limit?: number;
+  readonly sort?: "created_at" | "stars";
+  readonly offset?: number;
+  readonly limit?: number;
 }) =>
-  request("httpapi.playgrounds.list", (api) =>
+  call("playgrounds.list", (api) =>
     api.apiPlaygrounds.playgrounds({
-      query: {
-        sort: options?.sort,
-        offset: options?.offset,
-        limit: options?.limit,
-      },
+      query: { sort: options?.sort, offset: options?.offset, limit: options?.limit },
     }),
   );
 
 export const httpApiGetPlayground = (hash: string) =>
-  request("httpapi.playgrounds.get", (api) =>
-    api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
-  );
+  call("playgrounds.get", (api) => api.apiPlaygrounds.playgroundByHash({ params: { hash } }));
 
 export const httpApiCreatePlayground = (payload: {
-  name?: string | null;
-  message: string;
-  description?: string | null;
-  files: Array<{ path: string; content: string }>;
-  activeFile?: string | null;
-}) =>
-  request("httpapi.playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
+  readonly name?: string | null;
+  readonly message: string;
+  readonly description?: string | null;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
+  readonly activeFile?: string | null;
+}) => call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
 export const httpApiUpdatePlayground = (
   hash: string,
   payload: {
-    name?: string | null;
-    description?: string | null;
-    privacy?: "private" | "secret" | "public";
+    readonly name?: string | null;
+    readonly description?: string | null;
+    readonly privacy?: "private" | "secret" | "public";
   },
 ) =>
-  request("httpapi.playgrounds.update", (api) =>
+  call("playgrounds.update", (api) =>
     api.apiPlaygrounds.updatePlayground({ params: { hash }, payload }),
   );
 
 export const httpApiDeletePlayground = (hash: string) =>
-  request("httpapi.playgrounds.delete", (api) =>
-    api.apiPlaygrounds.deletePlayground({ params: { hash } }),
-  );
+  call("playgrounds.delete", (api) => api.apiPlaygrounds.deletePlayground({ params: { hash } }));
 
 export const httpApiTogglePlaygroundStar = (hash: string) =>
-  request("httpapi.playgrounds.star", (api) =>
-    api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }),
-  );
+  call("playgrounds.star", (api) => api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }));
 
-export const httpApiForkPlayground = (hash: string, payload: { name?: string | null }) =>
-  request("httpapi.playgrounds.fork", (api) =>
+export const httpApiForkPlayground = (hash: string, payload: { readonly name?: string | null }) =>
+  call("playgrounds.fork", (api) =>
     api.apiPlaygrounds.forkPlayground({ params: { hash }, payload }),
   );
+
+// --- Commits ---------------------------------------------------------------
 
 export const httpApiCreatePlaygroundCommit = (
   hash: string,
   payload: {
-    message: string;
-    files: Array<{ path: string; content: string }>;
-    activeFile?: string | null;
+    readonly message: string;
+    readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
+    readonly activeFile?: string | null;
   },
 ) =>
-  request("httpapi.playgrounds.commits.create", (api) =>
-    api.apiPlaygrounds.createCommit({ params: { hash }, payload }),
-  );
+  call("commits.create", (api) => api.apiPlaygrounds.createCommit({ params: { hash }, payload }));
 
 export const httpApiListPlaygroundCommits = (hash: string) =>
-  request("httpapi.playgrounds.commits.list", (api) =>
-    api.apiPlaygrounds.listCommits({ params: { hash } }),
-  );
+  call("commits.list", (api) => api.apiPlaygrounds.listCommits({ params: { hash } }));
 
 export const httpApiGetPlaygroundCommit = (hash: string, commit_id: string) =>
-  request("httpapi.playgrounds.commits.get", (api) =>
-    api.apiPlaygrounds.getCommit({ params: { hash, commit_id } }),
-  );
+  call("commits.get", (api) => api.apiPlaygrounds.getCommit({ params: { hash, commit_id } }));
 
 export const httpApiGetPlaygroundCommitDiff = (hash: string, commit_id: string) =>
-  request("httpapi.playgrounds.commits.diff", (api) =>
-    api.apiPlaygrounds.getCommitDiff({ params: { hash, commit_id } }),
-  );
+  call("commits.diff", (api) => api.apiPlaygrounds.getCommitDiff({ params: { hash, commit_id } }));

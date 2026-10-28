@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
-import { apiRequest } from "../api";
+import { apiCall } from "../api";
+import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
 
 export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }) => {
@@ -7,10 +8,9 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
   const [error, setError] = createSignal<string | null>(null);
   const [sent, setSent] = createSignal(false);
 
-  function handleSubmit(e: Event) {
+  function handleSubmit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
+    const data = new FormData(e.currentTarget);
     const getText = (name: string) => {
       const value = data.get(name);
       return value instanceof File ? "" : (value ?? "");
@@ -19,18 +19,16 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
     setSubmitting(true);
 
     void runRequest(
-      apiRequest(
-        "/api/forgotPassword",
-        "POST",
-        { email: getText("email") },
-        { action: "auth.forgot_password.submit" },
+      apiCall("auth.forgot_password.submit", (api) =>
+        api.apiUsers.forgotPassword({ payload: { email: getText("email") } }),
+      ).pipe(
+        Effect.match({
+          onFailure: (error) => setError(error.message),
+          onSuccess: () => setSent(true),
+        }),
+        Effect.ensuring(Effect.sync(() => setSubmitting(false))),
       ),
-    )
-      .then(
-        () => setSent(true),
-        (reason: Error) => setError(reason.message),
-      )
-      .finally(() => setSubmitting(false));
+    );
   }
 
   return (

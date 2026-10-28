@@ -15,8 +15,6 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
-        condition: service_healthy
       valkey:
         condition: service_healthy
     networks:
@@ -52,30 +50,8 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
-        condition: service_healthy
       valkey:
         condition: service_healthy
-
-  db:
-    image: postgres:17-alpine
-    <<: [*restart, *internal]
-    environment:
-      - POSTGRES_USER=${ROOT_DATABASE_USER}
-      - POSTGRES_PASSWORD=${ROOT_DATABASE_PASSWORD}
-    command:
-      - postgres
-      - -c
-      - shared_preload_libraries=pg_stat_statements
-      - -c
-      - pg_stat_statements.track=all
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${ROOT_DATABASE_USER}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   valkey:
     image: valkey/valkey:8-alpine
@@ -90,7 +66,6 @@ services:
       retries: 5
 
 volumes:
-  pgdata:
   valkeydata:
 
 networks:

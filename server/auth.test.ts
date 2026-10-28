@@ -338,6 +338,28 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
         );
       }),
     );
+
+    // `app_private.login` locks an account after 3 failures in 5 minutes. The
+    // failures only count if each rejected login commits its counter write.
+    it.effect("locks the account after repeated wrong passwords", () =>
+      Effect.flatMap(randomSuffix, (suffix) => {
+        const username = `test_lockout_${suffix}`;
+        const login = (password: string) =>
+          http("POST", "/login", { body: { id: username, password } });
+        return withCleanup(
+          username,
+          Effect.gen(function* () {
+            yield* register(username);
+
+            const wrong = yield* Effect.forEach([1, 2, 3], () => login("WrongPassword999!"));
+            const correct = yield* login("TestPassword123!");
+
+            expect(wrong.map((res) => res.status)).toEqual([401, 401, 401]);
+            expect(correct.status).toBe(423);
+          }),
+        );
+      }),
+    );
   });
 
   // -- Logout -------------------------------------------------------------

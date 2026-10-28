@@ -3,19 +3,19 @@ import { sql } from "kysely";
 import { env } from "../assertEnv.js";
 import { asRoot } from "../db.js";
 
-class WebhookNotConfiguredError extends S.TaggedError<WebhookNotConfiguredError>()(
-  "WebhookNotConfigured",
-  {
-    message: S.String,
-  },
-) {}
+class WebhookNotConfiguredError extends S.TaggedError<
+  WebhookNotConfiguredError,
+  { readonly brand: unique symbol }
+>()("WebhookNotConfigured", {
+  message: S.String,
+}) {}
 
-class WebhookVerificationError extends S.TaggedError<WebhookVerificationError>()(
-  "WebhookVerificationError",
-  {
-    message: S.String,
-  },
-) {}
+class WebhookVerificationError extends S.TaggedError<
+  WebhookVerificationError,
+  { readonly brand: unique symbol }
+>()("WebhookVerificationError", {
+  message: S.String,
+}) {}
 
 export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
   make: Effect.sync(() => {

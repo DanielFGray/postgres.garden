@@ -17,7 +17,7 @@ A browser-based PostgreSQL development environment built on a full VSCode workbe
 - **Database**: PostgreSQL 17, managed via [Kysely](https://kysely.dev) query builder + [Graphile Migrate](https://github.com/graphile/migrate)
 - **Cache**: [Valkey](https://valkey.io) (Redis-compatible)
 - **Background jobs**: [Graphile Worker](https://github.com/graphile/worker)
-- **Notebook renderer**: Preact (Shadow DOM, Vite lib mode)
+- **Notebook renderer**: Solid, plus the vendored Vue [pev2](https://github.com/dalibo/pev2) plan visualizer (Shadow DOM, Vite lib mode)
 
 ## Prerequisites
 
@@ -79,12 +79,11 @@ server/             Bun + Effect HTTP backend
   apiSchema.ts      API routes (Effect HTTP API + Schema validation)
   db.ts             Kysely connections + RLS auth context
 src/
-  entry.ts          Client entry point
-  loader.ts         Boot sequence
+  loader.tsx        Client entry point and boot sequence
   setup.*.ts        VSCode service overrides
   features/         Feature modules (auth, notebooks, playground, etc.)
     notebook/
-      renderer/     Preact notebook renderer (Shadow DOM)
+      renderer/     Solid notebook renderer (Shadow DOM)
 worker/             Graphile Worker background jobs
 migrations/         Graphile Migrate SQL migrations
 scripts/            Setup and build scripts

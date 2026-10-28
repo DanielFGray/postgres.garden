@@ -6,7 +6,11 @@ import * as S from "effect/Schema";
  * (see `scripts/generateEnvFile.ts`).
  */
 export const envSchema = S.Struct({
-  NODE_ENV: S.Union([S.Literals(["development"]), S.Literals(["production"]), S.Literals(["test"])]),
+  NODE_ENV: S.Union([
+    S.Literals(["development"]),
+    S.Literals(["production"]),
+    S.Literals(["test"]),
+  ]),
   PORT: S.String,
   VITE_ROOT_URL: S.String,
   /** Owner login. The server's root pool connects with it. */

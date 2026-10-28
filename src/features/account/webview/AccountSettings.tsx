@@ -6,9 +6,8 @@ import { SecuritySection } from "./sections/SecuritySection";
 import { LinkedAccountsSection } from "./sections/LinkedAccountsSection";
 import { DangerZoneSection, initializeDangerZone } from "./sections/DangerZoneSection";
 import * as S from "effect/Schema";
-import { Match as EffectMatch } from "effect";
-
-type SectionId = "profile" | "emails" | "security" | "linked-accounts" | "danger-zone";
+import { Option } from "effect";
+import { InitState, type SectionId } from "../types";
 
 interface NavSection {
   id: SectionId;
@@ -24,31 +23,13 @@ const sections: NavSection[] = [
   { id: "danger-zone", label: "Danger Zone", icon: "codicon-warning" },
 ];
 
-const SectionIdSchema = S.Literals([
-  "profile",
-  "emails",
-  "security",
-  "linked-accounts",
-  "danger-zone",
-]);
-const InitStateMessage = S.Struct({
-  type: S.Literal("init-state"),
-  section: S.optional(SectionIdSchema),
-  deleteToken: S.optional(S.String),
-});
-
 export const AccountSettings = () => {
   const [activeSection, setActiveSection] = createSignal<SectionId>("profile");
 
   const handleMessage = (event: MessageEvent) => {
-    const msg = EffectMatch.value(S.decodeUnknownOption(InitStateMessage)(event.data)).pipe(
-      EffectMatch.tags({ None: () => undefined, Some: ({ value }) => value }),
-      EffectMatch.exhaustive,
-    );
-    if (msg === undefined) return;
-    if (msg.section) setActiveSection(msg.section);
-    initializeDangerZone({
-      deleteToken: msg.deleteToken,
+    Option.map(S.decodeUnknownOption(InitState)(event.data), (message) => {
+      Option.map(message.section, setActiveSection);
+      initializeDangerZone(message.deleteToken);
     });
   };
 

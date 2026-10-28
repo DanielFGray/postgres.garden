@@ -72,14 +72,17 @@ const sponsorQuery = `
   }
 `;
 
-class OAuthNotConfiguredError extends S.TaggedError<OAuthNotConfiguredError>()(
-  "OAuthNotConfigured",
-  {
-    message: S.String,
-  },
-) {}
+class OAuthNotConfiguredError extends S.TaggedError<
+  OAuthNotConfiguredError,
+  { readonly brand: unique symbol }
+>()("OAuthNotConfigured", {
+  message: S.String,
+}) {}
 
-class OAuthCallbackError extends S.TaggedError<OAuthCallbackError>()("OAuthCallbackError", {
+class OAuthCallbackError extends S.TaggedError<
+  OAuthCallbackError,
+  { readonly brand: unique symbol }
+>()("OAuthCallbackError", {
   message: S.String,
   isBadCode: S.Boolean,
 }) {}
@@ -112,7 +115,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
   make: Effect.sync(() => {
     const resolveRole = (login: string): Effect.Effect<Option.Option<UserRole>, never> => {
       if (!env.GITHUB_PAT) {
-        return Effect.succeed(Option.none());
+        return Effect.succeedNone;
       }
 
       return Effect.gen(function* () {

@@ -370,7 +370,9 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
     })
     .handleRaw("authGithubStart", ({ request }) =>
       Effect.gen(function* () {
-        const result = yield* OAuthService.use((service) => service.createAuthorizationUrl(["user:email"]));
+        const result = yield* OAuthService.use((service) =>
+          service.createAuthorizationUrl(["user:email"]),
+        );
         const headers: Record<string, string> = {};
         headers["Set-Cookie"] = makeOAuthCookie(STATE_COOKIE, result.state);
         return HttpServerResponse.empty({
@@ -389,16 +391,15 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
           }
           return handleDbError(e, "OAuth error").pipe(
             Effect.flatMap(({ code, error }) =>
-              (
-                code >= 400
-                  ? reportHttpError({
-                      route: "authGithubStart",
-                      status: code,
-                      kind: "oauth",
-                      error: e,
-                      context: requestObservabilityContext(request.headers),
-                    })
-                  : Effect.void
+              (code >= 400
+                ? reportHttpError({
+                    route: "authGithubStart",
+                    status: code,
+                    kind: "oauth",
+                    error: e,
+                    context: requestObservabilityContext(request.headers),
+                  })
+                : Effect.void
               ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code }))),
             ),
           );
@@ -467,7 +468,9 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
               result: "error",
             }).pipe(
               Effect.andThen(
-                Effect.succeed(HttpServerResponse.jsonUnsafe({ error: e.message }, { status: 400 })),
+                Effect.succeed(
+                  HttpServerResponse.jsonUnsafe({ error: e.message }, { status: 400 }),
+                ),
               ),
             );
           }
@@ -486,16 +489,15 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
           }).pipe(
             Effect.andThen(handleDbError(e, "OAuth error")),
             Effect.flatMap(({ code, error }) =>
-              (
-                code >= 400
-                  ? reportHttpError({
-                      route: "authGithubCallback",
-                      status: code,
-                      kind: "oauth",
-                      error: e,
-                      context: requestObservabilityContext(request.headers),
-                    })
-                  : Effect.void
+              (code >= 400
+                ? reportHttpError({
+                    route: "authGithubCallback",
+                    status: code,
+                    kind: "oauth",
+                    error: e,
+                    context: requestObservabilityContext(request.headers),
+                  })
+                : Effect.void
               ).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code }))),
             ),
           );
@@ -640,7 +642,9 @@ const usersLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
         yield* requireSession("apiUsers.changePassword", request.headers);
         return yield* withDbError(
           "Failed to change password",
-          UserService.use((service) => service.changePassword(payload.oldPassword, payload.newPassword)),
+          UserService.use((service) =>
+            service.changePassword(payload.oldPassword, payload.newPassword),
+          ),
           request.headers,
         );
       }),
@@ -727,15 +731,7 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
         yield* requireSession("apiPlaygrounds.forkPlayground", request.headers);
         return yield* withDbError(
           "Failed to fork playground",
-          PlaygroundService.use((service) => service.fork(params.hash, payload.name)).pipe(
-            Effect.map((result) => ({
-              commit_id: result.commit_id,
-              playground_id: result.playground_id,
-              parent_id: result.parent_id,
-              message: result.message,
-              created_at: result.created_at,
-            })),
-          ),
+          PlaygroundService.use((service) => service.fork(params.hash, payload.name)),
           request.headers,
         );
       }),
@@ -774,7 +770,9 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
         const { user } = yield* requireSession("apiPlaygrounds.createCommit", request.headers);
         return yield* withDbError(
           "Failed to create commit",
-          PlaygroundService.use((service) => service.createCommit(user.id, params.hash, payload)).pipe(
+          PlaygroundService.use((service) =>
+            service.createCommit(user.id, params.hash, payload),
+          ).pipe(
             Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new NotFound({ error: "Playground not found" })),
             ),
@@ -809,7 +807,9 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
     getCommitDiff: ({ params, request }) =>
       withDbError(
         "Failed to generate diff",
-        PlaygroundService.use((service) => service.getCommitDiff(params.hash, params.commit_id)).pipe(
+        PlaygroundService.use((service) =>
+          service.getCommitDiff(params.hash, params.commit_id),
+        ).pipe(
           Effect.catchTag("NoSuchElementError", () =>
             Effect.fail(new NotFound({ error: "Commit not found" })),
           ),
@@ -886,7 +886,10 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
                 context: requestObservabilityContext(request.headers),
               }).pipe(
                 Effect.as(
-                  HttpServerResponse.jsonUnsafe({ error: "Webhook not configured" }, { status: 503 }),
+                  HttpServerResponse.jsonUnsafe(
+                    { error: "Webhook not configured" },
+                    { status: 503 },
+                  ),
                 ),
               ),
             ),

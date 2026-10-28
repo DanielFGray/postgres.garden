@@ -21,9 +21,12 @@ const publicUrl = env.VITE_ROOT_URL.replace(/\/$/, "");
 const resolveRedirectLocation = (target: string) =>
   target.startsWith("http") ? target : new URL(target, `${publicUrl}/`).toString();
 
-export class ValkeyError extends S.TaggedError<ValkeyError>()("ValkeyError", {
-  cause: S.Unknown,
-}) {}
+export class ValkeyError extends S.TaggedError<ValkeyError, { readonly brand: unique symbol }>()(
+  "ValkeyError",
+  {
+    cause: S.Unknown,
+  },
+) {}
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),

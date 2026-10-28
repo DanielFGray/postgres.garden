@@ -35,6 +35,7 @@ import {
   VSCODE_OPEN,
   VSCODE_DIFF,
 } from "./constants";
+import { LoadedWorkspace } from "./loadedWorkspace";
 
 // Commit history types
 interface CommitHistoryItem {
@@ -53,12 +54,18 @@ interface ForkHistoryItem {
   isCurrent: boolean;
 }
 
-class ServerSyncError extends Schema.TaggedError<ServerSyncError>()("ServerSyncError", {
+class ServerSyncError extends Schema.TaggedError<
+  ServerSyncError,
+  { readonly brand: unique symbol }
+>()("ServerSyncError", {
   message: Schema.String,
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
-class SignInRequired extends Schema.TaggedError<SignInRequired>()("SignInRequired", {}) {}
+class SignInRequired extends Schema.TaggedError<
+  SignInRequired,
+  { readonly brand: unique symbol }
+>()("SignInRequired", {}) {}
 
 const stringify = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeStringArgument = Schema.decodeUnknownOption(Schema.String);
@@ -85,6 +92,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const { runFork } = yield* Workbench;
+    const loadedWorkspace = yield* LoadedWorkspace;
     const runtime = yield* Effect.context<never>();
     const vscodeApi = vscodeService.api;
 
@@ -320,7 +328,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                           activeFile,
                         })
                   ).pipe(
-                    Effect.map(Option.some),
+                    Effect.asSome,
                     Effect.catch((error) =>
                       Effect.gen(function* () {
                         yield* Effect.logError("[ServerSync] Commit failed:", error);
@@ -389,6 +397,10 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   const playgroundHashChanged =
                     currentPlaygroundHash !== commitResult.playground_hash;
                   const wasForked = "forked" in commitResult && commitResult.forked === true;
+
+                  // A commit that moves the workspace to another playground (new or
+                  // forked) changes which playground is loaded, though no file changes.
+                  if (playgroundHashChanged) yield* loadedWorkspace.replace(Effect.void);
 
                   // Update current commit and playground tracking
                   currentCommitId = commitResult.commit_id;
@@ -1062,40 +1074,47 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
 
           const commitData = commitOrNull;
 
-          // Delete all existing files first
-          const allFiles = yield* Effect.tryPromise({
-            try: () => vscodeApi.workspace.findFiles("**/*", "**/node_modules/**"),
-            catch: toServerSyncError,
-          });
-
-          yield* Effect.forEach(allFiles, (file) =>
-            Effect.tryPromise({
-              try: () => vscodeApi.workspace.fs.delete(file),
-              catch: toServerSyncError,
-            }).pipe(
-              Effect.catch((err) => Effect.logWarning(`Failed to delete ${file.path}:`, err)),
-            ),
-          );
-
-          // Restore files from commit
-          yield* Effect.forEach(commitData.files, (file) =>
+          yield* loadedWorkspace.replace(
             Effect.gen(function* () {
-              const uri = vscode.Uri.file(file.path);
-              const content = new TextEncoder().encode(file.content);
-              const dirUri = vscode.Uri.file(file.path.substring(0, file.path.lastIndexOf("/")));
-
-              yield* Effect.tryPromise({
-                try: () => vscodeApi.workspace.fs.createDirectory(dirUri),
-                catch: toServerSyncError,
-              }).pipe(Effect.ignore);
-
-              yield* Effect.tryPromise({
-                try: () => vscodeApi.workspace.fs.writeFile(uri, content),
+              const allFiles = yield* Effect.tryPromise({
+                try: () => vscodeApi.workspace.findFiles("**/*", "**/node_modules/**"),
                 catch: toServerSyncError,
               });
-            }).pipe(
-              Effect.catch((err) => Effect.logWarning(`Failed to restore file ${file.path}:`, err)),
-            ),
+
+              yield* Effect.forEach(allFiles, (file) =>
+                Effect.tryPromise({
+                  try: () => vscodeApi.workspace.fs.delete(file),
+                  catch: toServerSyncError,
+                }).pipe(
+                  Effect.catch((err) => Effect.logWarning(`Failed to delete ${file.path}:`, err)),
+                ),
+              );
+
+              // Restore files from commit
+              yield* Effect.forEach(commitData.files, (file) =>
+                Effect.gen(function* () {
+                  const uri = vscode.Uri.file(file.path);
+                  const content = new TextEncoder().encode(file.content);
+                  const dirUri = vscode.Uri.file(
+                    file.path.substring(0, file.path.lastIndexOf("/")),
+                  );
+
+                  yield* Effect.tryPromise({
+                    try: () => vscodeApi.workspace.fs.createDirectory(dirUri),
+                    catch: toServerSyncError,
+                  }).pipe(Effect.ignore);
+
+                  yield* Effect.tryPromise({
+                    try: () => vscodeApi.workspace.fs.writeFile(uri, content),
+                    catch: toServerSyncError,
+                  });
+                }).pipe(
+                  Effect.catch((err) =>
+                    Effect.logWarning(`Failed to restore file ${file.path}:`, err),
+                  ),
+                ),
+              );
+            }),
           );
 
           void vscodeApi.window.showInformationMessage(

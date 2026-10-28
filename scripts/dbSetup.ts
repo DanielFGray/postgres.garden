@@ -3,11 +3,30 @@
  * Legacy db:init entrypoint. Database create/drop/roles/extensions are owned by
  * `ops dev db`; this only resets the cartridge database on the managed cluster.
  */
-import { spawnSync } from "node:child_process";
+import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { Effect, Runtime, Schema } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-const result = spawnSync("ops", ["dev", "db", "reset", "postgres_garden"], {
-  stdio: "inherit",
-  env: process.env,
+/** Carries the child's exit status through to this process's exit code. */
+class ResetFailed extends Schema.TaggedError<ResetFailed, { readonly brand: unique symbol }>()(
+  "ResetFailed",
+  { code: Schema.Int },
+) {
+  get [Runtime.errorExitCode]() {
+    return this.code;
+  }
+}
+
+const reset = Effect.gen(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const code = yield* spawner.exitCode(
+    ChildProcess.make("ops", ["dev", "db", "reset", "postgres_garden"], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }),
+  );
+  if (code !== 0) return yield* new ResetFailed({ code });
 });
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+
+NodeRuntime.runMain(reset.pipe(Effect.provide(NodeServices.layer)));

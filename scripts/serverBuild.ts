@@ -2,9 +2,12 @@ import * as esbuild from "esbuild";
 import { NodeRuntime } from "@effect/platform-node";
 import { Effect, Schema } from "effect";
 
-class BuildError extends Schema.TaggedError<BuildError>()("BuildError", {
-  message: Schema.String,
-}) {}
+class BuildError extends Schema.TaggedError<BuildError, { readonly brand: unique symbol }>()(
+  "BuildError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 // esbuild inlines process.env.NODE_ENV at build time, so a production build must define it.
 const isProductionBuild = import.meta.env?.NODE_ENV === "production";

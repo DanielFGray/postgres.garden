@@ -4,28 +4,11 @@
  */
 
 import * as vscode from "vscode";
-import { Effect } from "effect";
+import { Effect, Match } from "effect";
+import * as S from "effect/Schema";
 import { navigateTo } from "../../../shared/navigation";
-import type { RequestTelemetryContext } from "../../webview/requestTelemetry";
-import { buildWebviewHtml, handleWebviewApiRequest } from "../../webview/hostBridge";
-import type { WebviewValue } from "../../webview/apiBridge";
-
-interface RequestMessage {
-  type: "request";
-  id: string;
-  endpoint: string;
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: WebviewValue;
-  telemetry?: RequestTelemetryContext;
-}
-
-interface OpenPlaygroundCommand {
-  type: "command";
-  command: "openPlayground";
-  data: { readonly hash: string };
-}
-
-type WebviewMessage = RequestMessage | OpenPlaygroundCommand;
+import { buildWebviewHtml, handleRelayRequest } from "../../webview/hostBridge";
+import { PlaygroundListMessage } from "../types";
 
 export class PlaygroundBrowserPanel {
   public static currentPanel: PlaygroundBrowserPanel | undefined;
@@ -71,7 +54,7 @@ export class PlaygroundBrowserPanel {
 
     // Handle messages from webview
     this._panel.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => {
+      (message) => {
         void Effect.runPromise(this._handleMessage(message));
       },
       null,
@@ -93,31 +76,27 @@ export class PlaygroundBrowserPanel {
     }
   }
 
-  private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
-    return Effect.gen({ self: this }, function* () {
-      switch (message.type) {
-        case "request":
-          yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);
-          break;
-
-        case "command":
-          yield* this._handleCommand(message);
-          break;
-      }
-    });
-  }
-
-  private _handleCommand(command: OpenPlaygroundCommand): Effect.Effect<void> {
-    return Effect.gen(function* () {
-      switch (command.command) {
-        case "openPlayground": {
-          const url = `/playgrounds/${command.data.hash}`;
-          yield* Effect.log("[PlaygroundBrowser] Navigating to playground:", url);
-          navigateTo(url);
-          break;
-        }
-      }
-    });
+  private _handleMessage(raw: unknown) {
+    return S.decodeUnknownEffect(PlaygroundListMessage)(raw).pipe(
+      Effect.flatMap((message) =>
+        Match.value(message).pipe(
+          Match.discriminator("type")("api-relay-request", (request) =>
+            handleRelayRequest((reply) => {
+              void this._panel.webview.postMessage(reply);
+            }, request),
+          ),
+          Match.discriminator("type")("open-playground", ({ hash }) =>
+            Effect.gen(function* () {
+              const url = `/playgrounds/${hash}`;
+              yield* Effect.log("[PlaygroundBrowser] Navigating to playground:", url);
+              navigateTo(url);
+            }),
+          ),
+          Match.exhaustive,
+        ),
+      ),
+      Effect.catch((error) => Effect.logError("[PlaygroundBrowser] Message failed", error)),
+    );
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {

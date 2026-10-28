@@ -1,20 +1,13 @@
 import { createSignal, refresh, For, Show } from "solid-js";
-import { apiRequest } from "../api";
+import type { JSX } from "@solidjs/web";
+import type * as Effect from "effect/Effect";
+import type { ApiRequestError } from "../../../../httpapi-client";
+import { apiCall } from "../api";
+import { formText } from "../format";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
-type UserEmail = {
-  id: string;
-  email: string;
-  is_verified: boolean;
-  is_primary: boolean;
-  created_at: string;
-};
-
-const loadEmails = () =>
-  apiRequest<UserEmail[]>("/api/me/emails", "GET", undefined, {
-    action: "account.emails.load",
-  });
+const loadEmails = () => apiCall("account.emails.load", (api) => api.apiUsers.meEmails({}));
 
 const testId = (email: string) =>
   `email-settings-item-${email
@@ -28,9 +21,9 @@ export const EmailsSection = () => {
   const [actionLoading, setActionLoading] = createSignal<string | null>(null);
   const [mutationError, setMutationError] = createSignal<string | null>(null);
 
-  const runAction = (
+  const runAction = <A,>(
     emailId: string,
-    request: ReturnType<typeof apiRequest>,
+    request: Effect.Effect<A, ApiRequestError>,
     refreshAfter = false,
   ) => {
     setActionLoading(emailId);
@@ -46,11 +39,8 @@ export const EmailsSection = () => {
   function handleMakePrimary(emailId: string) {
     runAction(
       emailId,
-      apiRequest(
-        "/api/makeEmailPrimary",
-        "POST",
-        { emailId },
-        { action: "account.emails.make_primary" },
+      apiCall("account.emails.make_primary", (api) =>
+        api.apiUsers.makeEmailPrimary({ payload: { emailId } }),
       ),
       true,
     );
@@ -59,11 +49,8 @@ export const EmailsSection = () => {
   function handleResendVerification(emailId: string) {
     runAction(
       emailId,
-      apiRequest(
-        "/api/resendEmailVerificationCode",
-        "POST",
-        { emailId },
-        { action: "account.emails.resend_verification" },
+      apiCall("account.emails.resend_verification", (api) =>
+        api.apiUsers.resendEmailVerificationCode({ payload: { emailId } }),
       ),
     );
   }
@@ -71,24 +58,23 @@ export const EmailsSection = () => {
   function handleRemove(emailId: string) {
     runAction(
       emailId,
-      apiRequest("/api/me/emails/" + emailId, "DELETE", undefined, {
-        action: "account.emails.remove",
-      }),
+      apiCall("account.emails.remove", (api) =>
+        api.apiUsers.deleteMeEmail({ params: { id: emailId } }),
+      ),
       true,
     );
   }
 
-  function handleAddEmail(e: Event) {
+  const handleAddEmail: JSX.EventHandler<HTMLFormElement, SubmitEvent> = (e) => {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
-    const emailValue = (data.get("email") as string | null)?.trim();
-    if (!emailValue) return;
+    const form = e.currentTarget;
+    const email = formText(new FormData(form), "email").trim();
+    if (!email) return;
 
     setAddingEmail(true);
     setMutationError(null);
     void runRequest(
-      apiRequest("/api/me/emails", "POST", { email: emailValue }, { action: "account.emails.add" }),
+      apiCall("account.emails.add", (api) => api.apiUsers.createMeEmail({ payload: { email } })),
     )
       .then(
         () => {
@@ -98,7 +84,7 @@ export const EmailsSection = () => {
         (error: Error) => setMutationError(error.message),
       )
       .finally(() => setAddingEmail(false));
-  }
+  };
 
   return (
     <SectionBoundary loading="Loading emails..." retry={() => refresh(emails)}>

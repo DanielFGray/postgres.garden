@@ -20,7 +20,9 @@ const { readFile } = fs;
 // @ts-expect-error json import assertions were a mistake
 const fromEmail = process.env.EMAIL_FROM || packageJson.fromEmail;
 if (!fromEmail)
-  throw new Error("Warning: no sender address configured. Please set EMAIL_FROM or \"fromEmail\" in package.json");
+  throw new Error(
+    'Warning: no sender address configured. Please set EMAIL_FROM or "fromEmail" in package.json',
+  );
 // @ts-expect-error json import assertions were a mistake
 const projectName = packageJson.projectName ?? packageJson.name;
 if (!projectName)

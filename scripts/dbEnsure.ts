@@ -4,12 +4,18 @@ import "dotenv/config";
 import { NodeRuntime } from "@effect/platform-node";
 import { Config, Duration, Effect, Schedule, Schema, pipe } from "effect";
 
-class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
-  message: Schema.String,
-  code: Schema.optional(Schema.String),
-}) {}
+class DatabaseError extends Schema.TaggedError<DatabaseError, { readonly brand: unique symbol }>()(
+  "DatabaseError",
+  {
+    message: Schema.String,
+    code: Schema.optional(Schema.String),
+  },
+) {}
 
-class ConfigurationError extends Schema.TaggedError<ConfigurationError>()("ConfigurationError", {
+class ConfigurationError extends Schema.TaggedError<
+  ConfigurationError,
+  { readonly brand: unique symbol }
+>()("ConfigurationError", {
   message: Schema.String,
 }) {}
 

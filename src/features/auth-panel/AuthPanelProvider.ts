@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import { Effect } from "effect";
-import type { AuthWebviewMessage, AuthPanelCallbacks } from "./types";
-import { buildWebviewHtml, handleWebviewApiRequest } from "../webview/hostBridge";
+import { Effect, Match } from "effect";
+import * as S from "effect/Schema";
+import { AuthWebviewMessage, type AuthPanelCallbacks } from "./types";
+import { buildWebviewHtml, handleRelayRequest } from "../webview/hostBridge";
 
 export class AuthPanelProvider {
   public static readonly viewType = "authPanel.editor";
@@ -68,36 +69,39 @@ export class AuthPanelProvider {
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(
-      (message: AuthWebviewMessage) => {
-        void Effect.runPromise(this._handleMessage(message));
-      },
+      (message) => void Effect.runPromise(this._handleMessage(message)),
       null,
       this._disposables,
     );
   }
 
-  private _handleMessage(message: AuthWebviewMessage): Effect.Effect<void> {
-    return Effect.gen({ self: this }, function* () {
-      switch (message.type) {
-        case "initialized":
-          this._sendInitView();
-          break;
-
-        case "request":
-          yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);
-          break;
-
-        case "github-signin":
-          this._handleGitHubSignIn();
-          break;
-
-        case "auth-complete":
-          this._authCompleted = true;
-          AuthPanelProvider._callbacks?.onAuth(message.username);
-          this._panel.dispose();
-          break;
-      }
-    });
+  private _handleMessage(raw: unknown) {
+    return S.decodeUnknownEffect(AuthWebviewMessage)(raw).pipe(
+      Effect.flatMap((message) =>
+        Match.value(message).pipe(
+          Match.discriminator("type")("initialized", () => Effect.sync(() => this._sendInitView())),
+          Match.discriminator("type")("api-relay-request", (request) =>
+            handleRelayRequest((response) => {
+              void this._panel.webview.postMessage(response);
+            }, request),
+          ),
+          Match.discriminator("type")("github-signin", () =>
+            Effect.sync(() => this._handleGitHubSignIn()),
+          ),
+          Match.discriminator("type")("auth-complete", ({ username }) =>
+            Effect.sync(() => {
+              this._authCompleted = true;
+              AuthPanelProvider._callbacks?.onAuth(username);
+              this._panel.dispose();
+            }),
+          ),
+          Match.exhaustive,
+        ),
+      ),
+      Effect.catchTag("SchemaError", (error) =>
+        Effect.logWarning("auth panel: dropped an undecodable webview message", error),
+      ),
+    );
   }
 
   private _sendInitView() {
@@ -157,8 +161,6 @@ export class AuthPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
-    const serverOrigin = this._extensionUri.toString().replace(/\/$/, "");
-
     return buildWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
@@ -168,9 +170,7 @@ export class AuthPanelProvider {
         "node_modules/@vscode/codicons/dist/codicon.css",
       ],
       scripts: ["src/webview-dist/auth-panel.js"],
-      connectSrc: serverOrigin,
       allowRemoteImages: true,
-      extraHeadHtml: `<meta name="pg-garden-server-origin" content="${serverOrigin}">`,
     });
   }
 }

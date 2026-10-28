@@ -1,153 +1,155 @@
-import * as Effect from "effect/Effect";
-import { DateTime } from "effect";
-import { createSignal, onCleanup, Show } from "solid-js";
-import { apiRequest, sendCommand, sendMessage } from "../api";
-import type { Playground } from "../../types";
+import { DateTime, Effect, Match, Option } from "effect";
 import * as S from "effect/Schema";
+import { createSignal, onCleanup, Show } from "solid-js";
+import { runAction } from "../api";
+import { announceInitialized, apiCall, openPlayground } from "./api";
 
-type PlaygroundResponse = Playground & {
-  stars?: string;
-  is_starred?: boolean;
-};
-
-const BridgeMessage = S.Union([
-  S.Struct({ type: S.Literal("setPlaygroundId"), data: S.Struct({ playgroundId: S.String }) }),
+/** What the extension host tells this panel to show. */
+const HostMessage = S.Union([
+  S.Struct({
+    type: S.Literal("setPlaygroundId"),
+    data: S.Struct({ playgroundId: S.String }),
+  }),
   S.Struct({ type: S.Literal("clearPlayground") }),
   S.Struct({ type: S.Literal("triggerSave") }),
 ]);
 
-const [playground, setPlayground] = createSignal<Playground | null>(null);
+const fetchPlayground = (hash: string) =>
+  apiCall("playground.panel.load", (api) =>
+    api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
+  );
+
+type PlaygroundDetail = Effect.Success<ReturnType<typeof fetchPlayground>>;
+type EditableField = "name" | "description" | "privacy";
+
+const [playground, setPlayground] = createSignal<Option.Option<PlaygroundDetail>>(Option.none());
 const [isDirty, setIsDirty] = createSignal(false);
 const [saveStatus, setSaveStatus] = createSignal({ message: "", type: "" });
-const [starInfo, setStarInfo] = createSignal<{ starred: boolean; count: number }>({
+const [starInfo, setStarInfo] = createSignal<{
+  starred: boolean;
+  count: number;
+}>({
   starred: false,
   count: 0,
 });
 
-function showSaveStatus(message: string, type: string) {
-  setSaveStatus({ message, type });
-
-  if (type === "success") {
-    Effect.runFork(
-      Effect.sleep(3000).pipe(
-        Effect.tap(() => Effect.sync(() => setSaveStatus({ message: "", type: "" }))),
-      ),
-    );
-  }
-}
-
-function doSave() {
-  if (!isDirty()) return;
-
-  const pg = playground();
-  if (!pg) return;
-  setSaveStatus({ message: "Saving...", type: "info" });
-
-  Effect.runFork(
-    apiRequest<Playground>(`/api/playgrounds/${pg.hash}`, "PATCH", {
-      name: pg.name,
-      description: pg.description,
-      privacy: pg.privacy,
-    }).pipe(
-      Effect.tap((updated) =>
-        Effect.sync(() => {
-          setPlayground(updated);
-          setIsDirty(false);
-          showSaveStatus("Saved", "success");
-        }),
-      ),
-      Effect.catch((error) =>
-        Effect.sync(() => showSaveStatus(error.message || "Save failed", "error")),
-      ),
-    ),
-  );
-}
-
-function loadPlayground(playgroundId: string) {
-  Effect.runFork(
-    apiRequest<PlaygroundResponse>(`/api/playgrounds/${playgroundId}`, "GET").pipe(
-      Effect.tap((data) =>
-        Effect.sync(() => {
-          setPlayground(data);
-          setIsDirty(false);
-          setStarInfo({ starred: data.is_starred ?? false, count: Number(data.stars ?? 0) });
-        }),
-      ),
-      Effect.catch((error) =>
-        Effect.sync(() => {
-          Effect.runFork(Effect.logError("Failed to load playground:", error));
-          showSaveStatus("Failed to load", "error");
-        }),
-      ),
-    ),
-  );
-}
-
-function handleMetadataChange(field: "name" | "description" | "privacy", value: string) {
-  const current = playground();
-  if (!current) return;
-  setPlayground({ ...current, [field]: value });
-  setIsDirty(true);
-}
-
-function handleToggleStar() {
-  if (!playground()) return;
-  const current = starInfo();
-  // Optimistic update
-  setStarInfo({
-    starred: !current.starred,
-    count: current.starred ? current.count - 1 : current.count + 1,
+const showSaveStatus = (message: string, type: string) =>
+  Effect.gen(function* () {
+    setSaveStatus({ message, type });
+    if (type === "success") {
+      yield* Effect.sleep(3000);
+      setSaveStatus({ message: "", type: "" });
+    }
   });
 
-  Effect.runFork(
-    apiRequest<{ starred: boolean }>(`/api/playgrounds/${playground()!.hash}/star`, "POST").pipe(
+/** Runs `run` on the loaded playground; does nothing when none is loaded. */
+const withPlayground = <A, E>(run: (pg: PlaygroundDetail) => Effect.Effect<A, E>) =>
+  Option.match(playground(), { onNone: () => Effect.void, onSome: run });
+
+const doSave = () =>
+  isDirty()
+    ? withPlayground((pg) =>
+        Effect.gen(function* () {
+          setSaveStatus({ message: "Saving...", type: "info" });
+          const updated = yield* apiCall("playground.panel.save", (api) =>
+            api.apiPlaygrounds.updatePlayground({
+              params: { hash: pg.hash },
+              payload: {
+                name: pg.name,
+                description: pg.description,
+                privacy: pg.privacy,
+              },
+            }),
+          );
+          // The update answers with the bare row; stars, owner and fork origin
+          // are unchanged by a metadata save, so they stay from the load.
+          setPlayground(Option.some({ ...pg, ...updated }));
+          setIsDirty(false);
+          yield* showSaveStatus("Saved", "success");
+        }).pipe(Effect.catch((error) => showSaveStatus(error.message || "Save failed", "error"))),
+      )
+    : Effect.void;
+
+const loadPlayground = (hash: string) =>
+  fetchPlayground(hash).pipe(
+    Effect.tap((data) =>
+      Effect.sync(() => {
+        setPlayground(Option.some(data));
+        setIsDirty(false);
+        setStarInfo({ starred: data.is_starred, count: Number(data.stars) });
+      }),
+    ),
+    Effect.catch((error) =>
+      Effect.logError("Failed to load playground:", error).pipe(
+        Effect.andThen(showSaveStatus("Failed to load", "error")),
+      ),
+    ),
+  );
+
+function handleMetadataChange<F extends EditableField>(field: F, value: PlaygroundDetail[F]) {
+  Option.map(playground(), (current) => {
+    setPlayground(Option.some({ ...current, [field]: value }));
+    setIsDirty(true);
+  });
+}
+
+const toggleStar = () =>
+  withPlayground((pg) => {
+    const current = starInfo();
+    // Optimistic update
+    setStarInfo({
+      starred: !current.starred,
+      count: current.starred ? current.count - 1 : current.count + 1,
+    });
+    return apiCall("playground.panel.toggle_star", (api) =>
+      api.apiPlaygrounds.togglePlaygroundStar({ params: { hash: pg.hash } }),
+    ).pipe(
       // Reconcile with server
       Effect.tap((result) =>
         Effect.sync(() => setStarInfo((info) => ({ ...info, starred: result.starred }))),
       ),
       // Revert optimistic update
       Effect.catch(() => Effect.sync(() => setStarInfo(current))),
-    ),
-  );
-}
+    );
+  });
 
-function handleFork() {
-  const pg = playground();
-  if (!pg) return;
-  Effect.runFork(
-    apiRequest<Playground>(`/api/playgrounds/${pg.hash}/fork`, "POST").pipe(
-      Effect.tap((fork) => Effect.sync(() => sendCommand("fork", { hash: fork.hash }))),
-      Effect.catch((error) => Effect.logError("Failed to fork:", error)),
+const fork = () =>
+  withPlayground((pg) =>
+    apiCall("playground.panel.fork", (api) =>
+      api.apiPlaygrounds.forkPlayground({
+        params: { hash: pg.hash },
+        payload: {},
+      }),
+    ).pipe(
+      Effect.flatMap((forked) => openPlayground(forked.playground_hash)),
+      Effect.catch((error) => showSaveStatus(error.message || "Fork failed", "error")),
     ),
   );
-}
+
+const decodePrivacy = S.decodeUnknownOption(S.Literals(["private", "secret", "public"]));
 
 export const PlaygroundEditorPanel = () => {
   const handleHostMessage = (event: MessageEvent) => {
-    const parsed = S.decodeUnknownOption(BridgeMessage)(event.data);
-    if (parsed._tag === "None") return;
-    const message = parsed.value;
-
-    switch (message.type) {
-      case "setPlaygroundId": {
-        loadPlayground(message.data.playgroundId);
-        break;
-      }
-      case "clearPlayground":
-        setPlayground(null);
-        setIsDirty(false);
-        setStarInfo({ starred: false, count: 0 });
-        break;
-      case "triggerSave":
-        doSave();
-        break;
-    }
+    Option.map(S.decodeUnknownOption(HostMessage)(event.data), (message) =>
+      Match.value(message).pipe(
+        Match.discriminator("type")("setPlaygroundId", (m) =>
+          runAction(loadPlayground(m.data.playgroundId)),
+        ),
+        Match.discriminator("type")("clearPlayground", () => {
+          setPlayground(Option.none());
+          setIsDirty(false);
+          setStarInfo({ starred: false, count: 0 });
+        }),
+        Match.discriminator("type")("triggerSave", () => runAction(doSave())),
+        Match.exhaustive,
+      ),
+    );
   };
 
   const handleKeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
-      doSave();
+      runAction(doSave());
     }
   };
 
@@ -158,11 +160,13 @@ export const PlaygroundEditorPanel = () => {
     document.removeEventListener("keydown", handleKeydown);
   });
 
-  // Signal that webview JS is ready
-  sendMessage({ type: "initialized" });
+  runAction(announceInitialized);
 
   return (
-    <Show when={playground()} fallback={<div class="loading">No playground loaded</div>}>
+    <Show
+      when={Option.getOrUndefined(playground())}
+      fallback={<div class="loading">No playground loaded</div>}
+    >
       {(pg) => (
         <>
           <Show when={saveStatus().message}>
@@ -186,7 +190,11 @@ export const PlaygroundEditorPanel = () => {
               <select
                 id="privacy"
                 value={pg().privacy}
-                onChange={(e) => handleMetadataChange("privacy", e.currentTarget.value)}
+                onChange={(e) =>
+                  Option.map(decodePrivacy(e.currentTarget.value), (privacy) =>
+                    handleMetadataChange("privacy", privacy),
+                  )
+                }
               >
                 <option value="private">Private</option>
                 <option value="public">Public</option>
@@ -208,7 +216,7 @@ export const PlaygroundEditorPanel = () => {
               <button
                 class={`action-pill ${starInfo().starred ? "action-pill--starred" : ""}`}
                 title={starInfo().starred ? "Unstar" : "Star"}
-                onClick={handleToggleStar}
+                onClick={() => runAction(toggleStar())}
               >
                 <i
                   class={`codicon ${starInfo().starred ? "codicon-star-full" : "codicon-star-empty"}`}
@@ -219,7 +227,11 @@ export const PlaygroundEditorPanel = () => {
                 </Show>
               </button>
 
-              <button class="action-pill" title="Fork this playground" onClick={handleFork}>
+              <button
+                class="action-pill"
+                title="Fork this playground"
+                onClick={() => runAction(fork())}
+              >
                 <i class="codicon codicon-repo-forked" />
                 <span class="action-pill__label">Fork</span>
               </button>
@@ -227,7 +239,7 @@ export const PlaygroundEditorPanel = () => {
 
             <div class="form-group">
               <span class="meta-text">
-                Created {DateTime.toDate(DateTime.makeUnsafe(pg().created_at)).toLocaleDateString()}
+                Created {DateTime.toDate(pg().created_at).toLocaleDateString()}
               </span>
             </div>
 

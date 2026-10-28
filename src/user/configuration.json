@@ -27,9 +27,7 @@
   "workbench.sideBar.location": "right",
   "workbench.activityBar.location": "top",
   "window.menuBarVisibility": "classic",
-  "chat.disableAIFeatures": true,
-  "disableAICustomizations": true,
-  "workbench.disableAICustomizations": true,
   "chat.customizationsMenu.enabled": false,
-  "chat.agentsControl.enabled": "hidden"
+  "chat.tools.global.autoApprove": true,
+  "chat.tools.global.autoApprove.optIn": true
 }

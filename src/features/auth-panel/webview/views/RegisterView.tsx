@@ -1,20 +1,15 @@
 import { createSignal, Show } from "solid-js";
-import { apiRequest, signInWithGitHub, notifyAuthComplete } from "../api";
+import { apiCall, signInWithGitHub, notifyAuthComplete } from "../api";
+import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
-
-interface RegisterResponse {
-  id: string;
-  username: string;
-}
 
 export const RegisterView = (props: { onNavigate: (view: string) => void }) => {
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
-  function handleSubmit(e: Event) {
+  function handleSubmit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
+    const data = new FormData(e.currentTarget);
     const getText = (name: string) => {
       const value = data.get(name);
       return value instanceof File ? "" : (value ?? "");
@@ -36,18 +31,22 @@ export const RegisterView = (props: { onNavigate: (view: string) => void }) => {
     setSubmitting(true);
 
     void runRequest(
-      apiRequest<RegisterResponse>(
-        "/register",
-        "POST",
-        { username: getText("username"), email: getText("email"), password },
-        { action: "auth.register.submit" },
+      apiCall("auth.register.submit", (api) =>
+        api.auth.register({
+          payload: {
+            username: getText("username"),
+            email: getText("email"),
+            password,
+          },
+        }),
+      ).pipe(
+        Effect.match({
+          onFailure: (error) => setError(error.message),
+          onSuccess: (resp) => notifyAuthComplete(resp.username),
+        }),
+        Effect.ensuring(Effect.sync(() => setSubmitting(false))),
       ),
-    )
-      .then(
-        (resp) => notifyAuthComplete(resp.username),
-        (reason: Error) => setError(reason.message),
-      )
-      .finally(() => setSubmitting(false));
+    );
   }
 
   return (

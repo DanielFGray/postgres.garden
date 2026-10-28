@@ -60,7 +60,9 @@ const injectInitialData = (html: string, state: PageState): string => {
 
 const makeRuntime = () => {
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(SessionService.layer, NodeFileSystem.layer).pipe(Layer.provideMerge(DatabaseLive)),
+    Layer.mergeAll(SessionService.layer, NodeFileSystem.layer).pipe(
+      Layer.provideMerge(DatabaseLive),
+    ),
   );
   return {
     getPageState: (pathname: string, cookieHeader: string | null) =>
@@ -201,14 +203,20 @@ type ManifestChunk = {
 
 type Manifest = Record<string, ManifestChunk>;
 
-class ServerSetupError extends S.TaggedError<ServerSetupError>()("ServerSetupError", {
-  message: S.String,
-}) {}
+class ServerSetupError extends S.TaggedError<ServerSetupError, { readonly brand: unique symbol }>()(
+  "ServerSetupError",
+  {
+    message: S.String,
+  },
+) {}
 
-const ManifestSchema = S.Record(S.String, S.Struct({
-  file: S.String,
-  css: S.optional(S.Array(S.String)),
-}));
+const ManifestSchema = S.Record(
+  S.String,
+  S.Struct({
+    file: S.String,
+    css: S.optional(S.Array(S.String)),
+  }),
+);
 
 // Read Vite's built index.html rather than reconstructing it from the manifest.
 // This keeps prod aligned with index.html (the same source dev reads through
@@ -240,7 +248,9 @@ const createProdResponder = (runtime: Runtime): Promise<NonApiResponder> => {
     }
 
     const manifestText = yield* fs.readFileString(manifestPath);
-    const manifest: Manifest = yield* S.decodeEffect(S.fromJsonString(ManifestSchema))(manifestText);
+    const manifest: Manifest = yield* S.decodeEffect(S.fromJsonString(ManifestSchema))(
+      manifestText,
+    );
     const htmlTemplate = yield* readHtmlTemplate(distDir);
 
     const staticPaths = new Set<string>();

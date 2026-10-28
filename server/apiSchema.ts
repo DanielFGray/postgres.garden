@@ -11,7 +11,13 @@
  * its implementation lives in `services/sessionMiddleware.ts`.
  */
 import { Context, Schema as S, Struct } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiMiddleware,
+  HttpApiSecurity,
+} from "effect/http-api";
 import { Playground, Privacy, User, UserAuthentication, UserEmail } from "./models.js";
 import {
   ApiError,
@@ -52,11 +58,16 @@ export type SessionData = {
   readonly session: SessionInfo | null;
 };
 
-export class CurrentSession extends Context.Service<CurrentSession, SessionData>()("CurrentSession") {}
+export class CurrentSession extends Context.Service<CurrentSession, SessionData>()(
+  "CurrentSession",
+) {}
 
-export class SessionMiddleware extends HttpApiMiddleware.Service<SessionMiddleware, {
-  provides: CurrentSession;
-}>()("SessionMiddleware", {
+export class SessionMiddleware extends HttpApiMiddleware.Service<
+  SessionMiddleware,
+  {
+    provides: CurrentSession;
+  }
+>()("SessionMiddleware", {
   security: { session: sessionCookie },
   error: ServerError,
 }) {}
@@ -123,7 +134,8 @@ export const CreatePlaygroundResult = S.Struct({
 
 const ForkPlaygroundResult = S.Struct({
   commit_id: S.String,
-  playground_id: S.Finite,
+  /** The new playground's hash, which is how the UI opens the fork. */
+  playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
   created_at: S.DateTimeUtcFromString,
@@ -188,7 +200,9 @@ const DeletePlaygroundResponse = S.Struct({ hash: S.String });
 const queryPagination = S.Struct({
   offset: S.optional(S.FiniteFromString),
   limit: S.optional(S.FiniteFromString),
-  sort: S.optional(S.Union([S.Literals(["created_at"]), S.Literals(["updated_at"]), S.Literals(["stars"])])),
+  sort: S.optional(
+    S.Union([S.Literals(["created_at"]), S.Literals(["updated_at"]), S.Literals(["stars"])]),
+  ),
 });
 
 const SuccessResponse = S.Struct({ success: S.Boolean });
@@ -477,6 +491,25 @@ const authGroup = HttpApiGroup.make("auth")
 const webhookGroup = HttpApiGroup.make("webhooks")
   .add(HttpApiEndpoint.post("githubSponsorWebhook", "/gh_sponsor", { success: S.Unknown }))
   .prefix("/webhooks");
+
+/**
+ * The routes a sandboxed webview may ask the extension host to call for it.
+ *
+ * The webhook group is left out: GitHub posts to it with a signature and no
+ * session, so a webview asking for it is a bug or an attack. The relay refuses
+ * anything this list does not match, which is what keeps the contract the only
+ * way in. Deriving it from the groups keeps it right when an endpoint is added,
+ * and `:param` stands for exactly one path segment.
+ */
+export const webviewRelayRoutes = [systemGroup, authGroup, apiUsers, apiPlaygrounds].flatMap(
+  (group) =>
+    Object.values(group.endpoints).map((endpoint) => ({
+      method: endpoint.method,
+      pattern: new RegExp(
+        `^${endpoint.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/:[^/]+/g, "[^/]+")}$`,
+      ),
+    })),
+);
 
 export class PgGardenApi extends HttpApi.make("PgGardenApi")
   .add(systemGroup)

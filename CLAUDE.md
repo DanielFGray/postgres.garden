@@ -21,7 +21,7 @@ Bun + Effect Platform backend. Look at `server/apiHandlers.ts` for routes and `s
 
 ### Client (`src/`)
 
-Boot sequence starts at `src/entry.ts` → `src/loader.ts`. VSCode service overrides in `src/setup.*.ts`. Feature modules live in `src/features/` — each is an Effect Layer (auth, notebook, playground, serverSync, pglite, etc.).
+Boot sequence starts at `src/loader.tsx`. VSCode service overrides in `src/setup.*.ts`. Feature modules live in `src/features/` — each is an Effect Layer (auth, notebook, playground, serverSync, pglite, etc.).
 
 ## Code Quality Rules
 

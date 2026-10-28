@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
-import { Effect } from "effect";
-import type { WebviewMessage } from "./types";
-import { buildWebviewHtml, handleWebviewApiRequest } from "../webview/hostBridge";
+import { Effect, Match } from "effect";
+import * as S from "effect/Schema";
+import { InitState, AccountWebviewMessage } from "./types";
+import { buildWebviewHtml, handleRelayRequest } from "../webview/hostBridge";
 
 type AccountSettingsInitState = {
   readonly section?: string;
@@ -62,45 +63,54 @@ export class AccountSettingsPanelProvider {
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => {
-        void Effect.runPromise(this._handleMessage(message));
+      (message) => {
+        void Effect.runPromise(
+          S.decodeUnknownEffect(AccountWebviewMessage)(message).pipe(
+            Effect.flatMap((decoded) => this._handleMessage(decoded)),
+            Effect.catchCause(Effect.logError),
+          ),
+        );
       },
       null,
       this._disposables,
     );
   }
 
-  private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
+  private _handleMessage(message: typeof AccountWebviewMessage.Type) {
     return Effect.gen({ self: this }, function* () {
-      switch (message.type) {
-        case "initialized":
-          yield* this._postInitState(this._initState);
-          break;
-
-        case "account-deleted":
-          this.dispose();
-          window.location.assign("/");
-          break;
-
-        case "request":
-          yield* handleWebviewApiRequest((msg) => this._panel.webview.postMessage(msg), message);
-          break;
-      }
+      yield* Match.value(message).pipe(
+        Match.discriminator("type")("initialized", () => this._postInitState(this._initState)),
+        Match.discriminator("type")("account-deleted", () =>
+          Effect.sync(() => {
+            this.dispose();
+            window.location.assign("/");
+          }),
+        ),
+        Match.discriminator("type")("api-relay-request", (request) =>
+          handleRelayRequest((reply) => {
+            void this._panel.webview.postMessage(reply);
+          }, request),
+        ),
+        Match.exhaustive,
+      );
     });
   }
 
+  /**
+   * Sends the section and deletion token the panel was opened with. The
+   * caller passes a plain section name, so it is decoded here, once.
+   */
   private _postInitState(state?: AccountSettingsInitState): Effect.Effect<void> {
     return Effect.gen({ self: this }, function* () {
       if (!state) return;
-      yield* Effect.promise(() =>
-        this._panel.webview.postMessage({
-          type: "init-state",
-          section: state.section,
-          deleteToken: state.deleteToken,
-        }),
-      );
+      const message = yield* S.decodeUnknownEffect(InitState)({
+        type: "init-state",
+        ...state,
+      });
+      const encoded = yield* S.encodeEffect(InitState)(message);
+      yield* Effect.promise(() => this._panel.webview.postMessage(encoded));
       this._initState = undefined;
-    });
+    }).pipe(Effect.catchCause(Effect.logError));
   }
 
   public dispose() {

@@ -1,46 +1,32 @@
 import { createSignal, onCleanup, refresh, Errored, For, Loading, Show } from "solid-js";
-import { apiRequest, sendCommand } from "../api";
-import { createRequest, runRequest } from "../../../webview/request";
+import { runAction } from "../api";
+import { apiCall, openPlayground } from "./api";
+import { createRequest } from "../../../webview/request";
 import { parseSearchHint } from "lib/searchDSL.js";
-import { DateTime, Effect, Fiber } from "effect";
+import { DateTime, Duration, Effect, Fiber } from "effect";
 
-interface PlaygroundListItem {
-  hash: string;
-  name: string | null;
-  description?: string | null;
-  fork_hash?: string | null;
-  stars: string;
-  created_at: string;
-  updated_at: string;
-  user?: { username: string };
-}
+const searchPlaygrounds = (q: string) =>
+  apiCall("playground.list.search", (api) =>
+    // An empty search means "no filter", which the contract spells as no `q`.
+    api.apiPlaygrounds.searchPlaygrounds({
+      query: { q: q === "" ? undefined : q },
+    }),
+  );
 
-interface CreatePlaygroundResult {
-  playground_hash: string;
-}
-
-function buildSearchUrl(q: string): string {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  const qs = params.toString();
-  return `/api/playgrounds/search${qs ? `?${qs}` : ""}`;
-}
+type PlaygroundListItem = Effect.Success<ReturnType<typeof searchPlaygrounds>>[number];
 
 // ---------------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------------
 
-function formatDate(dateString: string) {
-  const date = DateTime.toDate(DateTime.makeUnsafe(dateString));
-  const now = DateTime.toDate(DateTime.nowUnsafe());
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+function formatDate(date: DateTime.Utc) {
+  const diffDays = Math.floor(Duration.toDays(DateTime.distance(date, DateTime.nowUnsafe())));
 
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
 
-  return date.toLocaleDateString();
+  return DateTime.toDate(date).toLocaleDateString();
 }
 
 function PlaygroundItem(props: {
@@ -48,24 +34,29 @@ function PlaygroundItem(props: {
   onChanged: () => void;
   onError: (message: string) => void;
 }) {
-  const mutate = (request: ReturnType<typeof apiRequest>) => {
-    void runRequest(request).then(props.onChanged, (error: Error) => props.onError(error.message));
-  };
+  const mutate = <A, E extends Error>(request: Effect.Effect<A, E>) =>
+    runAction(
+      Effect.match(request, {
+        onSuccess: props.onChanged,
+        onFailure: (error) => props.onError(error.message),
+      }),
+    );
+  const hash = props.playground.hash;
 
   function handleOpen() {
-    sendCommand("openPlayground", { hash: props.playground.hash });
+    runAction(openPlayground(hash));
   }
 
   function handleFork(e: Event) {
     e.stopPropagation();
     props.onError("");
     mutate(
-      apiRequest(
-        "/api/playgrounds/" + props.playground.hash + "/fork",
-        "POST",
-        { name: null },
-        { action: "playground.list.fork" },
-      ),
+      apiCall("playground.list.fork", (api) =>
+        api.apiPlaygrounds.forkPlayground({
+          params: { hash },
+          payload: { name: null },
+        }),
+      ).pipe(Effect.flatMap((forked) => openPlayground(forked.playground_hash))),
     );
   }
 
@@ -75,18 +66,18 @@ function PlaygroundItem(props: {
 
     props.onError("");
     mutate(
-      apiRequest("/api/playgrounds/" + props.playground.hash, "DELETE", undefined, {
-        action: "playground.list.delete",
-      }),
+      apiCall("playground.list.delete", (api) =>
+        api.apiPlaygrounds.deletePlayground({ params: { hash } }),
+      ),
     );
   }
 
   function handleToggleStar(e: Event) {
     e.stopPropagation();
     mutate(
-      apiRequest("/api/playgrounds/" + props.playground.hash + "/star", "POST", undefined, {
-        action: "playground.list.toggle_star",
-      }),
+      apiCall("playground.list.toggle_star", (api) =>
+        api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }),
+      ),
     );
   }
 
@@ -108,8 +99,8 @@ function PlaygroundItem(props: {
         <div class="playground-actions">
           <button class="icon-button action-star" title="Star" onClick={handleToggleStar}>
             <i class="codicon codicon-star-empty" />
-            <Show when={Number(props.playground.stars ?? "0") > 0}>
-              <span class="star-count">{props.playground.stars}</span>
+            <Show when={props.playground.stars > 0n}>
+              <span class="star-count">{String(props.playground.stars)}</span>
             </Show>
           </button>
           <button class="icon-button action-open" title="Open" onClick={handleOpen}>
@@ -135,11 +126,7 @@ export const PlaygroundListView = () => {
 
   // Tracks `searchQuery`, so committing a debounced search re-runs the request
   // on its own — no explicit refetch needed.
-  const playgrounds = createRequest(() =>
-    apiRequest<PlaygroundListItem[]>(buildSearchUrl(searchQuery()), "GET", undefined, {
-      action: "playground.list.search",
-    }),
-  );
+  const playgrounds = createRequest(() => searchPlaygrounds(searchQuery()));
 
   const hint = () => parseSearchHint(searchInput());
 
@@ -150,24 +137,24 @@ export const PlaygroundListView = () => {
     if (!name) return;
 
     setMutationError(null);
-    void runRequest(
-      apiRequest<CreatePlaygroundResult>(
-        "/api/playgrounds",
-        "POST",
-        { name, message: "Initial commit", files: [] },
-        { action: "playground.list.create" },
+    runAction(
+      apiCall("playground.list.create", (api) =>
+        api.apiPlaygrounds.createPlayground({
+          payload: { name, message: "Initial commit", files: [] },
+        }),
+      ).pipe(
+        Effect.match({
+          onSuccess: (created) => {
+            runAction(openPlayground(created.playground_hash));
+            refresh(playgrounds);
+          },
+          onFailure: (error) => setMutationError(error.message),
+        }),
       ),
-    ).then(
-      (resp) => {
-        sendCommand("openPlayground", { hash: resp.playground_hash });
-        refresh(playgrounds);
-      },
-      (error: Error) => setMutationError(error.message),
     );
   }
 
-  function handleSearch(e: Event) {
-    const value = (e.target as HTMLInputElement).value;
+  function handleSearch(value: string) {
     setSearchInput(value);
 
     if (debounceFiber) Effect.runFork(Fiber.interrupt(debounceFiber));
@@ -205,7 +192,7 @@ export const PlaygroundListView = () => {
           id="search"
           placeholder="Search... is:starred by:user sort:created|updated|stars"
           value={searchInput()}
-          onInput={handleSearch}
+          onInput={(e) => handleSearch(e.currentTarget.value)}
         />
         <Show when={hint().hasFilters}>
           <div class="search-hint">

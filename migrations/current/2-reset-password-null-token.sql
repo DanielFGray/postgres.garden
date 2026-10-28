@@ -1,9 +1,13 @@
--- Rejects a password reset when no reset is pending.
+-- Rejects a password reset when no reset is pending, or when the pending token
+-- is older than v_token_max_duration.
 --
 -- `user_secrets.reset_password_token` is NULL for every user without a pending
 -- reset. A comparison with NULL yields NULL, and an `if` treats NULL as false,
 -- so a reject branch guarded by a plain inequality is skipped. The check
 -- therefore rejects NULL explicitly, and the success path needs a positive match.
+--
+-- request_password_reset only replaces a token once it is older than the
+-- window, so without the age check a token would stay valid until it is used.
 create or replace function app_private.reset_password(
   user_id uuid,
   reset_token text,
@@ -35,8 +39,10 @@ begin
 
   -- Not too many reset attempts, let's check the token
   if v_user_secret.reset_password_token is null
-    or v_user_secret.reset_password_token is distinct from reset_token then
-    -- Wrong token, bump all the attempt tracking figures
+    or v_user_secret.reset_password_token is distinct from reset_token
+    or v_user_secret.reset_password_token_generated is null
+    or v_user_secret.reset_password_token_generated < now() - v_token_max_duration then
+    -- Wrong or expired token, bump all the attempt tracking figures
     update app_private.user_secrets
     set
       failed_reset_password_attempts = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then 1 else failed_reset_password_attempts + 1 end),

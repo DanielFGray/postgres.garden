@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { parseRoute } from "../shared/routes";
+import type { LoadedWorkspace } from "./loadedWorkspace";
 import { loadWorkspace, loadWorkspaceFromSharedUrl } from "./workspaceSwitcher";
 
 const loadCurrentRoute = () => {
@@ -28,7 +29,7 @@ const loadCurrentRoute = () => {
 
 export const RouterFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const runtime = yield* Effect.context<never>();
+    const runtime = yield* Effect.context<LoadedWorkspace>();
     const onPopState = () => {
       Effect.runForkWith(runtime)(
         loadCurrentRoute().pipe(

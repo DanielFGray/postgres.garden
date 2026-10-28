@@ -22,7 +22,9 @@ const sendEmail = async (payload: typeof passwordReset) => {
 describe("send_email with the cloudflare provider", () => {
   beforeEach(() => {
     vi.resetModules();
-    nodemailer.sendMail.mockReset().mockResolvedValue({ rejected: [], accepted: ["visitor@example.com"] });
+    nodemailer.sendMail
+      .mockReset()
+      .mockResolvedValue({ rejected: [], accepted: ["visitor@example.com"] });
     nodemailer.createTransport.mockClear();
     vi.stubEnv("MAIL_PROVIDER", "cloudflare");
     vi.stubEnv("CLOUDFLARE_EMAIL_API_TOKEN", "test-token");
@@ -79,8 +81,8 @@ describe("mail provider selection", () => {
   });
 
   it("rejects a provider that no longer exists", async () => {
-    await expect(load().then((mailProvider) => mailProvider({ MAIL_PROVIDER: "ses" }))).rejects.toThrow(
-      /MAIL_PROVIDER must be one of/,
-    );
+    await expect(
+      load().then((mailProvider) => mailProvider({ MAIL_PROVIDER: "ses" })),
+    ).rejects.toThrow(/MAIL_PROVIDER must be one of/);
   });
 });

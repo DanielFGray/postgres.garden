@@ -198,18 +198,6 @@ body {
   color: var(--vscode-badge-foreground);
 }
 
-/* Placeholder sections */
-.placeholder-section .section-description {
-  color: var(--vscode-descriptionForeground);
-  margin: 0 0 8px;
-}
-
-.placeholder-section .section-coming-soon {
-  color: var(--vscode-descriptionForeground);
-  font-style: italic;
-  font-size: 12px;
-}
-
 /* Loading / error states */
 .section-loading {
   padding: 16px;

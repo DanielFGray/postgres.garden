@@ -265,7 +265,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
               eb
                 .fn<{
                   commit_id: string;
-                  playground_id: number;
+                  playground_hash: string;
                   parent_id: string | null;
                   message: string;
                   created_at: Date;

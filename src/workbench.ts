@@ -4,7 +4,10 @@ import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-serv
 import { Context, Effect, FiberSet, Layer, Schema } from "effect";
 import { commonServices, constructOptions, envOptions, initializeCommon } from "./setup.common";
 
-class WorkbenchInitError extends Schema.TaggedError<WorkbenchInitError>()("WorkbenchInitError", {
+class WorkbenchInitError extends Schema.TaggedError<
+  WorkbenchInitError,
+  { readonly brand: unique symbol }
+>()("WorkbenchInitError", {
   step: Schema.String,
   message: Schema.String,
 }) {}

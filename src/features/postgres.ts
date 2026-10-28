@@ -39,10 +39,13 @@ const fromPromise = <A>(run: () => PromiseLike<A>) =>
     catch: (cause) => PromiseError.new({ cause }),
   });
 
-class PromiseError extends S.TaggedError<PromiseError>()("PromiseError", {
-  cause: S.optional(S.Unknown),
-  message: S.String,
-}) {
+class PromiseError extends S.TaggedError<PromiseError, { readonly brand: unique symbol }>()(
+  "PromiseError",
+  {
+    cause: S.optional(S.Unknown),
+    message: S.String,
+  },
+) {
   static new = (args: { readonly cause?: unknown }) =>
     new PromiseError({ ...args, message: toError(args.cause).message });
 }

@@ -1,12 +1,12 @@
 import { createSignal, refresh, Show } from "solid-js";
-import { apiRequest } from "../api";
+import type { JSX } from "@solidjs/web";
+import { apiCall } from "../api";
+import { formText } from "../format";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
 const loadPasswordStatus = () =>
-  apiRequest<{ has_password: boolean }>("/api/me/has-password", "GET", undefined, {
-    action: "account.security.load_password_status",
-  });
+  apiCall("account.security.load_password_status", (api) => api.apiUsers.meHasPassword({}));
 
 export const SecuritySection = () => {
   const status = createRequest(loadPasswordStatus);
@@ -14,12 +14,12 @@ export const SecuritySection = () => {
   const [mutationError, setMutationError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal<string | null>(null);
 
-  function handleSubmit(e: Event) {
+  const handleSubmit: JSX.EventHandler<HTMLFormElement, SubmitEvent> = (e) => {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
+    const form = e.currentTarget;
     const data = new FormData(form);
-    const newPassword = data.get("newPassword") as string;
-    const confirmPassword = data.get("confirmPassword") as string;
+    const newPassword = formText(data, "newPassword");
+    const confirmPassword = formText(data, "confirmPassword");
 
     setMutationError(null);
     setSuccess(null);
@@ -37,14 +37,13 @@ export const SecuritySection = () => {
     const hasPassword = status().has_password;
     setSaving(true);
     void runRequest(
-      apiRequest(
-        "/api/changePassword",
-        "POST",
-        {
-          oldPassword: hasPassword ? (data.get("oldPassword") as string) : "",
-          newPassword,
-        },
-        { action: "account.security.change_password" },
+      apiCall("account.security.change_password", (api) =>
+        api.apiUsers.changePassword({
+          payload: {
+            oldPassword: hasPassword ? formText(data, "oldPassword") : "",
+            newPassword,
+          },
+        }),
       ),
     )
       .then(
@@ -56,7 +55,7 @@ export const SecuritySection = () => {
         (error: Error) => setMutationError(error.message),
       )
       .finally(() => setSaving(false));
-  }
+  };
 
   return (
     <SectionBoundary loading="Loading security settings..." retry={() => refresh(status)}>

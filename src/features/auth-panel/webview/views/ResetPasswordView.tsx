@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
-import { apiRequest } from "../api";
+import { apiCall } from "../api";
+import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
 
 // Set by the host's `init-view` message before this view mounts. Signals, not
@@ -16,10 +17,9 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
   const [error, setError] = createSignal<string | null>(null);
   const [success, setSuccess] = createSignal(false);
 
-  function handleSubmit(e: Event) {
+  function handleSubmit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
+    const data = new FormData(e.currentTarget);
     const getText = (name: string) => {
       const value = data.get(name);
       return value instanceof File ? "" : (value ?? "");
@@ -41,18 +41,22 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
     setSubmitting(true);
 
     void runRequest(
-      apiRequest(
-        "/api/resetPassword",
-        "POST",
-        { userId: getText("userId"), token: getText("token"), password },
-        { action: "auth.reset_password.submit" },
+      apiCall("auth.reset_password.submit", (api) =>
+        api.apiUsers.resetPassword({
+          payload: {
+            userId: getText("userId"),
+            token: getText("token"),
+            password,
+          },
+        }),
+      ).pipe(
+        Effect.match({
+          onFailure: (error) => setError(error.message),
+          onSuccess: () => setSuccess(true),
+        }),
+        Effect.ensuring(Effect.sync(() => setSubmitting(false))),
       ),
-    )
-      .then(
-        () => setSuccess(true),
-        (reason: Error) => setError(reason.message),
-      )
-      .finally(() => setSubmitting(false));
+    );
   }
 
   return (

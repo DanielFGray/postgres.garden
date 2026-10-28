@@ -1,98 +1,38 @@
 import type * as vscode from "vscode";
-import { HttpClient, HttpClientRequest } from "effect/http";
-import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { Cause, Effect, Layer } from "effect";
+import { Effect } from "effect";
+import * as S from "effect/Schema";
 import { getNetworkState } from "../network";
 import { generateNonce } from "../../utils/nonce";
-import { applyTelemetryHeaders, type RequestTelemetryContext } from "./requestTelemetry";
-import { extractErrorMessage } from "./errorMessage";
-
-/** Extension-host side of the protocol `apiBridge.ts` speaks from inside the webview. */
-export const WebviewHttpClientLayer = Layer.mergeAll(
-  FetchHttpClient.layer,
-  Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
-);
-
-export type ApiRequestMessage = {
-  readonly id: string;
-  readonly endpoint: string;
-  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  readonly body?: unknown;
-  readonly telemetry?: RequestTelemetryContext;
-};
-
-/** Extension host → webview replies to a `{type:"request"}` message. */
-export type ApiResponseMessage =
-  | { readonly type: "data"; readonly id: string; readonly data: unknown }
-  | {
-      readonly type: "error";
-      readonly id: string;
-      readonly error: { readonly code: string; readonly message: string };
-    }
-  | { readonly type: "offline" };
+import {
+  RelayFailure,
+  type RelayRequest,
+  RelayResponse,
+  type RelayResponseEncoded,
+} from "./relayProtocol";
+import { relayHttpClient, relayReply } from "./relay";
 
 /**
- * Proxies a webview's `{type:"request"}` message to the server as the visitor's
- * session (`credentials: "include"`) and posts back `data`/`error`/`offline` —
- * the counterpart `apiBridge.ts`'s `request()` waits on from inside the webview.
+ * Makes one HTTP request on a webview's behalf and posts the raw answer back.
+ *
+ * This is the wiring: the offline check, the real HTTP client, and the channel
+ * the answer goes back on. What a relayed request is allowed to become lives in
+ * `relay.ts`, which has no VSCode import and can be tested on its own.
  */
-export const handleWebviewApiRequest = (
-  post: (message: ApiResponseMessage) => void,
-  { id, endpoint, method, body, telemetry }: ApiRequestMessage,
-): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    const networkState = getNetworkState();
-
-    // Block writes when offline
-    if (networkState !== "online" && method !== "GET") {
-      post({ type: "offline" });
-      return;
-    }
-
-    // For reads when offline, still try (may have cached data)
-    if (networkState === "offline") {
-      post({ type: "error", id, error: { code: "OFFLINE", message: "You're offline" } });
-      return;
-    }
-
-    const headers: Record<string, string> = {};
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-    }
-    applyTelemetryHeaders(headers, telemetry);
-
-    const { response, responseBody } = yield* Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-      const requestWithoutBody = HttpClientRequest.make(method)(
-        window.location.origin + endpoint,
-      ).pipe(HttpClientRequest.setHeaders(headers));
-      const request =
-        body !== undefined
-          ? HttpClientRequest.bodyJsonUnsafe(requestWithoutBody, body)
-          : requestWithoutBody;
-
-      const response = yield* client.execute(request);
-      const responseBody: unknown = yield* response.json.pipe(Effect.orElseSucceed(() => null));
-      return { response, responseBody };
-    }).pipe(Effect.provide(WebviewHttpClientLayer));
-
-    if (response.status < 200 || response.status >= 300) {
-      post({
-        type: "error",
-        id,
-        error: { code: String(response.status), message: extractErrorMessage(responseBody) },
-      });
-      return;
-    }
-
-    post({ type: "data", id, data: responseBody });
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.sync(() => {
-        post({ type: "error", id, error: { code: "NETWORK", message: Cause.pretty(cause) } });
-      }),
-    ),
-  );
+export const handleRelayRequest = Effect.fn("handleRelayRequest")(function* (
+  post: (response: RelayResponseEncoded) => void,
+  request: RelayRequest,
+) {
+  const reply = yield* getNetworkState() === "offline"
+    ? Effect.succeed(
+        new RelayFailure({
+          type: "api-relay-failure",
+          id: request.id,
+          message: "You're offline",
+        }),
+      )
+    : relayReply(request).pipe(Effect.provide(relayHttpClient));
+  post(yield* S.encodeEffect(RelayResponse)(reply));
+});
 
 export type WebviewHtmlOptions = {
   readonly webview: vscode.Webview;
@@ -102,8 +42,6 @@ export type WebviewHtmlOptions = {
   readonly styles?: readonly string[];
   /** Paths under the extension root, in `<script>` order. */
   readonly scripts: readonly string[];
-  /** Extra `connect-src` value, for panels that call `fetch` directly from the webview. */
-  readonly connectSrc?: string;
   /** Adds `img-src ${cspSource} https:` for panels that render remote images. */
   readonly allowRemoteImages?: boolean;
   /** Raw HTML inserted into `<head>` after the CSP meta tag. */
@@ -118,16 +56,16 @@ export const buildWebviewHtml = (options: WebviewHtmlOptions): string => {
     title,
     styles = [],
     scripts,
-    connectSrc,
     allowRemoteImages = false,
     extraHeadHtml = "",
   } = options;
   const baseUri = extensionUri.toString().replace(/\/$/, "");
   const nonce = generateNonce();
 
+  // No `connect-src`: a webview has no network of its own and reaches the
+  // server only through the relay, which `postMessage` carries.
   const csp = [
     "default-src 'none'",
-    connectSrc ? `connect-src ${connectSrc}` : undefined,
     allowRemoteImages ? `img-src ${webview.cspSource} https:` : undefined,
     `font-src ${webview.cspSource}`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,

@@ -1,50 +1,31 @@
 import { createSignal, refresh, Show } from "solid-js";
-import * as Effect from "effect/Effect";
-import type { UserProfile } from "../../types";
+import type { JSX } from "@solidjs/web";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
-import { apiRequest } from "../api";
-import { formatDate } from "../format";
-import { WebviewRequestError } from "../../../webview/apiBridge";
-
-const loadProfile = () =>
-  apiRequest<{ user: UserProfile | null }>("/api/me", "GET", undefined, {
-    action: "account.profile.load",
-  }).pipe(
-    Effect.flatMap((data) =>
-      data.user
-        ? Effect.succeed(data.user)
-        : Effect.fail(new WebviewRequestError({ message: "Unauthorized", code: "UNAUTHORIZED" })),
-    ),
-  );
+import { apiCall, loadProfile } from "../api";
+import { formatDate, formText } from "../format";
 
 export const ProfileSection = () => {
-  const profile = createRequest(loadProfile);
+  const profile = createRequest(() => loadProfile("account.profile.load"));
   const [bioLength, setBioLength] = createSignal(0);
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string | null>(null);
 
-  function handleSubmit(e: Event) {
+  const handleSubmit: JSX.EventHandler<HTMLFormElement, SubmitEvent> = (e) => {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const data = new FormData(form);
-    const getText = (name: string) => {
-      const value = data.get(name);
-      return value instanceof File ? "" : (value ?? "");
-    };
+    const data = new FormData(e.currentTarget);
     setSaving(true);
     setSaveError(null);
     void runRequest(
-      apiRequest(
-        "/api/me",
-        "PATCH",
-        {
-          username: getText("username"),
-          name: getText("name"),
-          bio: getText("bio"),
-          avatar_url: getText("avatar_url"),
-        },
-        { action: "account.profile.save" },
+      apiCall("account.profile.save", (api) =>
+        api.apiUsers.patchMe({
+          payload: {
+            username: formText(data, "username"),
+            name: formText(data, "name"),
+            bio: formText(data, "bio"),
+            avatar_url: formText(data, "avatar_url"),
+          },
+        }),
       ),
     )
       .then(
@@ -52,7 +33,7 @@ export const ProfileSection = () => {
         (error: Error) => setSaveError(error.message),
       )
       .finally(() => setSaving(false));
-  }
+  };
 
   return (
     <SectionBoundary loading="Loading profile..." retry={() => refresh(profile)}>
@@ -119,7 +100,7 @@ export const ProfileSection = () => {
 
           <div class="field">
             <label>Member Since</label>
-            <div class="field-value">{formatDate(String(profile().created_at))}</div>
+            <div class="field-value">{formatDate(profile().created_at)}</div>
           </div>
 
           <Show when={saveError()}>

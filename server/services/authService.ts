@@ -1,53 +1,62 @@
-import { Context, Effect, Layer, Match, Schema as S } from "effect";
+import { Array as Arr, Context, Effect, Layer, Match, Schema as S } from "effect";
 import pg from "pg";
 import { sql } from "kysely";
 import { rootQuerier, runQuery, unwrapPgError } from "../db.js";
 import type { AppPublicUsers } from "../../generated/db.js";
 import { SessionService } from "./sessionService.js";
 
-export class AccountLockedError extends S.TaggedError<AccountLockedError>()("AccountLocked", {
+export class AccountLockedError extends S.TaggedError<
+  AccountLockedError,
+  { readonly brand: unique symbol }
+>()("AccountLocked", {
   message: S.String,
 }) {}
 
-export class WeakPasswordError extends S.TaggedError<WeakPasswordError>()("WeakPassword", {
+export class WeakPasswordError extends S.TaggedError<
+  WeakPasswordError,
+  { readonly brand: unique symbol }
+>()("WeakPassword", {
   message: S.String,
   requirements: S.optional(S.Array(S.String)),
 }) {}
 
-export class AuthenticationRequiredError extends S.TaggedError<AuthenticationRequiredError>()(
-  "AuthenticationRequired",
-  {
-    message: S.String,
-    action: S.String,
-  },
-) {}
+export class AuthenticationRequiredError extends S.TaggedError<
+  AuthenticationRequiredError,
+  { readonly brand: unique symbol }
+>()("AuthenticationRequired", {
+  message: S.String,
+  action: S.String,
+}) {}
 
-export class InvalidCredentialsError extends S.TaggedError<InvalidCredentialsError>()(
-  "InvalidCredentials",
-  {
-    message: S.String,
-  },
-) {}
+export class InvalidCredentialsError extends S.TaggedError<
+  InvalidCredentialsError,
+  { readonly brand: unique symbol }
+>()("InvalidCredentials", {
+  message: S.String,
+}) {}
 
-export class MissingDataError extends S.TaggedError<MissingDataError>()("MissingData", {
+export class MissingDataError extends S.TaggedError<
+  MissingDataError,
+  { readonly brand: unique symbol }
+>()("MissingData", {
   message: S.String,
   field: S.Union([S.Literals(["email"]), S.Literals(["password"]), S.Literals(["username"])]),
 }) {}
 
-export class AccountAlreadyLinkedError extends S.TaggedError<AccountAlreadyLinkedError>()(
-  "AccountAlreadyLinked",
-  {
-    message: S.String,
-    service: S.String,
-  },
-) {}
+export class AccountAlreadyLinkedError extends S.TaggedError<
+  AccountAlreadyLinkedError,
+  { readonly brand: unique symbol }
+>()("AccountAlreadyLinked", {
+  message: S.String,
+  service: S.String,
+}) {}
 
-export class DuplicateAccountError extends S.TaggedError<DuplicateAccountError>()(
-  "DuplicateAccount",
-  {
-    message: S.String,
-  },
-) {}
+export class DuplicateAccountError extends S.TaggedError<
+  DuplicateAccountError,
+  { readonly brand: unique symbol }
+>()("DuplicateAccount", {
+  message: S.String,
+}) {}
 
 const mapRegisterPgError = (
   dbErr: pg.DatabaseError,
@@ -137,19 +146,22 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
 
       login: Effect.fnUntraced(
         function* ({ id, password }: { id: string; password: string }) {
-          // The lookup must not fail inside the boundary. `app_private.login`
-          // records a failed password attempt and then returns null, and a failure
-          // here would roll that write back, so the lockout counter would never grow.
+          // A wrong password must not fail inside the boundary. `app_private.login`
+          // records the failed attempt and then returns null, and a failure here would
+          // roll that write back, so the lockout counter would never grow. Database
+          // errors such as LOCKD must still fail, so the row is taken with `Arr.head`.
           const found = yield* runRoot((rootDb) =>
             runQuery(
               rootDb
                 .selectFrom((eb) =>
-                  eb.fn<AppPublicUsers>("app_private.login", [sql`${id}::citext`, eb.val(password)]).as("u"),
+                  eb
+                    .fn<AppPublicUsers>("app_private.login", [sql`${id}::citext`, eb.val(password)])
+                    .as("u"),
                 )
                 .selectAll()
                 // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
                 .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-            ).pipe(Effect.head, Effect.option),
+            ).pipe(Effect.map(Arr.head)),
           );
           const user = yield* Effect.fromOption(found).pipe(
             Effect.catchTag("NoSuchElementError", () =>
@@ -168,16 +180,17 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
             );
           return { user, token, expiresAt };
         },
-        Effect.catch((e): Effect.Effect<never, InvalidCredentialsError | AccountLockedError> => {
-          if (S.is(InvalidCredentialsError)(e)) return Effect.fail(e);
-          return unwrapPgError(e).pipe(
-            Effect.flatMap((dbErr) =>
-              dbErr?.code === "LOCKD"
-                ? Effect.fail(new AccountLockedError({ message: dbErr.message }))
-                : Effect.die(e),
+        Effect.catchIf(
+          (e) => !S.is(InvalidCredentialsError)(e),
+          (e) =>
+            unwrapPgError(e).pipe(
+              Effect.flatMap((dbErr) =>
+                dbErr?.code === "LOCKD"
+                  ? Effect.fail(new AccountLockedError({ message: dbErr.message }))
+                  : Effect.die(e),
+              ),
             ),
-          );
-        }),
+        ),
       ),
 
       logout: (cookieId: string | undefined) =>

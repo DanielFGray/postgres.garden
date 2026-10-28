@@ -1,20 +1,14 @@
 import { createSignal, refresh, For, Show } from "solid-js";
-import { apiRequest } from "../api";
+import type * as Effect from "effect/Effect";
+import { apiCall } from "../api";
 import { formatDate } from "../format";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
-type LinkedAccount = {
-  id: string;
-  service: string;
-  identifier: string;
-  created_at: string;
-};
-
 const loadAccounts = () =>
-  apiRequest<LinkedAccount[]>("/api/me/authentications", "GET", undefined, {
-    action: "account.linked_accounts.load",
-  });
+  apiCall("account.linked_accounts.load", (api) => api.apiUsers.meAuthentications({}));
+
+type LinkedAccount = Effect.Success<ReturnType<typeof loadAccounts>>[number];
 
 function capitalize(str: string) {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -38,9 +32,9 @@ export const LinkedAccountsSection = () => {
     setUnlinking(account.id);
     setMutationError(null);
     void runRequest(
-      apiRequest("/api/me/authentications/" + account.id, "DELETE", undefined, {
-        action: "account.linked_accounts.unlink",
-      }),
+      apiCall("account.linked_accounts.unlink", (api) =>
+        api.apiUsers.deleteMeAuthentication({ params: { id: account.id } }),
+      ),
     )
       .then(
         () => refresh(accounts),

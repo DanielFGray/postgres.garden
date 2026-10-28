@@ -1,11 +1,15 @@
 import { createSignal, Match, onSettled, Switch } from "solid-js";
-import { apiRequest } from "../api";
+import { apiCall } from "../api";
+import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
 
 // Set by the host's `init-view` message before this view mounts. A signal, not
 // a plain variable: the view renders once, so a plain write after mount would
 // never reach the DOM.
-const [pending, setPending] = createSignal<{ emailId: string; token: string } | null>(null);
+const [pending, setPending] = createSignal<{
+  emailId: string;
+  token: string;
+} | null>(null);
 let autoVerifyAttempted = false;
 
 export function triggerVerification(emailId: string, token: string) {
@@ -24,13 +28,16 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
     autoVerifyAttempted = true;
     setVerifying(true);
     void runRequest(
-      apiRequest("/api/verifyEmail", "POST", params, { action: "auth.verify_email.auto" }),
-    )
-      .then(
-        () => setSuccess(true),
-        (reason: Error) => setError(reason.message),
-      )
-      .finally(() => setVerifying(false));
+      apiCall("auth.verify_email.auto", (api) =>
+        api.apiUsers.verifyEmail({ payload: params }),
+      ).pipe(
+        Effect.match({
+          onFailure: (error) => setError(error.message),
+          onSuccess: () => setSuccess(true),
+        }),
+        Effect.ensuring(Effect.sync(() => setVerifying(false))),
+      ),
+    );
   });
 
   return (

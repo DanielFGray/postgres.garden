@@ -1,35 +1,50 @@
-import type { RequestTelemetryContext } from "../webview/requestTelemetry";
+import * as S from "effect/Schema";
+import { RelayRequest } from "../webview/relayProtocol";
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
+export class Initialized extends S.Class<Initialized, { readonly brand: unique symbol }>(
+  "Initialized",
+)({ type: S.Literal("initialized") }) {}
+
+/** GitHub sign-in navigates the top-level window, so the host starts it, not an API call. */
+export class GitHubSignIn extends S.Class<GitHubSignIn, { readonly brand: unique symbol }>(
+  "GitHubSignIn",
+)({ type: S.Literal("github-signin") }) {}
+
+export class AuthComplete extends S.Class<AuthComplete, { readonly brand: unique symbol }>(
+  "AuthComplete",
+)({ type: S.Literal("auth-complete"), username: S.String }) {}
 
 /** Webview → Extension host messages */
-export type AuthWebviewMessage =
-  | { type: "initialized" }
-  | {
-      type: "request";
-      id: string;
-      endpoint: string;
-      method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-      body?: JsonValue;
-      telemetry?: RequestTelemetryContext;
-    }
-  | { type: "github-signin" }
-  | { type: "auth-complete"; username: string };
+export const AuthWebviewMessage = S.Union([Initialized, GitHubSignIn, AuthComplete, RelayRequest]);
+
+export const ViewId = S.Literals([
+  "login",
+  "register",
+  "forgot-password",
+  "reset-password",
+  "verify-email",
+]);
+export type ViewId = typeof ViewId.Type;
+
+export class GitHubComplete extends S.Class<GitHubComplete, { readonly brand: unique symbol }>(
+  "GitHubComplete",
+)({
+  type: S.Literal("github-complete"),
+  username: S.String,
+}) {}
+
+export class GitHubError extends S.Class<GitHubError, { readonly brand: unique symbol }>(
+  "GitHubError",
+)({ type: S.Literal("github-error"), message: S.String }) {}
+
+export class InitView extends S.Class<InitView, { readonly brand: unique symbol }>("InitView")({
+  type: S.Literal("init-view"),
+  view: S.optional(ViewId),
+  params: S.optional(S.Record(S.String, S.String)),
+}) {}
 
 /** Extension host → Webview messages */
-export type AuthExtensionMessage =
-  | { type: "data"; id: string; data: unknown }
-  | { type: "error"; id: string; error: { code: string; message: string } }
-  | { type: "github-complete"; username: string }
-  | { type: "github-error"; message: string }
-  | { type: "offline" }
-  | { type: "init-view"; view: string; params?: Record<string, string> };
+export const AuthHostMessage = S.Union([GitHubComplete, GitHubError, InitView]);
 
 /** Callbacks from the panel provider to the auth provider */
 export interface AuthPanelCallbacks {

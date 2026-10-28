@@ -30,11 +30,15 @@ const userSecrets = (db: KyselyDB, userId: string) =>
     db.selectFrom("app_private.user_secrets").selectAll().where("user_id", "=", userId),
   ).pipe(Effect.head);
 
-const setPendingReset = (db: KyselyDB, userId: string, token: string) =>
+/** Stores `token` as the pending reset, generated `age` ago (a Postgres interval). */
+const setPendingReset = (db: KyselyDB, userId: string, token: string, age = "0 seconds") =>
   runQuery(
     db
       .updateTable("app_private.user_secrets")
-      .set({ reset_password_token: token, reset_password_token_generated: sql`now()` })
+      .set({
+        reset_password_token: token,
+        reset_password_token_generated: sql`now() - ${age}::interval`,
+      })
       .where("user_id", "=", userId),
   );
 
@@ -89,6 +93,27 @@ layer(DatabaseLive, { timeout: "30 seconds" })("app_private.reset_password", (it
 
           expect(result).toBe(true);
           expect(after.reset_password_token).toBeNull();
+        }),
+        asRoot((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
+      );
+    }),
+  );
+
+  it.effect("rejects the pending token once it is older than 3 days", () =>
+    Effect.gen(function* () {
+      const suffix = yield* randomSuffix;
+      const user = yield* asRoot((rootDb) => createUser(rootDb, `reset_expired_${suffix}`));
+      const token = `token_${suffix}`;
+
+      yield* Effect.ensuring(
+        Effect.gen(function* () {
+          yield* asRoot((rootDb) => setPendingReset(rootDb, user.id, token, "3 days 1 minute"));
+          const before = yield* asRoot((rootDb) => userSecrets(rootDb, user.id));
+          const result = yield* asRoot((rootDb) => resetPassword(rootDb, user.id, token));
+          const after = yield* asRoot((rootDb) => userSecrets(rootDb, user.id));
+
+          expect(result).toBeNull();
+          expect(after.password_hash).toBe(before.password_hash);
         }),
         asRoot((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );

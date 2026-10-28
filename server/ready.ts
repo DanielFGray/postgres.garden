@@ -4,13 +4,19 @@ import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { CurrentSession } from "./apiSchema.js";
 import { valkey } from "./valkey.js";
 
-class PostgresNotReady extends S.TaggedError<PostgresNotReady>()("PostgresNotReady", {
-  message: S.String,
-}) {}
+class PostgresNotReady extends S.TaggedError<PostgresNotReady, { readonly brand: unique symbol }>()(
+  "PostgresNotReady",
+  {
+    message: S.String,
+  },
+) {}
 
-class ValkeyNotReady extends S.TaggedError<ValkeyNotReady>()("ValkeyNotReady", {
-  message: S.String,
-}) {}
+class ValkeyNotReady extends S.TaggedError<ValkeyNotReady, { readonly brand: unique symbol }>()(
+  "ValkeyNotReady",
+  {
+    message: S.String,
+  },
+) {}
 
 /** Exponential backoff from 100ms, capped at 5s between attempts, for at most 20 retries. */
 const retrySchedule = Schedule.max([

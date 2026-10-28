@@ -31,7 +31,10 @@ export type { DB, User, Organization, Playground, Commit };
 export type KyselyDB = Kysely<DB>;
 
 /** A query or transaction step failed. `cause` is usually the `pg.DatabaseError`. */
-export class DatabaseError extends Schema.TaggedError<DatabaseError>()("DatabaseError", {
+export class DatabaseError extends Schema.TaggedError<
+  DatabaseError,
+  { readonly brand: unique symbol }
+>()("DatabaseError", {
   cause: Schema.Unknown,
 }) {}
 
@@ -104,10 +107,9 @@ const bindVisitor = (trx: KyselyDB, sessionId: string | undefined) =>
  */
 const openVisitor = (db: KyselyDB, sessionId: string | undefined) =>
   startTransaction(db).pipe(
-    Effect.flatMap((trx) =>
+    Effect.tap((trx) =>
       bindVisitor(trx, sessionId).pipe(
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : settle(trx, exit))),
-        Effect.as(trx),
       ),
     ),
   );

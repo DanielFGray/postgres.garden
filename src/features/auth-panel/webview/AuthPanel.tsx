@@ -6,49 +6,30 @@ import { ForgotPasswordView } from "./views/ForgotPasswordView";
 import { ResetPasswordView, setResetParams } from "./views/ResetPasswordView";
 import { VerifyEmailView, triggerVerification } from "./views/VerifyEmailView";
 import * as S from "effect/Schema";
-import { Option } from "effect";
-
-type ViewId = "login" | "register" | "forgot-password" | "reset-password" | "verify-email";
-
-const ViewIdSchema = S.Literals([
-  "login",
-  "register",
-  "forgot-password",
-  "reset-password",
-  "verify-email",
-]);
-const HostMessage = S.Union([
-  S.Struct({ type: S.Literal("github-complete"), username: S.String }),
-  S.Struct({ type: S.Literal("github-error"), message: S.String }),
-  S.Struct({
-    type: S.Literal("init-view"),
-    view: S.optional(ViewIdSchema),
-    params: S.optional(S.Record(S.String, S.String)),
-  }),
-]);
+import { Match as M, Option } from "effect";
+import { AuthHostMessage, ViewId } from "../types";
 
 export const AuthPanel = () => {
   const [activeView, setActiveView] = createSignal<ViewId>("login");
   const [githubError, setGithubError] = createSignal<string | null>(null);
 
   const handleHostMessage = (message: MessageEvent) => {
-    const msg = Option.getOrUndefined(S.decodeUnknownOption(HostMessage)(message.data));
-    if (msg === undefined) return;
-    if (msg.type === "github-complete") {
-      notifyAuthComplete(msg.username);
-    } else if (msg.type === "github-error") {
-      setGithubError(msg.message);
-    } else if (msg.type === "init-view") {
-      const view = msg.view ?? "login";
-      const params = msg.params;
-      if (view === "reset-password" && params?.userId && params?.token) {
-        setResetParams(params.userId, params.token);
-      }
-      if (view === "verify-email" && params?.emailId && params?.token) {
-        triggerVerification(params.emailId, params.token);
-      }
-      setActiveView(view);
-    }
+    Option.map(S.decodeUnknownOption(AuthHostMessage)(message.data), (msg) =>
+      M.value(msg).pipe(
+        M.discriminator("type")("github-complete", ({ username }) => notifyAuthComplete(username)),
+        M.discriminator("type")("github-error", ({ message }) => setGithubError(message)),
+        M.discriminator("type")("init-view", ({ view = "login", params }) => {
+          if (view === "reset-password" && params?.userId && params?.token) {
+            setResetParams(params.userId, params.token);
+          }
+          if (view === "verify-email" && params?.emailId && params?.token) {
+            triggerVerification(params.emailId, params.token);
+          }
+          setActiveView(view);
+        }),
+        M.exhaustive,
+      ),
+    );
   };
 
   window.addEventListener("message", handleHostMessage);
@@ -57,7 +38,7 @@ export const AuthPanel = () => {
 
   function onNavigate(view: string) {
     setGithubError(null);
-    Option.map(S.decodeUnknownOption(ViewIdSchema)(view), setActiveView);
+    Option.map(S.decodeUnknownOption(ViewId)(view), setActiveView);
   }
 
   return (

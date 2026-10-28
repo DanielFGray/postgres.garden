@@ -1,7 +1,12 @@
 import { Effect, Layer, Redacted } from "effect";
 import { HttpEffect, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { CurrentSession, SessionMiddleware, sessionCookie, type SessionData } from "../apiSchema.js";
+import {
+  CurrentSession,
+  SessionMiddleware,
+  sessionCookie,
+  type SessionData,
+} from "../apiSchema.js";
 import { withRequestTransaction } from "../db.js";
 import { env } from "../assertEnv.js";
 import { ServerError } from "../errors.js";

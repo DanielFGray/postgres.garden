@@ -4,33 +4,11 @@
  */
 
 import * as vscode from "vscode";
-import { Effect } from "effect";
+import { Effect, Match } from "effect";
+import * as S from "effect/Schema";
 import { navigateTo } from "../../../shared/navigation";
-import type { RequestTelemetryContext } from "../../webview/requestTelemetry";
-import { buildWebviewHtml, handleWebviewApiRequest } from "../../webview/hostBridge";
-import type { WebviewValue } from "../../webview/apiBridge";
-
-interface RequestMessage {
-  type: "request";
-  id: string;
-  endpoint: string;
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: WebviewValue;
-  telemetry?: RequestTelemetryContext;
-}
-
-interface ForkCommandMessage {
-  type: "command";
-  command: "fork";
-  data: { readonly hash: string };
-}
-
-interface ToggleStarCommandMessage {
-  type: "command";
-  command: "toggleStar";
-}
-
-type WebviewMessage = RequestMessage | ForkCommandMessage | ToggleStarCommandMessage;
+import { buildWebviewHtml, handleRelayRequest } from "../../webview/hostBridge";
+import { PlaygroundPanelMessage } from "../types";
 
 export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "playground.metadata";
@@ -54,15 +32,8 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-    webviewView.webview.onDidReceiveMessage((message: WebviewMessage | { type: "initialized" }) => {
-      if (message.type === "initialized") {
-        // Webview JS is ready — send current playground ID if we have one
-        if (this._currentPlaygroundId) {
-          this._postLoadPlayground(this._currentPlaygroundId);
-        }
-        return;
-      }
-      void Effect.runPromise(this._handleMessage(message as WebviewMessage));
+    webviewView.webview.onDidReceiveMessage((message) => {
+      void Effect.runPromise(this._handleMessage(message));
     });
   }
 
@@ -84,39 +55,36 @@ export class PlaygroundMetadataViewProvider implements vscode.WebviewViewProvide
   }
 
   private _postLoadPlayground(playgroundId: string) {
-    // Tell webview to load this playground via the API bridge
+    // The webview loads the playground itself, through its relayed API client.
     this._view?.webview.postMessage({
       type: "setPlaygroundId",
       data: { playgroundId },
     });
   }
 
-  private _handleMessage(message: WebviewMessage): Effect.Effect<void> {
-    return Effect.gen({ self: this }, function* () {
-      switch (message.type) {
-        case "request":
-          yield* handleWebviewApiRequest((msg) => this._view?.webview.postMessage(msg), message);
-          break;
-
-        case "command":
-          this._handleCommand(message);
-          break;
-      }
-    });
-  }
-
-  private _handleCommand(message: ForkCommandMessage | ToggleStarCommandMessage) {
-    switch (message.command) {
-      case "fork": {
-        const url = `/playgrounds/${message.data.hash}`;
-        navigateTo(url);
-        break;
-      }
-      case "toggleStar": {
-        void vscode.commands.executeCommand("playground.toggleStar");
-        break;
-      }
-    }
+  private _handleMessage(raw: unknown) {
+    return S.decodeUnknownEffect(PlaygroundPanelMessage)(raw).pipe(
+      Effect.flatMap((message) =>
+        Match.value(message).pipe(
+          Match.discriminator("type")("api-relay-request", (request) =>
+            handleRelayRequest((reply) => {
+              void this._view?.webview.postMessage(reply);
+            }, request),
+          ),
+          // The webview script is ready: send the current playground, if there is one.
+          Match.discriminator("type")("initialized", () =>
+            Effect.sync(() => {
+              if (this._currentPlaygroundId) this._postLoadPlayground(this._currentPlaygroundId);
+            }),
+          ),
+          Match.discriminator("type")("open-playground", ({ hash }) =>
+            Effect.sync(() => navigateTo(`/playgrounds/${hash}`)),
+          ),
+          Match.exhaustive,
+        ),
+      ),
+      Effect.catch((error) => Effect.logError("[PlaygroundMetadata] Message failed", error)),
+    );
   }
 
   private _getHtmlForWebview(webview: vscode.Webview): string {

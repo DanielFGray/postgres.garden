@@ -1,7 +1,7 @@
 /**
  * Get the initial page data for a request.
  *
- * The client reads the serialized value before mounting Preact.
+ * The client reads the serialized value before the workbench boots.
  */
 
 import { Array as Arr, Effect, Option, pipe } from "effect";

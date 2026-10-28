@@ -39,16 +39,15 @@ export class UserService extends Context.Service<UserService>()("UserService", {
         );
       }),
 
-      getProfile:
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom("app_public.users")
-            .selectAll()
-            .where("id", "=", sql<string>`app_public.current_user_id()`),
-        ).pipe(
-          Effect.head,
-          Effect.catchTag("NoSuchElementError", () => Effect.succeed(null)),
-        ),
+      getProfile: asVisitor((authDb) =>
+        authDb
+          .selectFrom("app_public.users")
+          .selectAll()
+          .where("id", "=", sql<string>`app_public.current_user_id()`),
+      ).pipe(
+        Effect.head,
+        Effect.catchTag("NoSuchElementError", () => Effect.succeed(null)),
+      ),
 
       updateProfile: (input: UpdateProfileInput) =>
         asVisitor((authDb) =>
@@ -62,15 +61,14 @@ export class UserService extends Context.Service<UserService>()("UserService", {
             .returningAll(),
         ).pipe(Effect.head),
 
-      listEmails:
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom("app_public.user_emails")
-            .selectAll()
-            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-            .orderBy("is_primary", "desc")
-            .orderBy("created_at", "asc"),
-        ),
+      listEmails: asVisitor((authDb) =>
+        authDb
+          .selectFrom("app_public.user_emails")
+          .selectAll()
+          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+          .orderBy("is_primary", "desc")
+          .orderBy("created_at", "asc"),
+      ),
 
       addEmail: (email: string) =>
         asVisitor((authDb) =>
@@ -82,29 +80,27 @@ export class UserService extends Context.Service<UserService>()("UserService", {
           authDb.deleteFrom("app_public.user_emails").where("id", "=", id).returningAll(),
         ).pipe(Effect.head),
 
-      listAuthentications:
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom("app_public.user_authentications")
-            .select(["id", "service", "identifier", "created_at"])
-            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-            .orderBy("created_at", "asc"),
-        ),
+      listAuthentications: asVisitor((authDb) =>
+        authDb
+          .selectFrom("app_public.user_authentications")
+          .select(["id", "service", "identifier", "created_at"])
+          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+          .orderBy("created_at", "asc"),
+      ),
 
       unlinkAuthentication: (id: string) =>
         asVisitor((authDb) =>
           authDb.deleteFrom("app_public.user_authentications").where("id", "=", id).returningAll(),
         ).pipe(Effect.head),
 
-      hasPassword:
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom("app_public.users as u")
-            .select((eb) => [
-              eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
-            ])
-            .where("u.id", "=", sql<string>`app_public.current_user_id()`),
-        ).pipe(Effect.head),
+      hasPassword: asVisitor((authDb) =>
+        authDb
+          .selectFrom("app_public.users as u")
+          .select((eb) => [
+            eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
+          ])
+          .where("u.id", "=", sql<string>`app_public.current_user_id()`),
+      ).pipe(Effect.head),
 
       forgotPassword: (email: string) =>
         asRoot((rootDb) =>

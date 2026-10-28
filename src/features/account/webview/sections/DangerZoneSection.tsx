@@ -1,25 +1,17 @@
 import { createSignal, refresh, Match, Show, Switch } from "solid-js";
-import * as Effect from "effect/Effect";
-import { apiRequest, notifyAccountDeleted } from "../api";
+import { Effect, Option } from "effect";
+import { apiCall, loadProfile, notifyAccountDeleted } from "../api";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
-import { WebviewRequestError } from "../../../webview/apiBridge";
 
 const loadUsername = () =>
-  apiRequest<{ user: { username: string } | null }>("/api/me", "GET", undefined, {
-    action: "account.danger.load",
-  }).pipe(
-    Effect.flatMap((data) =>
-      data.user
-        ? Effect.succeed(data.user.username)
-        : Effect.fail(new WebviewRequestError({ message: "Unauthorized", code: "UNAUTHORIZED" })),
-    ),
-  );
+  loadProfile("account.danger.load").pipe(Effect.map((profile) => profile.username));
 
-const [deleteToken, setDeleteToken] = createSignal<string | null>(null);
+const [deleteToken, setDeleteToken] = createSignal(Option.none<string>());
 
-export function initializeDangerZone(options?: { deleteToken?: string }) {
-  setDeleteToken(options?.deleteToken ?? null);
+/** Sets the token from an emailed deletion link; with one, the section offers to finish the delete. */
+export function initializeDangerZone(token: Option.Option<string>) {
+  setDeleteToken(token);
 }
 
 const dangerButton = (enabled: boolean) => ({
@@ -57,9 +49,8 @@ export const DangerZoneSection = () => {
     setRequesting(true);
     setMutationError(null);
     void runRequest(
-      apiRequest<{ success: boolean }>("/api/me", "DELETE", undefined, {
-        action: "account.danger.request_delete",
-      }),
+      // Without a token the server emails a link that carries one.
+      apiCall("account.danger.request_delete", (api) => api.apiUsers.deleteMe({ query: {} })),
     )
       .then(
         () => {
@@ -81,11 +72,8 @@ export const DangerZoneSection = () => {
     setRequesting(true);
     setMutationError(null);
     void runRequest(
-      apiRequest<{ success: boolean }>(
-        `/api/me?token=${encodeURIComponent(token)}`,
-        "DELETE",
-        undefined,
-        { action: "account.danger.confirm_delete" },
+      apiCall("account.danger.confirm_delete", (api) =>
+        api.apiUsers.deleteMe({ query: { token } }),
       ),
     )
       .then(
@@ -161,7 +149,7 @@ export const DangerZoneSection = () => {
               </p>
             </Match>
 
-            <Match when={deleteToken()}>
+            <Match when={Option.getOrUndefined(deleteToken())}>
               {(token) => (
                 <div data-pw="account-delete-token-confirm">
                   <p style={{ margin: "0 0 12px", "font-weight": 500 }}>
@@ -189,9 +177,9 @@ export const DangerZoneSection = () => {
                 style={{ margin: 0, color: "var(--vscode-charts-green)" }}
                 data-pw="account-delete-request-sent"
               >
-                <i class="codicon codicon-mail" style={{ "margin-right": "6px" }} />A confirmation
-                email has been sent to your primary email address. Click the link in the email to
-                complete the deletion.
+                <i class="codicon codicon-mail" style={{ "margin-right": "6px" }} />
+                A confirmation email has been sent to your primary email address. Click the link in
+                the email to complete the deletion.
               </p>
             </Match>
 
