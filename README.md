@@ -44,7 +44,7 @@ The dev server starts at `http://localhost:3000`.
 ### What `bun run init` does
 
 1. **`env:init`** — generates a `.env` file with random passwords and sensible defaults
-2. **`db:setup`** — starts PostgreSQL and Valkey containers, creates database roles/schemas, and runs migrations
+2. **`db:setup`** — brings up the shared Postgres cluster (`ops dev db up`), Valkey, and runs migrations
 3. **`worker:schema`** — sets up the Graphile Worker job schema
 
 ### Manual setup (step by step)
@@ -52,9 +52,8 @@ The dev server starts at `http://localhost:3000`.
 ```bash
 bun install
 bun run env:init          # Generate .env
-bun run db:up             # Start Postgres + Valkey containers
-bun run db:init           # Create database roles and schemas
-bun run db:reset          # Run all migrations from scratch
+bun run db:up             # Shared ops Postgres (ops-dev-pg17) + Valkey
+bun run db:latest         # Apply migrations against the shared cluster
 bun run worker:schema     # Initialize worker schema
 bun run dev               # Start dev server
 ```
