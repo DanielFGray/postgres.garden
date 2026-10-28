@@ -43,52 +43,26 @@ type FieldDefs = Record<string, FieldDef>;
 const fieldDefs: FieldDefs = {
   NODE_ENV: { derive: () => "development" },
 
-  // Database connection basics
-  ROOT_DATABASE_USER: {
-    prompt: { message: "superuser username:" },
-    derive: () => "postgres",
-  },
-  ROOT_DATABASE_PASSWORD: { generate: () => generatePassword(18) },
+  // Host/port are informational; `ops dev db up` writes the managed URLs.
   DATABASE_HOST: {
     prompt: { message: "database host:" },
-    derive: () => "localhost",
+    derive: () => "127.0.0.1",
   },
   DATABASE_PORT: {
     prompt: { message: "database port:" },
-    derive: () => "5432",
+    derive: () => "5417",
   },
   DATABASE_NAME: {
     prompt: { message: "database name:", validate: validName },
     // default filled from packageName at runtime
   },
 
-  // Roles derived from DATABASE_NAME
-  DATABASE_OWNER: { derive: (ctx) => ctx.DATABASE_NAME ?? "" },
-  DATABASE_OWNER_PASSWORD: { generate: () => generatePassword(18) },
+  // Role names match ops postgresRoles / postgresLoginRole.
+  DATABASE_OWNER: { derive: (ctx) => `${ctx.DATABASE_NAME}_owner` },
   DATABASE_AUTHENTICATOR: {
-    derive: (ctx) => `${ctx.DATABASE_NAME}_authenticator`,
+    derive: (ctx) => `alchemy_${ctx.DATABASE_NAME}_api`,
   },
-  DATABASE_AUTHENTICATOR_PASSWORD: { generate: () => generatePassword(18) },
   DATABASE_VISITOR: { derive: (ctx) => `${ctx.DATABASE_NAME}_visitor` },
-  SHADOW_DATABASE_PASSWORD: { generate: () => generatePassword(18) },
-
-  // URLs derived from connection info
-  ROOT_DATABASE_URL: {
-    derive: (ctx) =>
-      `postgres://${ctx.ROOT_DATABASE_USER}:${ctx.ROOT_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/template1`,
-  },
-  DATABASE_URL: {
-    derive: (ctx) =>
-      `postgres://${ctx.DATABASE_OWNER}:${ctx.DATABASE_OWNER_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}`,
-  },
-  AUTH_DATABASE_URL: {
-    derive: (ctx) =>
-      `postgres://${ctx.DATABASE_AUTHENTICATOR}:${ctx.DATABASE_AUTHENTICATOR_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}`,
-  },
-  SHADOW_DATABASE_URL: {
-    derive: (ctx) =>
-      `postgres://${ctx.DATABASE_NAME}_shadow:${ctx.SHADOW_DATABASE_PASSWORD}@${ctx.DATABASE_HOST}:${ctx.DATABASE_PORT}/${ctx.DATABASE_NAME}_shadow`,
-  },
 
   // App config
   PORT: { prompt: { message: "server port:" }, derive: () => "3000" },

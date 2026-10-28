@@ -17,13 +17,5 @@ END $$;
 
 GRANT ALL ON DATABASE :DATABASE_NAME TO :DATABASE_OWNER;
 ALTER SCHEMA public OWNER TO :DATABASE_OWNER;
-
--- Some extensions require superuser privileges, so we create them before migration time.
-CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
-CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA public;
+-- Extensions come from the cartridge via `ops dev db`, not from this file.
 COMMIT;

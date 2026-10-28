@@ -48,7 +48,7 @@
     "db:up": "ops dev db up && docker compose -f docker-compose.dev.yml up -d valkey",
     "db:latest": "run-s 'gm watch --once'",
     "db:watch": "run-s 'gm watch'",
-    "db:reset": "run-s 'gm reset --erase'",
+    "db:reset": "ops dev db reset postgres_garden && bun run db:latest && bun run worker:schema",
     "db:stop": "ops dev db down",
     "db:exec": "docker exec -it ops-dev-pg17",
     "db:types": "kysely-codegen",
