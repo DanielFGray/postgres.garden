@@ -476,13 +476,21 @@ const authGroup = HttpApiGroup.make("auth")
   )
   .add(
     HttpApiEndpoint.get("authGithubStart", "/auth/github", {
-      query: S.Struct({ redirectTo: S.optional(S.String), mode: S.optional(S.String) }),
       success: S.Unknown,
     }),
   )
   .add(
+    // GitHub answers a declined consent screen with `error` and no `code`, so
+    // both are optional and the handler decides which pair it got. A required
+    // `code` would turn pressing Cancel into a schema error in the popup, with
+    // nothing to tell the tab that opened it.
     HttpApiEndpoint.get("authGithubCallback", "/auth/github/callback", {
-      query: S.Struct({ code: S.String, state: S.String }),
+      query: S.Struct({
+        code: S.optional(S.String),
+        state: S.String,
+        error: S.optional(S.String),
+        error_description: S.optional(S.String),
+      }),
       success: S.Unknown,
     }),
   )

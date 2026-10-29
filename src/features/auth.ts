@@ -5,8 +5,8 @@
 
 import * as vscode from "vscode";
 import * as S from "effect/Schema";
-import { Effect, Fiber, Layer, Option, Schedule } from "effect";
-import { httpApiLogout } from "../httpapi-client";
+import { Effect, Layer, Match, Option } from "effect";
+import { httpApiLogout, httpApiMe } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import type { User } from "../shared/schemas";
 import {
@@ -20,17 +20,27 @@ import { AuthPanelProvider } from "./auth-panel/AuthPanelProvider";
 import { VSCodeService } from "../vscode/service";
 import { Workbench } from "../workbench";
 
-/** Schema for auth messages received via postMessage / localStorage / BroadcastChannel */
-const AuthMessage = S.Struct({
-  type: S.Literals(["github-auth-success"]),
-  user: S.Struct({ username: S.String }),
-});
-const isAuthMessage = S.is(AuthMessage);
-/** Stored text that is not a valid auth message reads as absent, and the caller keeps waiting. */
-const decodeStoredAuthMessage = (value: string) =>
-  Option.getOrUndefined(S.decodeOption(S.fromJsonString(AuthMessage))(value));
+/**
+ * What the OAuth popup tells the tab that opened it. It carries no identity:
+ * the callback response sets the session cookie, so the signed-in user is read
+ * from the server instead of trusted from a message.
+ */
+const GitHubAuthOutcome = S.Union([
+  S.Struct({ type: S.Literals(["github-auth-success"]) }),
+  S.Struct({ type: S.Literals(["github-auth-failure"]), message: S.String }),
+]);
+type GitHubAuthOutcome = typeof GitHubAuthOutcome.Type;
+
+/** Anything that is not an outcome reads as absent, and the sign-in keeps waiting. */
+const decodeAuthOutcome = S.decodeUnknownOption(GitHubAuthOutcome);
 
 const AUTH_PROVIDER_ID = "github-auth";
+
+/** The channel name the popup page rendered by the OAuth callback posts on. */
+const AUTH_CHANNEL = "github-auth";
+
+/** How long a sign-in may stay unanswered before the popup is given up on. */
+const SIGN_IN_TIMEOUT = "5 minutes";
 
 class AuthError extends S.TaggedError<AuthError, { readonly brand: unique symbol }>()("AuthError", {
   message: S.String,
@@ -148,16 +158,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 
         AuthPanelProvider.createOrShow(this.extensionUri, {
           onAuth: (username: string) => {
-            // Email/password auth completed — update state
-            localStorage.setItem(AuthProvider.storageKey, username);
-            this.currentUsername = username;
-            const session = new AuthSession(username, username);
-            this._onDidChangeSessions.fire({
-              added: [session],
-              removed: [],
-              changed: [],
-            });
-            resume(Effect.succeed(session));
+            resume(Effect.succeed(this.completeAuth(username)));
           },
           onGitHubSignIn: () => {
             // User clicked GitHub button — run OAuth popup flow
@@ -182,10 +183,12 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 
   /**
-   * Called when email/password auth completes outside the VSCode auth API flow
-   * (e.g., from the sign-in command opening the panel directly).
+   * Records the signed-in user and announces the new session, which is what
+   * every path through sign-in ends with: the auth panel's email and password
+   * form, the GitHub popup, and the sign-in command that opens the panel on its
+   * own.
    */
-  completeAuth(username: string) {
+  completeAuth(username: string): AuthSession {
     localStorage.setItem(AuthProvider.storageKey, username);
     this.currentUsername = username;
     const session = new AuthSession(username, username);
@@ -194,6 +197,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
       removed: [],
       changed: [],
     });
+    return session;
   }
 
   removeSession(): Promise<void> {
@@ -217,19 +221,26 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 
   /**
-   * Create session using GitHub OAuth in a popup window
+   * Create a session through the GitHub OAuth popup.
+   *
+   * The popup reports its outcome on a BroadcastChannel, which is the only
+   * channel that survives the trip. The app sends
+   * `Cross-Origin-Opener-Policy: same-origin` so that the workbench is
+   * cross-origin isolated, so the hop through github.com moves the popup into
+   * another browsing context group: `window.opener` is null in the popup, and
+   * the handle held here is disowned. A disowned handle reads `closed === true`
+   * while the popup is still open, so nothing here may watch `popup.closed` —
+   * doing so reports every sign-in as cancelled a second after it starts.
    */
   createSessionWithGitHub(): Promise<AuthSession> {
     this.ensureInitialized();
 
     return Effect.runPromise(
       Effect.callback<AuthSession, AuthError>((resume) => {
-        // Access the actual browser window (not VSCode's window API)
-        const browserWindow = globalThis.window;
-
-        const popup = browserWindow.open(
-          "/auth/github?mode=popup",
-          "github-auth",
+        // The browser's own window, not VSCode's window API.
+        const popup = globalThis.window.open(
+          "/auth/github",
+          AUTH_CHANNEL,
           "width=600,height=700,left=100,top=100",
         );
 
@@ -244,130 +255,47 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
           return;
         }
 
-        let isResolved = false;
-        const storageKey = "github-auth-result";
-
-        const completeAuth = (user: { username: string }) => {
-          if (isResolved) return;
-          isResolved = true;
-
-          const username = user.username;
-
-          // Store in localStorage
-          localStorage.setItem(AuthProvider.storageKey, username);
-          this.currentUsername = username;
-
-          // Clean up auth result from localStorage
-          localStorage.removeItem(storageKey);
-
-          // Create session
-          const session = new AuthSession(username, username);
-
-          // Fire session change event
-          this._onDidChangeSessions.fire({
-            added: [session],
-            removed: [],
-            changed: [],
-          });
-
-          // Clean up listeners
-          browserWindow.removeEventListener("message", messageHandler);
-          browserWindow.removeEventListener("storage", storageHandler);
-          if (broadcastChannel) {
-            broadcastChannel.close();
-          }
-          Effect.runSync(Fiber.interrupt(checkPopup));
-          Effect.runSync(Fiber.interrupt(pollStorage));
-
-          resume(Effect.succeed(session));
-        };
-
-        // Method 1: Listen for postMessage (may not work due to redirects)
-        const messageHandler = (event: MessageEvent) => {
-          // Verify origin for security
-          if (event.origin !== browserWindow.location.origin) {
-            return;
-          }
-          if (isAuthMessage(event.data)) {
-            completeAuth(event.data.user);
-          }
-        };
-        browserWindow.addEventListener("message", messageHandler);
-
-        // Method 2: Listen for storage events
-        const storageHandler = (event: StorageEvent) => {
-          if (event.key === "github-auth-trigger" || event.key === storageKey) {
-            const result = localStorage.getItem(storageKey);
-            if (result) {
-              const data = decodeStoredAuthMessage(result);
-              if (data) completeAuth(data.user);
-            }
-          }
-        };
-        browserWindow.addEventListener("storage", storageHandler);
-
-        // Method 3: Use BroadcastChannel if available
-        let broadcastChannel: BroadcastChannel | null = null;
-        if (typeof BroadcastChannel !== "undefined") {
-          broadcastChannel = new BroadcastChannel("github-auth");
-          broadcastChannel.onmessage = (event: MessageEvent) => {
-            if (isAuthMessage(event.data)) {
-              completeAuth(event.data.user);
-            }
-          };
-        }
-
-        // Method 4: Poll localStorage as fallback (in case storage event doesn't fire)
-        const pollStorage = Effect.runFork(
-          Effect.repeat(
-            Effect.sync(() => {
-              const result = localStorage.getItem(storageKey);
-              if (result) {
-                const data = decodeStoredAuthMessage(result);
-                if (data) completeAuth(data.user);
-              }
-            }),
-            Schedule.spaced("500 millis"),
-          ),
+        const onOutcome = Match.type<GitHubAuthOutcome>().pipe(
+          Match.discriminatorsExhaustive("type")({
+            "github-auth-success": () => this.sessionFromServer,
+            "github-auth-failure": ({ message }) => Effect.fail(new AuthError({ message })),
+          }),
         );
 
-        // Check if popup was closed without completing auth
-        const checkPopup = Effect.runFork(
-          Effect.repeat(
-            Effect.sync(() => {
-              if (popup.closed) {
-                if (!isResolved) {
-                  // Give one final check for the result
-                  const result = localStorage.getItem(storageKey);
-                  if (result) {
-                    const data = decodeStoredAuthMessage(result);
-                    if (data) {
-                      completeAuth(data.user);
-                      return;
-                    }
-                  }
+        const channel = new BroadcastChannel(AUTH_CHANNEL);
+        // Every same-origin tab shares this channel, so a message that is not an
+        // outcome belongs to someone else and the sign-in keeps waiting.
+        channel.onmessage = (event: MessageEvent) =>
+          Option.map(decodeAuthOutcome(event.data), (outcome) => resume(onOutcome(outcome)));
 
-                  Effect.runSync(Fiber.interrupt(checkPopup));
-                  Effect.runSync(Fiber.interrupt(pollStorage));
-                  browserWindow.removeEventListener("message", messageHandler);
-                  browserWindow.removeEventListener("storage", storageHandler);
-                  if (broadcastChannel) {
-                    broadcastChannel.close();
-                  }
-                  resume(
-                    Effect.fail(
-                      new AuthError({
-                        message: "Authentication was cancelled",
-                      }),
-                    ),
-                  );
-                }
-              }
-            }),
-            Schedule.spaced("1 second"),
-          ),
-        );
-      }),
+        return Effect.sync(() => channel.close());
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: SIGN_IN_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new AuthError({ message: "Sign-in did not finish in time. Please try again." }),
+            ),
+        }),
+      ),
+    );
+  }
+
+  /**
+   * The session the cookie now belongs to, according to the server. A success
+   * the server does not agree with is a failure here: the popup reports only
+   * that the flow finished, never who finished it.
+   */
+  private get sessionFromServer() {
+    return httpApiMe.pipe(
+      Effect.mapError((error) => new AuthError({ message: error.message })),
+      Effect.flatMap(({ user }) =>
+        Option.match(Option.fromNullishOr(user), {
+          onNone: () =>
+            Effect.fail(new AuthError({ message: "Signed in, but the server reported no user." })),
+          onSome: (signedIn) => Effect.succeed(this.completeAuth(signedIn.username)),
+        }),
+      ),
     );
   }
 }

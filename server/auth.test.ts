@@ -112,6 +112,7 @@ const http = Effect.fnUntraced(function* (
     status: response.status,
     headers: response.headers,
     json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
+    text: () => Effect.tryPromise(() => response.text()),
   } as const;
 });
 
@@ -177,6 +178,7 @@ const testingHttp = Effect.fnUntraced(function* (
     status: response.status,
     headers: response.headers,
     json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
+    text: () => Effect.tryPromise(() => response.text()),
   } as const;
 });
 
@@ -389,6 +391,125 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             expect(meBody).toBeFalsy();
           }),
         );
+      }),
+    );
+  });
+
+  // -- Playgrounds ---------------------------------------------------------
+
+  describe("Playgrounds", () => {
+    it.effect("an unknown playground hash answers 404", () =>
+      Effect.gen(function* () {
+        const response = yield* http("GET", "/api/playgrounds/nosuchhash00");
+
+        expect(response.status).toBe(404);
+      }),
+    );
+
+    it.effect("saving another user's playground forks it and keeps the files being saved", () =>
+      Effect.flatMap(Effect.all([randomSuffix, randomSuffix]), ([first, second]) => {
+        const owner = `owner_${first}`;
+        const forker = `forker_${second}`;
+        return withCleanup(
+          owner,
+          withCleanup(
+            forker,
+            Effect.gen(function* () {
+              const ownerCookie = yield* registerAndGetCookie(owner);
+              const created = yield* http("POST", "/api/playgrounds", {
+                cookie: ownerCookie,
+                body: {
+                  name: "original",
+                  message: "the owner's commit",
+                  files: [{ path: "query.sql", content: "-- the owner's" }],
+                },
+              });
+              expect(created.status).toBe(200);
+              const { playground_hash: source } = yield* created.json<{
+                playground_hash: string;
+              }>();
+
+              const forkerCookie = yield* registerAndGetCookie(forker);
+              const commit = yield* http("POST", `/api/playgrounds/${source}/commits`, {
+                cookie: forkerCookie,
+                body: {
+                  message: "the forker's commit",
+                  files: [{ path: "query.sql", content: "-- the forker's" }],
+                },
+              });
+              expect(commit.status).toBe(200);
+              const fork = yield* commit.json<{
+                forked: boolean;
+                playground_hash: string;
+                commit_id: string;
+              }>();
+              expect(fork.forked).toBe(true);
+              expect(fork.playground_hash).not.toBe(source);
+
+              // The commit the fork reports must hold what was saved, not the
+              // snapshot the fork was copied from.
+              const saved = yield* http(
+                "GET",
+                `/api/playgrounds/${fork.playground_hash}/commits/${fork.commit_id}`,
+                { cookie: forkerCookie },
+              );
+              const { files, parent_id } = yield* saved.json<{
+                files: ReadonlyArray<{ path: string; content: string }>;
+                parent_id: string | null;
+              }>();
+              expect(files).toEqual([{ path: "query.sql", content: "-- the forker's" }]);
+
+              // Its parent is the copy of the source, so the fork records what
+              // it came from and the change made on top of it.
+              const parent = yield* http(
+                "GET",
+                `/api/playgrounds/${fork.playground_hash}/commits/${parent_id}`,
+                { cookie: forkerCookie },
+              );
+              const copied = yield* parent.json<{
+                files: ReadonlyArray<{ path: string; content: string }>;
+              }>();
+              expect(copied.files).toEqual([{ path: "query.sql", content: "-- the owner's" }]);
+            }),
+          ),
+        );
+      }),
+    );
+  });
+
+  // -- GitHub OAuth --------------------------------------------------------
+
+  describe("GitHub OAuth callback", () => {
+    // Both cases answer before the handler reaches GitHub, so they need no
+    // OAuth credentials and make no outbound request.
+    const STATE = "test-oauth-state";
+
+    it.effect("a declined consent screen reports a failure the popup can relay", () =>
+      Effect.gen(function* () {
+        const response = yield* http(
+          "GET",
+          `/auth/github/callback?error=access_denied&error_description=denied&state=${STATE}`,
+          { cookie: `github_oauth_state=${STATE}` },
+        );
+
+        expect(response.status).toBe(400);
+        const html = yield* response.text();
+        expect(html).toContain("github-auth-failure");
+        expect(html).not.toContain("github-auth-success");
+        expect(html).toContain("Sign-in was declined on GitHub.");
+      }),
+    );
+
+    it.effect("a state that does not match the cookie reports a failure", () =>
+      Effect.gen(function* () {
+        const response = yield* http("GET", `/auth/github/callback?code=abc&state=${STATE}`, {
+          cookie: "github_oauth_state=a-different-state",
+        });
+
+        expect(response.status).toBe(400);
+        const html = yield* response.text();
+        expect(html).toContain("github-auth-failure");
+        expect(html).not.toContain("github-auth-success");
       }),
     );
   });

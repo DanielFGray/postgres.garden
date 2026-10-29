@@ -57,6 +57,75 @@ const nestUser = <T extends { readonly username: string | null }>({
   user: username === null ? null : { username },
 });
 
+/** One row of `app_public.playground_commit_result`. */
+interface CommitResultRow {
+  readonly commit_id: string;
+  readonly playground_hash: string;
+  readonly parent_id: string | null;
+  readonly message: string;
+  readonly created_at: Date;
+}
+
+/** The files of one save, in the form the commit functions store. */
+const encodeCommitData = (body: CommitPayload) =>
+  S.encodeEffect(S.fromJsonString(S.Unknown))({
+    files: body.files,
+    activeFile: body.activeFile,
+  });
+
+/**
+ * Add a commit to a playground. The function refuses a playground the caller
+ * does not own, so it is also the authorization check.
+ */
+const commitTo = (
+  authDb: KyselyDB,
+  commit: { readonly hash: string; readonly message: string; readonly data: string },
+) =>
+  runQuery(
+    authDb
+      .selectFrom(
+        sql<CommitResultRow>`app_public.create_playground_commit(
+          ${null},
+          ${commit.message},
+          ${commit.data}::jsonb,
+          ${commit.hash},
+          ${null}
+        )`.as("result"),
+      )
+      .selectAll(),
+  ).pipe(
+    Effect.head,
+    Effect.catchTag("NoSuchElementError", () =>
+      Effect.die(new Error("create_playground_commit returned no rows")),
+    ),
+  );
+
+/**
+ * Copy a playground into a new one the caller owns, whose first commit holds
+ * the source's latest commit.
+ */
+const forkFrom = (
+  authDb: KyselyDB,
+  source: { readonly hash: string; readonly name: string | null },
+) =>
+  runQuery(
+    authDb
+      .selectFrom((eb) =>
+        eb
+          .fn<CommitResultRow>("app_public.fork_playground", [
+            eb.val(source.hash),
+            eb.val(source.name),
+          ])
+          .as("result"),
+      )
+      .selectAll(),
+  ).pipe(
+    Effect.head,
+    Effect.catchTag("NoSuchElementError", () =>
+      Effect.die(new Error("fork_playground returned no rows")),
+    ),
+  );
+
 /**
  * @effect-expect-leaking CurrentSession
  *
@@ -259,26 +328,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ).pipe(Effect.head, Effect.map(nestUser)),
 
       fork: (hash: string, name: string | null | undefined) =>
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom((eb) =>
-              eb
-                .fn<{
-                  commit_id: string;
-                  playground_hash: string;
-                  parent_id: string | null;
-                  message: string;
-                  created_at: Date;
-                }>("app_public.fork_playground", [eb.val(hash), eb.val(name ?? null)])
-                .as("result"),
-            )
-            .selectAll(),
-        ).pipe(
-          Effect.head,
-          Effect.catchTag("NoSuchElementError", () =>
-            Effect.die(new Error("Failed to fork playground")),
-          ),
-        ),
+        asVisitor((authDb) => forkFrom(authDb, { hash, name: name ?? null })),
 
       update: (hash: string, input: UpdatePlaygroundInput) =>
         asVisitor((authDb) =>
@@ -297,66 +347,33 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
             const playground = yield* runQuery(
               authDb
                 .selectFrom("app_public.playgrounds")
-                .select(["hash", "user_id"])
+                .select(["hash", "name", "user_id"])
                 .where("hash", "=", hash),
             ).pipe(Effect.head);
 
+            const data = yield* encodeCommitData(body);
+
             if (playground.user_id === userId) {
-              const filesJson = yield* S.encodeEffect(S.fromJsonString(S.Unknown))({
-                files: body.files,
-                activeFile: body.activeFile,
-              });
-              return yield* runQuery(
-                authDb
-                  .selectFrom(
-                    sql<{
-                      commit_id: string;
-                      playground_hash: string;
-                      parent_id: string | null;
-                      message: string;
-                      created_at: Date;
-                    }>`app_public.create_playground_commit(
-                                                                                      ${null},
-                                                                                      ${body.message},
-                                                                                      ${filesJson}::jsonb,
-                                                                                      ${hash},
-                                                                                      ${null}
-                                                                                    )`.as("result"),
-                  )
-                  .selectAll(),
-              ).pipe(
-                Effect.head,
-                Effect.catchTag("NoSuchElementError", () =>
-                  Effect.die(new Error("create_playground_commit returned no rows")),
-                ),
-                Effect.map((result) => ({ ...result, forked: false as const })),
-              );
+              return {
+                ...(yield* commitTo(authDb, { hash, message: body.message, data })),
+                forked: false as const,
+              };
             }
 
-            return yield* runQuery(
-              authDb
-                .selectFrom((eb) =>
-                  eb
-                    .fn<{
-                      commit_id: string;
-                      playground_hash: string;
-                      parent_id: string | null;
-                      message: string;
-                      created_at: Date;
-                    }>("app_public.fork_playground", [
-                      eb.val(hash),
-                      eb.val(`fork-of-${hash.substring(0, 8)}`),
-                    ])
-                    .as("result"),
-                )
-                .selectAll(),
-            ).pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementError", () =>
-                Effect.die(new Error("fork_playground returned no rows")),
-              ),
-              Effect.map((result) => ({ ...result, forked: true as const })),
-            );
+            // Saving a playground that is not the caller's forks it, and the
+            // work being saved lands on top of the copy. The fork's first commit
+            // is the source as it stands, so the copy records what it came from
+            // and still keeps the changes that prompted it. This holds for an
+            // admin too: the editor never writes into someone else's playground.
+            const fork = yield* forkFrom(authDb, { hash, name: playground.name });
+            return {
+              ...(yield* commitTo(authDb, {
+                hash: fork.playground_hash,
+                message: body.message,
+                data,
+              })),
+              forked: true as const,
+            };
           }),
         ),
 
