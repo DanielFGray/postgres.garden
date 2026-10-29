@@ -2,17 +2,17 @@
 
 import dotenv from "dotenv";
 import { Prompt } from "effect/cli";
-import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Config, Crypto, Effect, FileSystem } from "effect";
+import { NodeCrypto, NodeRuntime, NodeServices } from "@effect/platform-node";
+import { Config, Effect, FileSystem, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import packageJson from "../package.json" with { type: "json" };
 
 const DOTENV_PATH = ".env";
 
-/** A random failure is a defect: there is no safe fallback for a password. */
+/** A password of `len` random bytes, in a form safe for an env file. */
 const generatePassword = (len: number) =>
-  Crypto.Crypto.use((crypto) => crypto.randomBytes(len)).pipe(
+  SecureRandom.SecureRandom.use((random) => random.randomBytes(len)).pipe(
     Effect.map((bytes) => Buffer.from(bytes).toString("base64").replace(/\W/g, "_")),
-    Effect.orDie,
   );
 
 const validName = (s: string): Effect.Effect<string, string> =>
@@ -34,7 +34,7 @@ type Ctx = Record<string, string>;
 interface FieldDef {
   prompt?: { message: string; validate?: (s: string) => Effect.Effect<string, string> };
   derive?: (ctx: Ctx) => string;
-  generate?: () => Effect.Effect<string, never, Crypto.Crypto>;
+  generate?: () => Effect.Effect<string, never, SecureRandom.SecureRandom>;
 }
 
 // Fields are resolved in declaration order - dependencies must come first
@@ -83,7 +83,7 @@ const resolveField = (
   resolved: Ctx,
   interactive: boolean,
   defaults: Ctx,
-): Effect.Effect<string | undefined, never, Prompt.Environment | Crypto.Crypto> => {
+): Effect.Effect<string | undefined, never, Prompt.Environment | SecureRandom.SecureRandom> => {
   // Keep existing value
   if (existing[key]) return Effect.succeed(existing[key]);
 
@@ -172,4 +172,9 @@ const program = Effect.gen(function* () {
   yield* Effect.log(`.env ${action}`);
 });
 
-program.pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
+program.pipe(
+  // NodeServices carries no crypto service, so NodeCrypto supplies the
+  // `effect/crypto` family the password generator needs.
+  Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  NodeRuntime.runMain,
+);

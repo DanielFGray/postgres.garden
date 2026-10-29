@@ -1,5 +1,6 @@
 import { NodeCrypto } from "@effect/platform-node";
-import { Context, Crypto, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
 import { valkey } from "../valkey.js";
@@ -31,17 +32,17 @@ export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
 export class SessionService extends Context.Service<SessionService>()("SessionService", {
   make: Effect.gen(function* () {
     const runRoot = yield* rootQuerier;
-    const crypto = yield* Crypto.Crypto;
+    const secureRandom = yield* SecureRandom.SecureRandom;
+    const digest = yield* Digest.Digest;
 
-    /** `length` random bytes as hex. A failing random source is a defect, not a typed error. */
+    /** `length` random bytes as hex. */
     const generateSecureRandomString = (length = 32) =>
-      crypto.randomBytes(length).pipe(
-        Effect.map((bytes) => Buffer.from(bytes).toString("hex")),
-        Effect.orDie,
-      );
+      secureRandom
+        .randomBytes(length)
+        .pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
 
     const hashSecret = (secret: string) =>
-      crypto.digest("SHA-256", new TextEncoder().encode(secret)).pipe(Effect.orDie);
+      digest.digest(Digest.sha256, new TextEncoder().encode(secret));
 
     return {
       createSession: Effect.fnUntraced(function* (userId: string) {
@@ -57,7 +58,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         const id = yield* generateSecureRandomString();
         const secret = yield* generateSecureRandomString();
         const secretHash = Buffer.from(yield* hashSecret(secret)).toString("hex");
-        const sessionUuid = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+        const sessionUuid = yield* secureRandom.uuidV4();
         const expiresAt = DateTime.toDate(
           DateTime.add(DateTime.nowUnsafe(), { milliseconds: SESSION_TTL_MS }),
         );

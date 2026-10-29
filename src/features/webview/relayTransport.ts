@@ -5,7 +5,12 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { Effect, Match, Option } from "effect";
 import * as S from "effect/Schema";
 import { makeApiCaller, makePgGardenClient } from "../../httpapi-client";
-import { RelayRequest, type RelayRequestEncoded, RelayResponse } from "./relayProtocol";
+import {
+  RelayMethod,
+  RelayRequest,
+  type RelayRequestEncoded,
+  RelayResponse,
+} from "./relayProtocol";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -97,7 +102,12 @@ export const makeRelayTransport = <Encoded>(channel: RelayChannel<Encoded>) => {
             new RelayRequest({
               type: "api-relay-request",
               id,
-              method: request.method,
+              // `HttpClientRequest.method` is a plain string, so the method is
+              // decoded here for the same reason the headers are: what crosses
+              // the wire is only ever what the relay contract names.
+              method: yield* S.decodeUnknownEffect(RelayMethod)(request.method).pipe(
+                Effect.mapError(encodeFailed),
+              ),
               path: `${url.pathname}${url.search}`,
               // Decoding here drops every header the relay does not carry, so
               // the wire value cannot hold one the host would refuse.
