@@ -47,6 +47,8 @@ export const UserAuthentication = S.Struct({
 
 export const Playground = S.Struct({
   hash: S.String,
+  /** The playground's newest commit; null until its first one. */
+  head_commit_id: S.NullOr(S.String),
   user_id: S.NullOr(Uuid),
   fork_hash: S.NullOr(S.String),
   privacy: Privacy,

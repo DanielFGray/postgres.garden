@@ -470,6 +470,31 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
                 files: ReadonlyArray<{ path: string; content: string }>;
               }>();
               expect(copied.files).toEqual([{ path: "query.sql", content: "-- the owner's" }]);
+
+              // Opening the fork loads the commit the playground names as its
+              // head, which must be the save and not the copy it sits on.
+              const opened = yield* http("GET", `/api/playgrounds/${fork.playground_hash}`, {
+                cookie: forkerCookie,
+              });
+              const { head_commit_id } = yield* opened.json<{ head_commit_id: string | null }>();
+              expect(head_commit_id).toBe(fork.commit_id);
+
+              // The next save on the fork continues from that head rather than
+              // from the copy that shares its timestamp.
+              const second = yield* http(
+                "POST",
+                `/api/playgrounds/${fork.playground_hash}/commits`,
+                {
+                  cookie: forkerCookie,
+                  body: {
+                    message: "the forker's second commit",
+                    files: [{ path: "query.sql", content: "-- the forker's, again" }],
+                  },
+                },
+              );
+              const continued = yield* second.json<{ parent_id: string | null; forked: boolean }>();
+              expect(continued.parent_id).toBe(fork.commit_id);
+              expect(continued.forked).toBe(false);
             }),
           ),
         );

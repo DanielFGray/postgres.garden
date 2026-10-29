@@ -121,6 +121,7 @@ export interface AppPublicPlaygrounds {
   expires_at: Timestamp | null;
   fork_hash: string | null;
   hash: string;
+  head_commit_id: string | null;
   name: string | null;
   privacy: Generated<AppPublicPrivacy>;
   updated_at: Generated<Timestamp>;

@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
 import { DateTime, Effect, Exit, Option, pipe } from "effect";
 import * as S from "effect/Schema";
-import { httpApiGetPlaygroundCommit, httpApiListPlaygroundCommits } from "../httpapi-client";
+import { httpApiGetPlayground, httpApiGetPlaygroundCommit } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import { toError } from "../shared/index.js";
 import { CommitDetail } from "../../server/apiSchema.js";
@@ -333,8 +333,11 @@ const loadWorkspaceCore = (
       if (result === null) return;
       data = result;
     } else {
-      // Loading a playground's latest commit
-      const commits = yield* httpApiListPlaygroundCommits(playgroundHash).pipe(
+      // Loading the playground's newest commit, which the playground names. A
+      // fork and the save that lands on it are written in one transaction and
+      // so carry the same timestamp, which leaves a commit list unable to say
+      // which of the two came last.
+      const playground = yield* httpApiGetPlayground(playgroundHash).pipe(
         Effect.catch((error) => {
           if (error.status === 404) {
             return clearWorkspace.pipe(
@@ -360,15 +363,17 @@ const loadWorkspaceCore = (
           }
           return Effect.fail(
             new WorkspaceError({
-              message: `Failed to fetch playground commits: ${error.status} ${error.message}`,
+              message: `Failed to fetch playground: ${error.status} ${error.message}`,
             }),
           );
         }),
       );
 
-      if (commits === null) return;
+      if (playground === null) return;
 
-      if (!Array.isArray(commits) || commits.length === 0) {
+      const head = playground.head_commit_id;
+
+      if (head === null) {
         progress.report({ message: "Clearing workspace..." });
         yield* clearWorkspace;
         vscode.window.showInformationMessage(
@@ -377,14 +382,7 @@ const loadWorkspaceCore = (
         return;
       }
 
-      const latestCommit = pipe(
-        Option.fromNullishOr(commits[0]),
-        Option.getOrThrowWith(
-          () => new WorkspaceError({ message: "Invalid playground commit list received" }),
-        ),
-      );
-
-      data = yield* httpApiGetPlaygroundCommit(playgroundHash, latestCommit.id).pipe(
+      data = yield* httpApiGetPlaygroundCommit(playgroundHash, head).pipe(
         Effect.mapError(
           (error) =>
             new WorkspaceError({
