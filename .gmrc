@@ -9,6 +9,9 @@
  */
 
 {
+  // ops dev db makes each database owned by this group role; the migration login is a member.
+  "databaseOwner": "postgres_garden_owner",
+
   /*
    * Database connections strings are sourced from the DATABASE_URL,
    * SHADOW_DATABASE_URL and ROOT_DATABASE_URL environmental variables.
@@ -64,6 +67,8 @@
    * afterReset: actions executed after a `graphile-migrate reset` command.
    */
   "afterReset": [
+    // graphile-migrate recreates the shadow database empty; ops rebuilds it from the cartridge.
+    { "_": "command", "shadow": true, "command": "ops dev db reset \"$GM_DBNAME\"" },
     "!afterReset.sql",
   ],
 
