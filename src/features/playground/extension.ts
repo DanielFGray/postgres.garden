@@ -6,7 +6,7 @@ import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
-import { PlaygroundService } from "./services/PlaygroundService";
+import { httpApiCreatePlayground, httpApiTogglePlaygroundStar } from "../../httpapi-client";
 import { navigateTo } from "../../shared/navigation";
 import { getCurrentPlaygroundId } from "../../shared/routes";
 import { Workbench } from "../../workbench";
@@ -26,7 +26,6 @@ const activatePlaygroundExtension = Effect.gen(function* () {
   const { runFork } = yield* Workbench;
   const vscodeApi = vscodeService.api;
 
-  const service = new PlaygroundService();
   const subscriptions: vscode.Disposable[] = [];
   const extensionUri = vscodeService.extensionUri;
 
@@ -89,7 +88,7 @@ const activatePlaygroundExtension = Effect.gen(function* () {
         const playgroundId = getCurrentPlaygroundId();
         if (!playgroundId) return;
 
-        yield* service.toggleStar(playgroundId);
+        yield* httpApiTogglePlaygroundStar(playgroundId);
         yield* refreshMetadata;
       }).pipe(
         Effect.tapError((error) =>
@@ -125,9 +124,14 @@ const activatePlaygroundExtension = Effect.gen(function* () {
           return;
         }
 
-        const playground = yield* service.createPlayground({
+        // The create endpoint carries no privacy field, so a new playground is
+        // whatever the database defaults to: secret, reachable by anyone with
+        // the link. Asking the author for a privacy here needs the field to
+        // exist on the wire first.
+        const playground = yield* httpApiCreatePlayground({
           name,
-          privacy: "private",
+          message: "Initial commit",
+          files: [],
         });
 
         const url = `/playgrounds/${playground.playground_hash}`;
