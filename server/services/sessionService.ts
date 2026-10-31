@@ -1,5 +1,5 @@
 import { NodeCrypto } from "@effect/platform-node";
-import { Context, DateTime, Effect, Layer, Option, Schema as S } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
@@ -121,6 +121,11 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         if (!(id && secret)) return anonymous;
 
         const data = yield* Effect.tryPromise(() => valkey.hgetall(sessionKey(id)));
+        // Valkey answers a key it does not hold with an empty hash, which is
+        // every expired, revoked and invented cookie. That is absence, not a
+        // session written in the wrong shape, so it must not reach the decode
+        // below: otherwise any junk cookie logs a warning about this code.
+        if (Record.isEmptyRecord(data)) return anonymous;
 
         const decoded = yield* decodeCachedSession(data).pipe(
           Effect.tapError((error) =>
