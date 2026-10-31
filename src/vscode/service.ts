@@ -16,7 +16,6 @@ import {
   PGLITE_EXECUTE,
   PGLITE_INTROSPECT,
   PGLITE_RESET,
-  PLAYGROUND_CREATE,
   PLAYGROUND_METADATA,
   PLAYGROUND_OPEN,
   PLAYGROUND_OPEN_CURRENT,
@@ -111,7 +110,6 @@ const manifest: Parameters<typeof registerExtension>[0] = {
         title: "Edit Current Playground Metadata",
         icon: "$(edit)",
       },
-      { command: PLAYGROUND_CREATE, title: "Create Playground", icon: "$(add)" },
       {
         command: PLAYGROUND_REFRESH_METADATA,
         title: "Refresh Playground Metadata",

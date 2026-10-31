@@ -11,7 +11,6 @@ import {
   PGLITE_EXECUTE,
   PGLITE_INTROSPECT,
   PGLITE_RESET,
-  PLAYGROUND_CREATE,
   PLAYGROUND_SHOW_BROWSER,
   SERVER_SYNC_COMMIT,
   WORKSPACE_DOWNLOAD,
@@ -461,7 +460,6 @@ const activatePostgresFeature = Effect.gen(function* () {
 
   // Titlebar icons (top-right, alongside layout controls / accounts / settings)
   const titleBarActions: Array<[string, string, (typeof Codicon)[keyof typeof Codicon], number]> = [
-    [PLAYGROUND_CREATE, "Create Playground", Codicon.add, 1],
     [PLAYGROUND_SHOW_BROWSER, "Browse Playgrounds", Codicon.database, 2],
     [SERVER_SYNC_COMMIT, "Save", Codicon.cloudUpload, 3],
     [ERD_SHOW, "Show ERD", Codicon.typeHierarchy, 4],

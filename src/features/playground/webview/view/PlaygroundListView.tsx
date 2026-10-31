@@ -132,28 +132,6 @@ export const PlaygroundListView = () => {
 
   onCleanup(() => debounceFiber && Effect.runFork(Fiber.interrupt(debounceFiber)));
 
-  function handleCreate() {
-    const name = prompt("Playground name:");
-    if (!name) return;
-
-    setMutationError(null);
-    runAction(
-      apiCall("playground.list.create", (api) =>
-        api.apiPlaygrounds.createPlayground({
-          payload: { name, message: "Initial commit", files: [] },
-        }),
-      ).pipe(
-        Effect.match({
-          onSuccess: (created) => {
-            runAction(openPlayground(created.playground_hash));
-            refresh(playgrounds);
-          },
-          onFailure: (error) => setMutationError(error.message),
-        }),
-      ),
-    );
-  }
-
   function handleSearch(value: string) {
     setSearchInput(value);
 
@@ -176,14 +154,6 @@ export const PlaygroundListView = () => {
 
       <div class="header">
         <h3>Playgrounds</h3>
-        <button
-          class="icon-button"
-          id="create-btn"
-          title="Create Playground"
-          onClick={handleCreate}
-        >
-          <i class="codicon codicon-add" />
-        </button>
       </div>
 
       <div class="search-container">

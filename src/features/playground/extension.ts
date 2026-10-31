@@ -6,8 +6,7 @@ import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
-import { httpApiCreatePlayground, httpApiTogglePlaygroundStar } from "../../httpapi-client";
-import { navigateTo } from "../../shared/navigation";
+import { httpApiTogglePlaygroundStar } from "../../httpapi-client";
 import { getCurrentPlaygroundId } from "../../shared/routes";
 import { Workbench } from "../../workbench";
 import {
@@ -15,7 +14,6 @@ import {
   PLAYGROUND_OPEN,
   PLAYGROUND_OPEN_CURRENT,
   PLAYGROUND_REFRESH_METADATA,
-  PLAYGROUND_CREATE,
   PLAYGROUND_TOGGLE_STAR,
   PLAYGROUND_METADATA,
 } from "../constants";
@@ -95,52 +93,6 @@ const activatePlaygroundExtension = Effect.gen(function* () {
           Effect.sync(() => {
             void vscodeApi.window.showErrorMessage(
               `Failed to toggle star: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }),
-        ),
-        Effect.ignore,
-      ),
-    );
-  });
-
-  yield* vscodeService.registerCommand(PLAYGROUND_CREATE, () => {
-    runFork(
-      Effect.gen(function* () {
-        const name = yield* Effect.tryPromise(() =>
-          vscodeApi.window.showInputBox({
-            prompt: "Enter playground name",
-            placeHolder: "my-playground",
-            validateInput: (value) => {
-              if (!value) return "Name is required";
-              if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-                return "Name can only contain letters, numbers, hyphens, and underscores";
-              }
-              return null;
-            },
-          }),
-        );
-
-        if (!name) {
-          return;
-        }
-
-        // The create endpoint carries no privacy field, so a new playground is
-        // whatever the database defaults to: secret, reachable by anyone with
-        // the link. Asking the author for a privacy here needs the field to
-        // exist on the wire first.
-        const playground = yield* httpApiCreatePlayground({
-          name,
-          message: "Initial commit",
-          files: [],
-        });
-
-        const url = `/playgrounds/${playground.playground_hash}`;
-        navigateTo(url);
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.sync(() => {
-            void vscodeApi.window.showErrorMessage(
-              `Failed to create playground: ${error instanceof Error ? error.message : String(error)}`,
             );
           }),
         ),
