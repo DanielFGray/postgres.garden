@@ -16,10 +16,8 @@ import { SessionService, sessionKey } from "./services/sessionService.js";
 import { makeSetCookie } from "./services/cookies.js";
 import { DatabaseLive, rootQuerier, runQuery } from "./db.js";
 
-const publicUrl = env.VITE_ROOT_URL.replace(/\/$/, "");
-
 const resolveRedirectLocation = (target: string) =>
-  target.startsWith("http") ? target : new URL(target, `${publicUrl}/`).toString();
+  target.startsWith("http") ? target : new URL(target, `${env.VITE_ROOT_URL}/`).toString();
 
 export class ValkeyError extends S.TaggedError<ValkeyError, { readonly brand: unique symbol }>()(
   "ValkeyError",

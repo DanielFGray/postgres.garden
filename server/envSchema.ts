@@ -1,4 +1,5 @@
 import * as S from "effect/Schema";
+import { SchemaGetter } from "effect";
 
 /**
  * What the production server reads from the environment. Migrations and the
@@ -12,7 +13,18 @@ export const envSchema = S.Struct({
     S.Literals(["test"]),
   ]),
   PORT: S.String,
-  VITE_ROOT_URL: S.String,
+  /**
+   * Where the app is served. A trailing slash is dropped here, because callers
+   * append a path to it: GitHub compares the redirect_uri it is sent with the
+   * one registered on the OAuth app, and `//auth/github/callback` is a
+   * different URL.
+   */
+  VITE_ROOT_URL: S.String.pipe(
+    S.decode({
+      decode: SchemaGetter.transform((url: string) => url.replace(/\/+$/, "")),
+      encode: SchemaGetter.transform((url: string) => url),
+    }),
+  ),
   /** Owner login. The server's root pool connects with it. */
   DATABASE_URL: S.String,
   /** Login for the visitor pool. It switches to `DATABASE_VISITOR` per request. */
