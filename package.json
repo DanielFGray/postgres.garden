@@ -34,6 +34,7 @@
     "test:unit": "bun --env-file=.env vitest run",
     "test:watch": "bun --env-file=.env vitest --watch",
     "test:e2e": "bunx playwright test --project=chromium",
+    "smoke": "bun scripts/smoke.ts",
     "test": "run-s -c typecheck lint ast-grep test:unit test:e2e",
     "worker": "bun --cwd=worker --env-file=../.env graphile-worker",
     "worker:prod": "bun --cwd=worker graphile-worker",
