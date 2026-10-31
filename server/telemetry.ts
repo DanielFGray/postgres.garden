@@ -14,7 +14,12 @@ const OtlpLive = Otlp.layerFromConfig({
   resource: { serviceName: "postgres-garden" },
 }).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer));
 
-// DevTools connects to effect-devtui over WebSocket (port 34437).
-const DevToolsLive = isDev ? DevTools.layer() : Layer.empty;
+// Streaming traces to effect-devtui is opt-in, like the export above: the
+// devtools client retries its WebSocket every second and never gives up, so
+// switching it on by NODE_ENV alone means a dev who is not running the
+// collector pays for a reconnect loop. Set VITE_DEVTOOLS_URL (the client reads
+// the same variable) to something like ws://localhost:34437 to turn it on.
+const DevToolsLive =
+  isDev && env.VITE_DEVTOOLS_URL ? DevTools.layer(env.VITE_DEVTOOLS_URL) : Layer.empty;
 
 export const TelemetryLive = Layer.provideMerge(OtlpLive, DevToolsLive);

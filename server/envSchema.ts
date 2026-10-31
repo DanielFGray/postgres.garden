@@ -37,6 +37,8 @@ export const envSchema = S.Struct({
   VALKEY_URL: S.optionalKey(S.String),
   OTEL_EXPORTER_OTLP_ENDPOINT: S.optionalKey(S.String),
   VITE_OTEL_COLLECTOR_URL: S.optionalKey(S.String),
+  /** Where effect-devtui listens, e.g. `ws://localhost:34437`. Unset means no devtools. */
+  VITE_DEVTOOLS_URL: S.optionalKey(S.String),
 });
 
 export type Env = typeof envSchema.Type;

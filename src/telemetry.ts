@@ -38,8 +38,12 @@ const WebSdkLive = collectorUrl
       resource: { serviceName: "postgres-garden-web" },
     }));
 
-// DevTools.layer() includes Socket.layerWebSocketConstructorGlobal
-// which uses the browser's native WebSocket — no platform-browser import needed
-const DevToolsLive = isDev ? DevTools.layer() : Layer.empty;
+// Streaming traces to effect-devtui is opt-in, like the OTLP export above:
+// the devtools client retries its WebSocket every second and never gives up,
+// so switching it on by NODE_ENV alone fills the console of every dev who is
+// not running the collector. DevTools.layer() provides the global WebSocket
+// constructor itself, so no platform-browser import is needed.
+const devtoolsUrl = import.meta.env.VITE_DEVTOOLS_URL;
+const DevToolsLive = isDev && devtoolsUrl ? DevTools.layer(devtoolsUrl) : Layer.empty;
 
 export const TelemetryLive = Layer.provideMerge(WebSdkLive, DevToolsLive);
