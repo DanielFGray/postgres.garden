@@ -1,0 +1,21 @@
+id: no-command-string-literals
+language: TypeScript
+severity: error
+message: A command id belongs in src/features/constants.ts, not in a string literal at the call site
+note: |
+  A literal here is invisible to a rename and a typo in it fails at runtime.
+  Define the id in src/features/constants.ts and import it:
+    registerCommand(PLAYGROUND_OPEN, run)   not   registerCommand("playground.open", run)
+rule:
+  any:
+    - pattern: $_.registerCommand($CMD)
+    - pattern: $_.registerCommand($CMD, $$$)
+    - pattern: $_.executeCommand($CMD)
+    - pattern: $_.executeCommand($CMD, $$$)
+    - pattern: registerCommand($CMD)
+    - pattern: registerCommand($CMD, $$$)
+    - pattern: executeCommand($CMD)
+    - pattern: executeCommand($CMD, $$$)
+constraints:
+  CMD:
+    kind: string

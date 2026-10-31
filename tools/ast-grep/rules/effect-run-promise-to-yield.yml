@@ -1,5 +1,12 @@
 id: effect-run-promise-to-yield
 language: TypeScript
+# A suggestion, not an invariant: a script or a process entry point has to run
+# the effect somewhere. Declared hint so `bun ast-grep` reports it and passes.
+severity: hint
+message: Inside a program, yield* the effect instead of running it; only an entry point runs one
 rule:
   pattern: await Effect.runPromise($E)
 fix: yield* $E
+# A script's last line is its entry point, where running the effect is correct.
+ignores:
+  - "scripts/**"

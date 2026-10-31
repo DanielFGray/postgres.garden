@@ -1,5 +1,9 @@
 id: effect-gen-to-fn-untraced
 language: TypeScript
+# A codemod for the Effect migration rather than an invariant: apply it with
+# `ast-grep scan -U`. Declared hint so `bun ast-grep` reports it and passes.
+severity: hint
+message: A function whose whole body is Effect.gen can be written with Effect.fnUntraced
 rule:
   any:
     - pattern: "function $N($$$ARGS): Effect.Effect<$T> { return Effect.gen(function*() { $$$BODY }) }"
