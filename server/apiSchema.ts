@@ -26,6 +26,7 @@ import {
   Locked,
   NotFound,
   ServerError,
+  ServiceUnavailable,
   Unauthorized,
 } from "./errors.js";
 
@@ -443,8 +444,12 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
   .prefix("/api");
 
 const systemGroup = HttpApiGroup.make("system").add(
+  // The deploy platform health-checks this route, so it answers 503 when a
+  // dependency is down: an instance that cannot reach Postgres should be taken
+  // out of rotation, not kept in it because the process is still running.
   HttpApiEndpoint.get("healthz", "/healthz", {
     success: S.Struct({ ok: S.Boolean }),
+    error: [ServiceUnavailable],
   }),
 );
 

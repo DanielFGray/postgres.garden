@@ -1,24 +1,59 @@
-import { Effect, Schedule, pipe, Duration, Schema as S } from "effect";
+import { Duration, Effect, Schedule, Schema as S } from "effect";
 import { sql } from "kysely";
-import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { CurrentSession } from "./apiSchema.js";
+import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { valkey } from "./valkey.js";
 
-class PostgresNotReady extends S.TaggedError<PostgresNotReady, { readonly brand: unique symbol }>()(
-  "PostgresNotReady",
-  {
-    message: S.String,
-  },
-) {}
+/** A service the server cannot work without did not answer. */
+export class DependencyUnavailable extends S.TaggedError<
+  DependencyUnavailable,
+  { readonly brand: unique symbol }
+>()("DependencyUnavailable", {
+  dependency: S.String,
+  message: S.String,
+}) {}
 
-class ValkeyNotReady extends S.TaggedError<ValkeyNotReady, { readonly brand: unique symbol }>()(
-  "ValkeyNotReady",
-  {
-    message: S.String,
-  },
-) {}
+/**
+ * Blocks until every dependency answers, retrying with backoff for about a
+ * minute. Run it before the server accepts connections: a container that
+ * starts beside its database would otherwise answer 500 to every request that
+ * arrives while Postgres is still coming up.
+ *
+ * Wrapped in `suspend` so the probes below can be declared after the two
+ * entries a reader of this module is looking for.
+ */
+export const waitForDependencies = Effect.suspend(() =>
+  Effect.all([ownerPool.waited, visitorPool.waited, cache.waited], {
+    concurrency: "unbounded",
+  }),
+).pipe(
+  Effect.asVoid,
+  Effect.tap(() => Effect.log("Dependencies are ready")),
+  Effect.provideService(CurrentSession, { user: null, session: null }),
+  Effect.withSpan("server.waitForDependencies"),
+);
 
-/** Exponential backoff from 100ms, capped at 5s between attempts, for at most 20 retries. */
+/**
+ * One bounded attempt at each dependency, for the health endpoint. It does not
+ * retry: a health check answers what is true now and lets the platform decide,
+ * where retrying would hold the request open past the platform's own timeout
+ * and report healthy on the way out.
+ */
+export const checkDependencies = Effect.suspend(() =>
+  Effect.all([ownerPool.checked, visitorPool.checked, cache.checked], {
+    concurrency: "unbounded",
+  }),
+).pipe(
+  Effect.asVoid,
+  Effect.provideService(CurrentSession, { user: null, session: null }),
+  Effect.withSpan("server.checkDependencies"),
+);
+
+// ---------------------------------------------------------------------------
+// The probes
+// ---------------------------------------------------------------------------
+
+/** Exponential backoff from 100ms, capped at 5s between attempts, 20 retries. */
 const retrySchedule = Schedule.max([
   Schedule.min([
     Schedule.exponential(Duration.millis(100)),
@@ -27,50 +62,41 @@ const retrySchedule = Schedule.max([
   Schedule.recurs(20),
 ]);
 
-const testDb = <A, E, R>(probe: Effect.Effect<A, E, R>, name: string) =>
-  pipe(
-    probe,
+const probeTimeout = Duration.seconds(2);
+
+/** Names one dependency's probe and gives it the two shapes callers need. */
+const probe = <A, E, R>(dependency: string, check: Effect.Effect<A, E, R>) => {
+  const attempt = check.pipe(
     Effect.asVoid,
-    Effect.mapError(
-      (e) =>
-        new PostgresNotReady({
-          message: `${name}: ${e instanceof Error ? e.message : String(e)}`,
-        }),
-    ),
-    Effect.retry(retrySchedule),
-    Effect.catchTag("PostgresNotReady", (e) =>
-      Effect.die(new Error(`Postgres not ready after retries: ${e.message}`)),
-    ),
+    Effect.catch((cause) => new DependencyUnavailable({ dependency, message: String(cause) })),
   );
+  return {
+    waited: attempt.pipe(Effect.retry(retrySchedule)),
+    checked: attempt.pipe(
+      Effect.timeoutOrElse({
+        duration: probeTimeout,
+        orElse: () =>
+          Effect.fail(
+            new DependencyUnavailable({
+              dependency,
+              message: `no answer within ${Duration.format(probeTimeout)}`,
+            }),
+          ),
+      }),
+    ),
+  };
+};
 
 const ping = (db: KyselyDB) => runQuery(db.selectNoFrom([sql.lit(1).as("ready")]));
 
-/**
- * Probes both pools. The visitor probe runs as an anonymous visitor, which
- * exercises the role switch as well as connectivity.
- */
-const waitForPostgres = Effect.gen(function* () {
-  yield* Effect.all([testDb(asRoot(ping), "rootDb"), testDb(asVisitor(ping), "authDb")], {
-    concurrency: "unbounded",
-  });
-  yield* Effect.log("Postgres is ready");
-}).pipe(Effect.provideService(CurrentSession, { user: null, session: null }));
-
-const waitForValkey = pipe(
+// Both pools, because they log in as different roles. The visitor probe runs as
+// an anonymous visitor, so it exercises the role switch as well as the socket.
+const ownerPool = probe("postgres (owner pool)", asRoot(ping));
+const visitorPool = probe("postgres (visitor pool)", asVisitor(ping));
+const cache = probe(
+  "valkey",
   Effect.tryPromise({
     try: () => valkey.ping(),
-    catch: (e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      return new ValkeyNotReady({ message: msg });
-    },
+    catch: (cause) => new DependencyUnavailable({ dependency: "valkey", message: String(cause) }),
   }),
-  Effect.retry(retrySchedule),
-  Effect.tap(() => Effect.log("Valkey is ready")),
-  Effect.catchTag("ValkeyNotReady", (e) =>
-    Effect.die(new Error(`Valkey not ready after retries: ${e.message}`)),
-  ),
 );
-
-export const waitForDependencies = Effect.all([waitForPostgres, waitForValkey], {
-  concurrency: "unbounded",
-}).pipe(Effect.withSpan("server.waitForDependencies"));

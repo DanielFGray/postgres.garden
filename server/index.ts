@@ -12,6 +12,7 @@ import { DatabaseLive } from "./db.js";
 import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
 import { getPageData } from "./layers/getPageData.js";
+import { waitForDependencies } from "./ready.js";
 import { PageStateSchema, type PageState } from "../src/shared/dehydrate.js";
 import { HttpApiLive } from "./apiHandlers.js";
 
@@ -65,6 +66,7 @@ const makeRuntime = () => {
     ),
   );
   return {
+    awaitDependencies: () => runtime.runPromise(waitForDependencies),
     getPageState: (pathname: string, cookieHeader: string | null) =>
       runtime.runPromise(getPageData(pathname, cookieHeader)),
     runFileSystem: <A, E>(effect: Effect.Effect<A, E, FS.FileSystem>) => runtime.runPromise(effect),
@@ -346,8 +348,11 @@ const runWebServer = () => {
   const responderPromise =
     env.NODE_ENV === "production" ? createProdResponder(runtime) : createDevResponder(runtime);
 
-  responderPromise
-    .then((responder) => {
+  // Nothing is served until Postgres and Valkey answer. A container that comes
+  // up beside its database would otherwise spend its first seconds answering
+  // 500 to real traffic, and the platform's health check would pass throughout.
+  Promise.all([responderPromise, runtime.awaitDependencies()])
+    .then(([responder]) => {
       const server = Bun.serve({
         port: PORT,
         fetch: (request) => {

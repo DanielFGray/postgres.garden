@@ -39,3 +39,7 @@ export class ServerError extends S.TaggedError<ServerError, { readonly brand: un
   { error: S.String },
   { httpApiStatus: 500 },
 ) {}
+export class ServiceUnavailable extends S.TaggedError<
+  ServiceUnavailable,
+  { readonly brand: unique symbol }
+>()("ServiceUnavailable", { error: S.String }, { httpApiStatus: 503 }) {}

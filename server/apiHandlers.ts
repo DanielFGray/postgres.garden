@@ -10,6 +10,7 @@ import {
   Locked,
   NotFound,
   ServerError,
+  ServiceUnavailable,
   Unauthorized,
 } from "./errors.js";
 import {
@@ -18,6 +19,7 @@ import {
   recordHttpError,
   recordWebhook,
 } from "./metrics.js";
+import { checkDependencies } from "./ready.js";
 import { AuthService } from "./services/authService.js";
 import { makeExpiredNamedCookie, makeOAuthCookie } from "./services/cookies.js";
 import {
@@ -981,7 +983,17 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
 
 const systemLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
   handlers.handleAll({
-    healthz: () => Effect.succeed({ ok: true }),
+    healthz: () =>
+      checkDependencies.pipe(
+        Effect.as({ ok: true }),
+        Effect.catchTag("DependencyUnavailable", (e) =>
+          // The dependency's name reaches the client; its error text only the
+          // logs, since a health endpoint is unauthenticated.
+          Effect.logWarning(`healthz: ${e.dependency} unavailable: ${e.message}`).pipe(
+            Effect.andThen(Effect.fail(new ServiceUnavailable({ error: e.dependency }))),
+          ),
+        ),
+      ),
   }),
 );
 
