@@ -23,14 +23,14 @@ class PageNotLoaded extends Data.TaggedError("PageNotLoaded")<{
 }> {}
 
 /**
- * Playwright's own chromium build when it has been downloaded, else the Chrome
- * already on the machine, so a smoke test needs no 170MB fetch.
+ * The same browser playwright.config.ts gives the e2e suite: the bundled
+ * chromium builds do not run on Arch, and the one the system installed does.
  */
 const openBrowser = Effect.acquireRelease(
   Effect.promise<Browser>(() =>
     chromium
-      .launch({ headless: true })
-      .catch(() => chromium.launch({ headless: true, channel: "chrome" })),
+      .launch({ headless: true, executablePath: "/usr/bin/chromium" })
+      .catch(() => chromium.launch({ headless: true })),
   ),
   (browser) => Effect.promise(() => browser.close()),
 );
