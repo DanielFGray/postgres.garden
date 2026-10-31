@@ -1,29 +1,8 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Random } from "effect";
+import { Effect } from "effect";
 import { sql } from "kysely";
 import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
-
-/** Unique enough to keep concurrent test users apart. */
-const randomSuffix = Random.nextIntBetween(0, 0xffffffff).pipe(
-  Effect.map((n) => n.toString(16).padStart(8, "0")),
-);
-
-const createUser = (db: KyselyDB, username: string) =>
-  runQuery(
-    db
-      .selectFrom(
-        sql<{ id: string }>`app_private.really_create_user(
-        username => ${username}::citext,
-        email => ${`${username}@example.com`}::text,
-        email_is_verified => true,
-        password => ${"TestPassword123!"}::text
-      )`.as("user"),
-      )
-      .selectAll(),
-  ).pipe(Effect.head);
-
-const deleteUser = (db: KyselyDB, userId: string) =>
-  runQuery(db.deleteFrom("app_public.users").where("id", "=", userId));
+import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
 
 const userSecrets = (db: KyselyDB, userId: string) =>
   runQuery(
