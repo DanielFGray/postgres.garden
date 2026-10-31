@@ -67,15 +67,6 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
 
     return {
       createSession: Effect.fnUntraced(function* (userId: string) {
-        const user = yield* runRoot((rootDb) =>
-          runQuery(
-            rootDb
-              .selectFrom("app_public.users")
-              .select(["id", "username", "role", "is_verified"])
-              .where("id", "=", userId),
-          ).pipe(Effect.head),
-        );
-
         const id = yield* generateSecureRandomString();
         const secret = yield* generateSecureRandomString();
         const secretHash = Buffer.from(yield* hashSecret(secret)).toString("hex");
@@ -84,6 +75,36 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
           DateTime.add(DateTime.nowUnsafe(), { milliseconds: SESSION_TTL_MS }),
         );
 
+        // The read and the insert must stay in one transaction, and the read
+        // must keep its `for key share`: that lock is what makes the insert's
+        // foreign key safe. An account deletion needs a stronger lock on the
+        // same row, so it either commits first - the read then finds nothing,
+        // which the callers answer as an authentication failure - or it waits
+        // for this transaction and cascades the new session away afterwards.
+        const user = yield* runRoot((rootDb) =>
+          Effect.gen(function* () {
+            const found = yield* runQuery(
+              rootDb
+                .selectFrom("app_public.users")
+                .select(["id", "username", "role", "is_verified"])
+                .where("id", "=", userId)
+                .forKeyShare(),
+            ).pipe(Effect.head);
+
+            yield* runQuery(
+              rootDb.insertInto("app_private.sessions").values({
+                id: sessionUuid,
+                user_id: found.id,
+                expires_at: expiresAt,
+              }),
+            );
+
+            return found;
+          }),
+        );
+
+        // The cache is written only once the session row exists, so a failed
+        // insert leaves no hash behind for a cookie that was never issued.
         const key = sessionKey(id);
         yield* Effect.tryPromise(() =>
           valkey.hset(key, {
@@ -96,16 +117,6 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
           }),
         );
         yield* Effect.tryPromise(() => valkey.expire(key, SESSION_TTL_SECONDS));
-
-        yield* runRoot((rootDb) =>
-          runQuery(
-            rootDb.insertInto("app_private.sessions").values({
-              id: sessionUuid,
-              user_id: user.id,
-              expires_at: expiresAt,
-            }),
-          ),
-        );
 
         return { token: `${id}.${secret}`, id, expiresAt };
       }),

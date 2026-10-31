@@ -338,10 +338,19 @@ test.describe("workbench basics", () => {
     await expect(settings.locator('[data-pw="account-delete-confirm-button"]')).toBeVisible({
       timeout: 15_000,
     });
-    await Promise.all([
-      page.waitForURL((url) => url.pathname === "/" && !url.search, { timeout: 15_000 }),
-      settings.locator('[data-pw="account-delete-confirm-button"]').click(),
-    ]);
+    // Wait for the DELETE itself, not for the URL. The workbench strips the
+    // delete_token from the URL while it boots (src/features/auth.ts), so "/"
+    // with no query string is already true before the click: a wait on the URL
+    // resolves while the request is still in flight, and the login below needs
+    // the deletion to have finished.
+    const deletion = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/me" &&
+        response.request().method() === "DELETE",
+      { timeout: 15_000 },
+    );
+    await settings.locator('[data-pw="account-delete-confirm-button"]').click();
+    expect((await deletion).status()).toBe(200);
 
     const deletedAccountLogin = await request.post("/login", {
       data: { id: username, password },
