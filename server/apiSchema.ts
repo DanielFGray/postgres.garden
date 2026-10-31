@@ -339,6 +339,7 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         name: S.optional(S.NullOr(S.String)),
         message: S.String,
         description: S.optional(S.NullOr(S.String)),
+        privacy: S.optional(Privacy),
         files: S.Array(PlaygroundFile),
         activeFile: S.optional(S.NullOr(S.String)),
       }),

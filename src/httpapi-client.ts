@@ -154,13 +154,18 @@ export const httpApiLogout = call("logout", (api) => api.auth.logout({}));
 export const httpApiGetPlayground = (hash: string) =>
   call("playgrounds.get", (api) => api.apiPlaygrounds.playgroundByHash({ params: { hash } }));
 
-export const httpApiCreatePlayground = (payload: {
-  readonly name?: string | null;
-  readonly message: string;
-  readonly description?: string | null;
-  readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
-  readonly activeFile?: string | null;
-}) => call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
+/**
+ * What the create endpoint accepts, taken from the contract rather than written
+ * out again here. A field added to the endpoint reaches this caller's type with
+ * no edit, which is how `privacy` was found missing: the hand-written copy this
+ * replaces had no such field, so the client could not ask for one.
+ */
+type CreatePlaygroundPayload = Parameters<
+  PgGardenClient["apiPlaygrounds"]["createPlayground"]
+>[0]["payload"];
+
+export const httpApiCreatePlayground = (payload: CreatePlaygroundPayload) =>
+  call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   call("playgrounds.star", (api) => api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }));

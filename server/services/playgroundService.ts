@@ -6,6 +6,7 @@ import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
 import { CurrentSession } from "../apiSchema.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
+import type { Privacy } from "../models.js";
 
 export interface ListPlaygroundsQuery {
   readonly offset?: number | null;
@@ -17,6 +18,7 @@ export interface CreatePlaygroundInput {
   readonly name?: string | null;
   readonly message: string;
   readonly description?: string | null;
+  readonly privacy?: typeof Privacy.Type;
   readonly files: ReadonlyArray<{
     readonly path: string;
     readonly content: string;
@@ -27,7 +29,7 @@ export interface CreatePlaygroundInput {
 export interface UpdatePlaygroundInput {
   readonly name?: string | null;
   readonly description?: string | null;
-  readonly privacy?: "private" | "secret" | "public" | null;
+  readonly privacy?: typeof Privacy.Type | null;
 }
 
 export interface CommitPayload {
@@ -84,12 +86,15 @@ const commitTo = (
   runQuery(
     authDb
       .selectFrom(
+        // Named arguments: the function has six parameters, five of them with
+        // defaults, so a positional call says which value is which only by
+        // counting. A commit to an existing playground names neither its
+        // privacy nor its name, which the playground already has.
         sql<CommitResultRow>`app_public.create_playground_commit(
-          ${null},
-          ${commit.message},
-          ${commit.data}::jsonb,
-          ${commit.hash},
-          ${null}
+          p_playground_name => ${null},
+          p_commit_message => ${commit.message},
+          p_commit_data => ${commit.data}::jsonb,
+          p_playground_hash => ${commit.hash}
         )`.as("result"),
       )
       .selectAll(),
@@ -268,13 +273,19 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                 parent_id: string | null;
                 message: string;
                 created_at: Date;
+                // `p_privacy` is the privacy the caller asked for; NULL means
+                // it asked for none and the function keeps its default.
+                // Entitlement is the database's call: the
+                // _200_privacy_entitlement trigger refuses 'private' for an
+                // anonymous or non-sponsor author, and that reaches the client
+                // as a 400 carrying the trigger's own message.
               }>`app_public.create_playground_commit(
-                                      ${body.name ?? null},
-                                      ${body.message},
-                                      ${S.encodeSync(S.fromJsonString(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
-                                      ${null},
-                                      ${body.description ?? null}
-                                    )`.as("result"),
+                p_playground_name => ${body.name ?? null},
+                p_commit_message => ${body.message},
+                p_commit_data => ${S.encodeSync(S.fromJsonString(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
+                p_playground_description => ${body.description ?? null},
+                p_privacy => ${body.privacy ?? null}::app_public.privacy
+              )`.as("result"),
             )
             .selectAll(),
         ).pipe(
