@@ -6,7 +6,6 @@ import { DatabaseLive, handleDbError } from "./db.js";
 import {
   ApiError,
   Conflict,
-  Forbidden,
   Locked,
   NotFound,
   ServerError,
@@ -786,24 +785,11 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
       }),
     updatePlayground: ({ params, payload, request }) =>
       Effect.gen(function* () {
-        const { user } = yield* requireSession("apiPlaygrounds.updatePlayground", request.headers);
-        if (payload.privacy === "private" && !["sponsor", "pro", "admin"].includes(user.role)) {
-          return yield* reportHttpError({
-            route: "apiPlaygrounds.updatePlayground",
-            status: 403,
-            kind: "unknown",
-            error: "Private playgrounds require a sponsor account",
-            context: requestObservabilityContext(request.headers),
-          }).pipe(
-            Effect.andThen(
-              Effect.fail(
-                new Forbidden({
-                  error: "Private playgrounds require a sponsor account",
-                }),
-              ),
-            ),
-          );
-        }
+        yield* requireSession("apiPlaygrounds.updatePlayground", request.headers);
+        // Entitlement is the database's call, not this handler's. The
+        // _200_privacy_entitlement trigger refuses 'private' for an anonymous
+        // or non-sponsor author and reaches the client as a 400 carrying its
+        // own message, the same way creating a playground does.
         return yield* withDbErrorOrMissing(
           "Failed to update playground",
           PlaygroundService.use((service) => service.update(params.hash, payload)),

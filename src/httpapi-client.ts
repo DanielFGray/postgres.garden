@@ -9,7 +9,6 @@ import { PgGardenApi } from "../server/apiSchema";
 import {
   ApiError,
   Conflict,
-  Forbidden,
   Locked,
   NotFound,
   ServerError,
@@ -21,7 +20,6 @@ import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from ".
 type ClientFailure =
   | ApiError
   | Conflict
-  | Forbidden
   | HttpApiError.HttpApiSchemaError
   | HttpClientError.HttpClientError
   | Locked
@@ -45,7 +43,6 @@ export class ApiRequestError extends S.TaggedError<
 const toApiRequestError = Match.type<ClientFailure>().pipe(
   Match.tag("ApiError", (error) => new ApiRequestError({ status: 400, message: error.error })),
   Match.tag("Unauthorized", (error) => new ApiRequestError({ status: 401, message: error.error })),
-  Match.tag("Forbidden", (error) => new ApiRequestError({ status: 403, message: error.error })),
   Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.error })),
   Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.error })),
   Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.error })),

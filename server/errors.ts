@@ -14,11 +14,6 @@ export class Unauthorized extends S.TaggedError<Unauthorized, { readonly brand: 
   { error: S.String },
   { httpApiStatus: 401 },
 ) {}
-export class Forbidden extends S.TaggedError<Forbidden, { readonly brand: unique symbol }>()(
-  "Forbidden",
-  { error: S.String },
-  { httpApiStatus: 403 },
-) {}
 export class NotFound extends S.TaggedError<NotFound, { readonly brand: unique symbol }>()(
   "NotFound",
   { error: S.String },

@@ -22,7 +22,6 @@ import { Playground, Privacy, User, UserAuthentication, UserEmail, UserRole } fr
 import {
   ApiError,
   Conflict,
-  Forbidden,
   Locked,
   NotFound,
   ServerError,
@@ -371,7 +370,7 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         privacy: S.optional(Privacy),
       }),
       success: PlaygroundRow,
-      error: [Unauthorized, Forbidden, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound, ApiError, ServerError],
     }),
   )
   .add(
