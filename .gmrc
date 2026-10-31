@@ -91,7 +91,9 @@
     {
       "_": "command",
       "shadow": false,
-      "command": "bun db:types --url 'env(GM_DBURL)'"
+      // The generated file is version tracked and formatted; oxfmt keeps the
+      // codegen from dirtying the tree on every migration.
+      "command": "bun db:types --url 'env(GM_DBURL)' && bun format generated/db.ts"
     }
   ],
 
