@@ -151,17 +151,6 @@ export const httpApiLogout = call("logout", (api) => api.auth.logout({}));
 
 // --- Playgrounds -----------------------------------------------------------
 
-export const httpApiListPlaygrounds = (options?: {
-  readonly sort?: "created_at" | "stars";
-  readonly offset?: number;
-  readonly limit?: number;
-}) =>
-  call("playgrounds.list", (api) =>
-    api.apiPlaygrounds.playgrounds({
-      query: { sort: options?.sort, offset: options?.offset, limit: options?.limit },
-    }),
-  );
-
 export const httpApiGetPlayground = (hash: string) =>
   call("playgrounds.get", (api) => api.apiPlaygrounds.playgroundByHash({ params: { hash } }));
 
@@ -173,28 +162,8 @@ export const httpApiCreatePlayground = (payload: {
   readonly activeFile?: string | null;
 }) => call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
-export const httpApiUpdatePlayground = (
-  hash: string,
-  payload: {
-    readonly name?: string | null;
-    readonly description?: string | null;
-    readonly privacy?: "private" | "secret" | "public";
-  },
-) =>
-  call("playgrounds.update", (api) =>
-    api.apiPlaygrounds.updatePlayground({ params: { hash }, payload }),
-  );
-
-export const httpApiDeletePlayground = (hash: string) =>
-  call("playgrounds.delete", (api) => api.apiPlaygrounds.deletePlayground({ params: { hash } }));
-
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   call("playgrounds.star", (api) => api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }));
-
-export const httpApiForkPlayground = (hash: string, payload: { readonly name?: string | null }) =>
-  call("playgrounds.fork", (api) =>
-    api.apiPlaygrounds.forkPlayground({ params: { hash }, payload }),
-  );
 
 // --- Commits ---------------------------------------------------------------
 

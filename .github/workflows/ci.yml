@@ -25,6 +25,15 @@ jobs:
       - name: Lint
         run: bun lint
 
+      - name: AST rules
+        run: bun ast-grep
+
+      # The gate `bun run test` also runs `test:unit` and `test:e2e`. Both need a
+      # Postgres and a Valkey this job does not start, so a push to main still
+      # deploys without them having run. Adding them means service containers,
+      # a generated .env, and the migrations applied first.
+
+
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: check

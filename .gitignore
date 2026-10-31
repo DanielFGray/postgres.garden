@@ -30,3 +30,4 @@ vscode-extension-samples
 src/features/notebook/renderer-dist
 src/webview-dist
 .playwright-mcp/
+stats.html
