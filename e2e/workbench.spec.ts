@@ -8,6 +8,7 @@ import {
   forgotPassword,
   login,
   loginWithPassword,
+  notebookResultTable,
   openAccountSettings,
   openExplorerFile,
   openSignInPanel,
@@ -17,10 +18,6 @@ import {
   waitForWorkbench,
   runAllNotebookCells,
 } from "./helpers";
-
-test.beforeAll(async ({ request }) => {
-  await serverCommand(request, "clearTestUsers");
-});
 
 test.describe("workbench basics", () => {
   test.beforeEach(async ({ page }) => {
@@ -375,9 +372,6 @@ test.describe("workbench basics", () => {
 
     await runAllNotebookCells(page);
 
-    // Check output
-    await expect(page.locator(".notebook-output")).toContainText("test_column", {
-      timeout: 15_000,
-    });
+    await expect(notebookResultTable(page)).toContainText("test_column", { timeout: 20_000 });
   });
 });

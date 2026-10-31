@@ -294,7 +294,13 @@ export async function waitForNotification(
 
 export async function createFileFromExplorer(page: Page, fileName: string) {
   await waitForWorkbench(page);
-  await page.locator('.codicon-new-file[aria-label^="New File"]').first().click({ force: true });
+  // The explorer renders its title actions only while the section is hovered.
+  // Until then "New File..." is in the DOM with no box to click.
+  await page
+    .getByRole("button", { name: /Explorer Section:/i })
+    .first()
+    .hover();
+  await page.locator('.codicon-new-file[aria-label^="New File"]').first().click();
   await page.locator('input[aria-label^="Type file name"]').fill(fileName);
   await page.keyboard.press("Enter");
 }
@@ -304,10 +310,17 @@ export async function openExplorerFile(page: Page, fileName: string) {
 }
 
 export async function addNotebookCodeCell(page: Page) {
-  await page
+  // A notebook editor that is open but not active keeps its cell toolbars in
+  // the DOM, parked thousands of pixels off-screen, so an index into every
+  // "Add Code Cell" on the page can pick one no click can reach. The active
+  // notebook's own toolbar is the one button that is really there, and it
+  // renders a moment after the editor, so wait for it.
+  const addCell = page
+    .locator(".notebook-toolbar-left")
     .getByRole("button", { name: /Add Code Cell/i })
-    .last()
-    .click({ force: true });
+    .first();
+  await addCell.waitFor({ state: "visible", timeout: 10_000 });
+  await addCell.click();
 }
 
 export async function firstNotebookEditor(page: Page) {
@@ -318,4 +331,22 @@ export async function firstNotebookEditor(page: Page) {
 
 export async function runAllNotebookCells(page: Page) {
   await page.getByRole("button", { name: "Run All", exact: true }).click();
+}
+
+/**
+ * The table the SQL renderer draws for a cell's result.
+ *
+ * Cell output lives in a VS Code webview, which nests a second iframe, and the
+ * renderer builds its table inside a shadow root in there, so nothing in the
+ * page's own document can see it. One webview exists per open notebook editor,
+ * in the order they were opened, so the notebook opened last is the last one.
+ */
+export function notebookResultTable(page: Page) {
+  return page
+    .locator("iframe.webview")
+    .last()
+    .contentFrame()
+    .locator("#active-frame")
+    .contentFrame()
+    .locator("table.sql-table");
 }
