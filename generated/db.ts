@@ -118,6 +118,10 @@ export interface AppPublicPlaygrounds {
   created_at: Generated<Timestamp>;
   data_size: Generated<bigint>;
   description: string | null;
+  /**
+   * SHA-256 of the edit key an anonymous playground is held by. Null once an account owns the row.
+   */
+  edit_key_hash: Buffer | null;
   expires_at: Timestamp | null;
   fork_hash: string | null;
   hash: string;

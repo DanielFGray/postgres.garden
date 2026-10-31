@@ -1,9 +1,10 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
-import { Digest, SecureRandom } from "effect/crypto";
+import { SecureRandom } from "effect/crypto";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
 import { UserRole } from "../models.js";
+import { Secrets } from "../secrets.js";
 import { valkey } from "../valkey.js";
 
 export const sessionCookieName = "session";
@@ -54,22 +55,13 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
   make: Effect.gen(function* () {
     const runRoot = yield* rootQuerier;
     const secureRandom = yield* SecureRandom.SecureRandom;
-    const digest = yield* Digest.Digest;
-
-    /** `length` random bytes as hex. */
-    const generateSecureRandomString = (length = 32) =>
-      secureRandom
-        .randomBytes(length)
-        .pipe(Effect.map((bytes) => Buffer.from(bytes).toString("hex")));
-
-    const hashSecret = (secret: string) =>
-      digest.digest(Digest.sha256, new TextEncoder().encode(secret));
+    const secrets = yield* Secrets;
 
     return {
       createSession: Effect.fnUntraced(function* (userId: string) {
-        const id = yield* generateSecureRandomString();
-        const secret = yield* generateSecureRandomString();
-        const secretHash = Buffer.from(yield* hashSecret(secret)).toString("hex");
+        const id = yield* secrets.generate;
+        const secret = yield* secrets.generate;
+        const secretHash = (yield* secrets.digest(secret)).toString("hex");
         const sessionUuid = yield* secureRandom.uuidV4();
         const expiresAt = DateTime.toDate(
           DateTime.add(DateTime.nowUnsafe(), { milliseconds: SESSION_TTL_MS }),
@@ -149,7 +141,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         if (Option.isNone(decoded)) return anonymous;
         const cached = decoded.value;
 
-        const incomingHash = yield* hashSecret(secret);
+        const incomingHash = yield* secrets.digest(secret);
         const storedHash = Buffer.from(cached.secret_hash, "hex");
         if (!constantTimeEqual(incomingHash, storedHash)) return anonymous;
 
@@ -204,5 +196,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(NodeCrypto.layer));
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide([NodeCrypto.layer, Secrets.layer]),
+  );
 }
