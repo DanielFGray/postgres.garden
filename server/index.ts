@@ -345,6 +345,13 @@ const runWebServer = () => {
     .then(([responder]) => {
       const server = Bun.serve({
         port: PORT,
+        // Bun would otherwise read 128MB before anything judged the request.
+        // The largest body any route takes is a workspace save, and 64MB is far
+        // above a workspace of text while a save with no account is capped at
+        // 1MB. This is not a storage rule: what a writer may store is
+        // app_public.max_storage_bytes, which refuses from a smaller number per
+        // role. This only stops the server reading a body nothing can accept.
+        maxRequestBodySize: 64 * 1024 * 1024,
         fetch: (request) => {
           const pathname = new URL(request.url).pathname;
 

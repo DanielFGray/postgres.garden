@@ -241,6 +241,27 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), { timeout: 
       }),
     );
 
+    it.effect("refuses a save larger than a playground with no account may hold", () =>
+      Effect.gen(function* () {
+        const keyHash = yield* Secrets.use((secrets) => secrets.digest("too-big"));
+        const error = yield* Effect.flip(
+          asVisitor((db) =>
+            save(db, {
+              message: "oversized",
+              // The cap is on the stored commit, which is this content plus the
+              // JSON around it.
+              content: "x".repeat(1024 * 1024),
+              editKeyHash: keyHash,
+            }),
+          ).pipe(anonymous),
+        );
+
+        const { code, message } = yield* refusal(error);
+        expect(code).toBe("DNIED");
+        expect(message).toContain("Storage limit exceeded");
+      }),
+    );
+
     it.effect("hands the playground to the account that presents the key", () =>
       Effect.gen(function* () {
         const suffix = yield* randomSuffix;
