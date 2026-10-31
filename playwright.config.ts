@@ -10,6 +10,14 @@ export default defineConfig({
   // drives a whole VS Code workbench with PGlite in WASM against the dev
   // server, and the contention reads as timeouts waiting for UI.
   workers: 1,
+  // Each test boots a whole VS Code workbench with PGlite in WASM against the
+  // dev server, which puts a normal run at 20-30s. Playwright's 30s default is
+  // sized for a web page, so a slightly slower run fails on a click that would
+  // have landed: measured on "can request reset link then reset password" and
+  // "can add an email, verify it", which both time out waiting for an element
+  // the call log reports as visible and enabled, and both pass on a quieter
+  // run. A longer budget costs nothing when the suite is green.
+  timeout: 60_000,
   // The reset that clears test users and every session belongs to the whole
   // run, not to a worker. See e2e/globalSetup.ts.
   globalSetup: "./e2e/globalSetup.ts",
