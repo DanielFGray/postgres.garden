@@ -129,6 +129,14 @@ export const CreatePlaygroundResult = S.Struct({
   parent_id: S.NullOr(S.String),
   message: S.String,
   created_at: S.DateTimeUtcFromString,
+  /**
+   * The key that holds a playground created without an account, answered once
+   * and never stored in a form that could be read back. Null when an account
+   * owns the playground, which is reachable through its owner instead.
+   */
+  edit_key: S.NullOr(S.String),
+  /** When an unclaimed playground is pruned. Null once an account owns it. */
+  expires_at: S.NullOr(S.DateTimeUtcFromString),
 });
 
 const ForkPlaygroundResult = S.Struct({
@@ -343,7 +351,9 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         activeFile: S.optional(S.NullOr(S.String)),
       }),
       success: CreatePlaygroundResult,
-      error: [Unauthorized, ApiError, ServerError],
+      // A caller with no account may start a playground: the answer carries the
+      // key that holds it, so there is nothing to be unauthorised for.
+      error: [ApiError, ServerError],
     }),
   )
   .add(
@@ -380,9 +390,22 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         message: S.String,
         files: S.Array(PlaygroundFile),
         activeFile: S.optional(S.NullOr(S.String)),
+        /**
+         * The key a playground with no owner is held by. The caller sends it
+         * instead of a session; the database decides whether it matches.
+         */
+        edit_key: S.optional(S.String),
       }),
       success: CreateCommitResult,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [NotFound, ApiError, ServerError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("claimPlayground", "/playgrounds/:hash/claim", {
+      params: { hash: S.String },
+      payload: S.Struct({ edit_key: S.String }),
+      success: PlaygroundRow,
+      error: [Unauthorized, ApiError, ServerError],
     }),
   )
   .add(

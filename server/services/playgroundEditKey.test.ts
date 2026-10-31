@@ -22,6 +22,7 @@ import {
   type KyselyDB,
 } from "../db.js";
 import { Secrets } from "../secrets.js";
+import { PlaygroundService } from "./playgroundService.js";
 import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
 
 /** One row of `app_public.playground_commit_result`. */
@@ -343,3 +344,128 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), { timeout: 
     );
   },
 );
+
+/**
+ * The same flow through the service the handlers call, which is where the key
+ * is minted and digested: a database test cannot tell whether the server hashes
+ * the key it answered with.
+ */
+layer(
+  PlaygroundService.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer)),
+  ),
+  { timeout: "30 seconds" },
+)("saving without an account", (it) => {
+  it.effect("answers a key, then takes that key as proof of a later save", () =>
+    Effect.gen(function* () {
+      const suffix = yield* randomSuffix;
+      const created = yield* PlaygroundService.use((service) =>
+        service.create({
+          name: `svc-${suffix}`,
+          message: "first",
+          files: [{ path: "a.sql", content: "select 1" }],
+        }),
+      ).pipe(anonymous);
+
+      yield* Effect.ensuring(
+        Effect.gen(function* () {
+          expect(created.edit_key).not.toBeNull();
+          // The author is told when an unclaimed playground goes.
+          expect(created.expires_at).not.toBeNull();
+
+          const second = yield* PlaygroundService.use((service) =>
+            service.createCommit(null, created.playground_hash, {
+              message: "second",
+              files: [{ path: "a.sql", content: "select 2" }],
+              edit_key: created.edit_key ?? undefined,
+            }),
+          ).pipe(anonymous);
+
+          expect(second.playground_hash).toBe(created.playground_hash);
+          expect(second.forked).toBe(false);
+
+          // A save with no key reaches the same playground and is refused:
+          // the key is the whole claim to it.
+          const refused = yield* PlaygroundService.use((service) =>
+            service.createCommit(null, created.playground_hash, {
+              message: "third",
+              files: [{ path: "a.sql", content: "select 3" }],
+            }),
+          ).pipe(
+            anonymous,
+            Effect.flip,
+            // The save fails on the database refusing it. Any other failure
+            // is a broken test, not a refusal to read.
+            Effect.flatMap((error) =>
+              error._tag === "DatabaseError" ? refusal(error) : Effect.die(error),
+            ),
+          );
+          expect(refused.code).toBe("DNIED");
+        }),
+        asRoot((db) => dropPlayground(db, created.playground_hash)).pipe(
+          Effect.asVoid,
+          Effect.orDie,
+        ),
+      );
+    }),
+  );
+
+  it.effect("hands the playground to an account that presents the answered key", () =>
+    Effect.gen(function* () {
+      const suffix = yield* randomSuffix;
+      const user = yield* asRoot((db) => createUser(db, `svc_claim_${suffix}`));
+      const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
+
+      const created = yield* PlaygroundService.use((service) =>
+        service.create({
+          name: `svc-claim-${suffix}`,
+          message: "first",
+          files: [{ path: "a.sql", content: "select 1" }],
+        }),
+      ).pipe(anonymous);
+
+      yield* Effect.ensuring(
+        Effect.gen(function* () {
+          yield* asRoot((db) =>
+            runQuery(
+              db.insertInto("app_private.sessions").values({
+                id: sessionId,
+                user_id: user.id,
+                expires_at: expiry,
+              }),
+            ),
+          );
+
+          const claimed = yield* PlaygroundService.use((service) =>
+            service.claim(created.playground_hash, created.edit_key ?? ""),
+          ).pipe(
+            Effect.provideService(CurrentSession, {
+              user: {
+                id: user.id,
+                username: `svc_claim_${suffix}`,
+                role: "user",
+                is_verified: true,
+              },
+              session: {
+                id: sessionId,
+                cookie_id: `svc_claim_${suffix}`,
+                user_id: user.id,
+                expires_at: expiry,
+              },
+            } satisfies SessionData),
+          );
+
+          expect(claimed.user_id).toBe(user.id);
+          expect(claimed.expires_at).toBeNull();
+          // The answer carries what the contract promises and nothing the
+          // key could be read out of.
+          expect(claimed).not.toHaveProperty("edit_key_hash");
+        }),
+        Effect.gen(function* () {
+          yield* asRoot((db) => dropPlayground(db, created.playground_hash));
+          yield* asRoot((db) => deleteUser(db, user.id));
+        }).pipe(Effect.asVoid, Effect.orDie),
+      );
+    }),
+  );
+});

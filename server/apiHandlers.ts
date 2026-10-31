@@ -744,23 +744,25 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
         PlaygroundService.use((service) => service.list(query)),
         request.headers,
       ),
+    // A caller with no account may start a playground. The answer then carries
+    // the key that holds it, which is the only time the server has it in a form
+    // anyone can read.
     createPlayground: ({ payload, request }) =>
-      Effect.gen(function* () {
-        yield* requireSession("apiPlaygrounds.createPlayground", request.headers);
-        return yield* withDbError(
-          "Failed to create playground",
-          PlaygroundService.use((service) => service.create(payload)).pipe(
-            Effect.map((result) => ({
-              commit_id: result.commit_id,
-              playground_hash: result.playground_hash,
-              parent_id: result.parent_id,
-              message: result.message,
-              created_at: result.created_at,
-            })),
-          ),
-          request.headers,
-        );
-      }),
+      withDbError(
+        "Failed to create playground",
+        PlaygroundService.use((service) => service.create(payload)).pipe(
+          Effect.map((result) => ({
+            commit_id: result.commit_id,
+            playground_hash: result.playground_hash,
+            parent_id: result.parent_id,
+            message: result.message,
+            created_at: result.created_at,
+            edit_key: result.edit_key,
+            expires_at: result.expires_at,
+          })),
+        ),
+        request.headers,
+      ),
     playgroundByHash: ({ params, request }) =>
       withDbErrorOrMissing(
         "Failed to fetch playground",
@@ -797,13 +799,27 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
           request.headers,
         );
       }),
+    // Saving needs an account or the playground's edit key, and which of the
+    // two the caller has is the database's question, not this handler's: it
+    // refuses a key that does not match with a 400 carrying its own message.
     createCommit: ({ params, payload, request }) =>
       Effect.gen(function* () {
-        const { user } = yield* requireSession("apiPlaygrounds.createCommit", request.headers);
+        const { user } = yield* CurrentSession;
         return yield* withDbErrorOrMissing(
           "Failed to create commit",
-          PlaygroundService.use((service) => service.createCommit(user.id, params.hash, payload)),
+          PlaygroundService.use((service) =>
+            service.createCommit(user?.id ?? null, params.hash, payload),
+          ),
           "Playground not found",
+          request.headers,
+        );
+      }),
+    claimPlayground: ({ params, payload, request }) =>
+      Effect.gen(function* () {
+        yield* requireSession("apiPlaygrounds.claimPlayground", request.headers);
+        return yield* withDbError(
+          "Failed to claim playground",
+          PlaygroundService.use((service) => service.claim(params.hash, payload.edit_key)),
           request.headers,
         );
       }),

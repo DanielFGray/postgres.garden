@@ -1,9 +1,11 @@
 import { Context, Effect, Layer, pipe } from "effect";
 import * as S from "effect/Schema";
-import { sql } from "kysely";
+import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
 import { CurrentSession } from "../apiSchema.js";
+import type { AppPublicPlaygrounds } from "../../generated/db.js";
+import { Secrets } from "../secrets.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
 import type { Privacy } from "../models.js";
@@ -39,6 +41,11 @@ export interface CommitPayload {
     readonly content: string;
   }>;
   readonly activeFile?: string | null;
+  /**
+   * The key a playground with no owner is held by. A caller with an account
+   * sends none: the account is what the database matches against.
+   */
+  readonly edit_key?: string;
 }
 
 /**
@@ -77,16 +84,21 @@ const encodeCommitData = (body: CommitPayload) =>
 
 /**
  * Add a commit to a playground. The function refuses a playground the caller
- * does not own, so it is also the authorization check.
+ * neither owns nor holds the key to, so it is also the authorization check.
  */
 const commitTo = (
   authDb: KyselyDB,
-  commit: { readonly hash: string; readonly message: string; readonly data: string },
+  commit: {
+    readonly hash: string;
+    readonly message: string;
+    readonly data: string;
+    readonly editKeyHash?: Buffer | null;
+  },
 ) =>
   runQuery(
     authDb
       .selectFrom(
-        // Named arguments: the function has six parameters, five of them with
+        // Named arguments: the function has seven parameters, six of them with
         // defaults, so a positional call says which value is which only by
         // counting. A commit to an existing playground names neither its
         // privacy nor its name, which the playground already has.
@@ -94,7 +106,8 @@ const commitTo = (
           p_playground_name => ${null},
           p_commit_message => ${commit.message},
           p_commit_data => ${commit.data}::jsonb,
-          p_playground_hash => ${commit.hash}
+          p_playground_hash => ${commit.hash},
+          p_edit_key_hash => ${commit.editKeyHash ?? null}::bytea
         )`.as("result"),
       )
       .selectAll(),
@@ -142,7 +155,8 @@ const forkFrom = (
 export class PlaygroundService extends Context.Service<PlaygroundService>()("PlaygroundService", {
   make: Effect.gen(function* () {
     const run = yield* visitorQuerier;
-    const asVisitor = <A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
+    const secrets = yield* Secrets;
+    const asVisitor =<A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
       Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use));
 
     return {
@@ -263,37 +277,114 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         );
       },
 
-      create: (body: CreatePlaygroundInput) =>
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom(
-              sql<{
-                commit_id: string;
-                playground_hash: string;
-                parent_id: string | null;
-                message: string;
-                created_at: Date;
-                // `p_privacy` is the privacy the caller asked for; NULL means
-                // it asked for none and the function keeps its default.
-                // Entitlement is the database's call: the
-                // _200_privacy_entitlement trigger refuses 'private' for an
-                // anonymous or non-sponsor author, and that reaches the client
-                // as a 400 carrying the trigger's own message.
-              }>`app_public.create_playground_commit(
+      /**
+       * Start a playground. A caller with no account gets a key back: it is
+       * the only way to commit to this playground again, and the only way to
+       * claim it later, so the answer carries it once and the database stores
+       * nothing the key can be read out of.
+       */
+      create: Effect.fnUntraced(function* (body: CreatePlaygroundInput) {
+        const { user } = yield* CurrentSession;
+        const editKey = user === null ? yield* secrets.generate : null;
+        const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
+
+        const commitData = yield* encodeCommitData(body);
+
+        const { result, expires_at } = yield* asVisitor((authDb) =>
+          Effect.gen(function* () {
+            const result = yield* runQuery(
+              authDb
+                .selectFrom(
+                  sql<{
+                    commit_id: string;
+                    playground_hash: string;
+                    parent_id: string | null;
+                    message: string;
+                    created_at: Date;
+                    // `p_privacy` is the privacy the caller asked for; NULL
+                    // means it asked for none and the function keeps its
+                    // default. Entitlement is the database's call: the
+                    // _200_privacy_entitlement trigger refuses 'private' for an
+                    // anonymous or non-sponsor author, and that reaches the
+                    // client as a 400 carrying the trigger's own message.
+                  }>`app_public.create_playground_commit(
                 p_playground_name => ${body.name ?? null},
                 p_commit_message => ${body.message},
-                p_commit_data => ${S.encodeSync(S.fromJsonString(S.Unknown))({ files: body.files, activeFile: body.activeFile })}::jsonb,
+                p_commit_data => ${commitData}::jsonb,
                 p_playground_description => ${body.description ?? null},
-                p_privacy => ${body.privacy ?? null}::app_public.privacy
+                p_privacy => ${body.privacy ?? null}::app_public.privacy,
+                p_edit_key_hash => ${editKeyHash}::bytea
               )`.as("result"),
-            )
-            .selectAll(),
-        ).pipe(
-          Effect.head,
-          Effect.catchTag("NoSuchElementError", () =>
-            Effect.die(new Error("create_playground_commit returned no rows")),
+                )
+                .selectAll(),
+            ).pipe(
+              Effect.head,
+              Effect.catchTag("NoSuchElementError", () =>
+                Effect.die(new Error("create_playground_commit returned no rows")),
+              ),
+            );
+
+            // An unclaimed playground is pruned, so the author has to be told
+            // when the link stops working. The row is the only place that date
+            // exists: the retention it is calculated from depends on the size.
+            const row = yield* runQuery(
+              authDb
+                .selectFrom("app_public.playgrounds")
+                .select("expires_at")
+                .where("hash", "=", result.playground_hash),
+            ).pipe(
+              Effect.head,
+              Effect.catchTag("NoSuchElementError", () =>
+                Effect.die(new Error("the playground just created cannot be read back")),
+              ),
+            );
+
+            return { result, expires_at: row.expires_at };
+          }),
+        );
+
+        return { ...result, edit_key: editKey, expires_at };
+      }),
+
+      /**
+       * Hand an anonymous playground to the caller's account. The key stops
+       * being the way in, and the playground stops expiring.
+       */
+      claim: Effect.fnUntraced(function* (hash: string, editKey: string) {
+        const editKeyHash = yield* secrets.digest(editKey);
+
+        return yield* asVisitor((authDb) =>
+          runQuery(
+            authDb
+              .selectFrom(
+                sql<
+                  Selectable<AppPublicPlaygrounds>
+                >`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
+              )
+              // The columns the contract answers with. The function returns the
+              // whole row, and the row holds the digest of the key that was
+              // just spent: naming the columns keeps it on this side.
+              .select([
+                "hash",
+                "head_commit_id",
+                "user_id",
+                "fork_hash",
+                "privacy",
+                "created_at",
+                "updated_at",
+                "name",
+                "description",
+                "data_size",
+                "expires_at",
+              ]),
+          ).pipe(
+            Effect.head,
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.die(new Error("claim_playground returned no rows")),
+            ),
           ),
-        ),
+        );
+      }),
 
       getByHash: (hash: string) =>
         asVisitor((authDb) =>
@@ -352,9 +443,28 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
           ),
         ).pipe(Effect.head),
 
-      createCommit: (userId: string, hash: string, body: CommitPayload) =>
+      createCommit: (userId: string | null, hash: string, body: CommitPayload) =>
         asVisitor((authDb) =>
           Effect.gen(function* () {
+            if (userId === null) {
+              // Without an account the key is the whole claim to this
+              // playground, and the database refuses a commit whose key does
+              // not match. There is no fork to fall back to: a fork needs an
+              // owner to belong to.
+              const editKeyHash =
+                body.edit_key === undefined ? null : yield* secrets.digest(body.edit_key);
+              const data = yield* encodeCommitData(body);
+              return {
+                ...(yield* commitTo(authDb, {
+                  hash,
+                  message: body.message,
+                  data,
+                  editKeyHash,
+                })),
+                forked: false as const,
+              };
+            }
+
             const playground = yield* runQuery(
               authDb
                 .selectFrom("app_public.playgrounds")
@@ -563,5 +673,5 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Secrets.layer));
 }

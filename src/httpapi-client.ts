@@ -164,19 +164,22 @@ type CreatePlaygroundPayload = Parameters<
 export const httpApiCreatePlayground = (payload: CreatePlaygroundPayload) =>
   call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
+export const httpApiClaimPlayground = (hash: string, edit_key: string) =>
+  call("playgrounds.claim", (api) =>
+    api.apiPlaygrounds.claimPlayground({ params: { hash }, payload: { edit_key } }),
+  );
+
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   call("playgrounds.star", (api) => api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }));
 
 // --- Commits ---------------------------------------------------------------
 
-export const httpApiCreatePlaygroundCommit = (
-  hash: string,
-  payload: {
-    readonly message: string;
-    readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
-    readonly activeFile?: string | null;
-  },
-) =>
+/** Taken from the contract for the same reason as CreatePlaygroundPayload. */
+type CreateCommitPayload = Parameters<
+  PgGardenClient["apiPlaygrounds"]["createCommit"]
+>[0]["payload"];
+
+export const httpApiCreatePlaygroundCommit = (hash: string, payload: CreateCommitPayload) =>
   call("commits.create", (api) => api.apiPlaygrounds.createCommit({ params: { hash }, payload }));
 
 export const httpApiListPlaygroundCommits = (hash: string) =>

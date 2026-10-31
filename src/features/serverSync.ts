@@ -8,6 +8,7 @@ import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vsc
 import { DateTime, Effect, Layer, Match, Option, pipe, Schema } from "effect";
 import { navigateTo } from "../shared/navigation";
 import {
+  httpApiClaimPlayground,
   httpApiCreatePlayground,
   httpApiCreatePlaygroundCommit,
   httpApiGetPlayground,
@@ -16,7 +17,7 @@ import {
   httpApiListPlaygroundCommits,
   httpApiMe,
 } from "../httpapi-client";
-import { buildPath } from "../shared/routes";
+import { buildPath, getCurrentPlaygroundId } from "../shared/routes";
 import { VSCodeService } from "../vscode/service";
 import { Workbench } from "../workbench";
 import {
@@ -62,10 +63,38 @@ class ServerSyncError extends Schema.TaggedError<
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
-class SignInRequired extends Schema.TaggedError<
-  SignInRequired,
-  { readonly brand: unique symbol }
->()("SignInRequired", {}) {}
+/**
+ * Where the key that holds an unclaimed playground lives, and how it travels.
+ *
+ * It travels in the URL fragment, which the browser never sends to the server,
+ * so it reaches no request log and no trace. The page then takes it out of the
+ * address bar: a URL copied from the bar to show someone a playground must not
+ * also hand them the right to edit it.
+ *
+ * It is kept in session storage under its playground's hash, so a reload of
+ * this tab can still save, and so a key for one playground can never go out
+ * with a save to another.
+ */
+const editKeyFragment = (key: string) => `#key=${key}`;
+
+const editKeyStorageKey = (hash: string) => `playground-edit-key:${hash}`;
+
+const rememberEditKey = (hash: string, key: string) =>
+  sessionStorage.setItem(editKeyStorageKey(hash), key);
+
+const forgetEditKey = (hash: string) => sessionStorage.removeItem(editKeyStorageKey(hash));
+
+const heldEditKey = (hash: string | null) =>
+  hash === null ? null : sessionStorage.getItem(editKeyStorageKey(hash));
+
+/** Moves a key the tab was opened with out of the address bar and into storage. */
+const takeEditKeyFromUrl = () => {
+  const key = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("key");
+  const hash = getCurrentPlaygroundId();
+  if (key === null || hash === null) return;
+  rememberEditKey(hash, key);
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+};
 
 const stringify = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeStringArgument = Schema.decodeUnknownOption(Schema.String);
@@ -108,6 +137,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
     const changedFiles = new Map<string, vscode.Uri>(); // Track changed files
     let currentCommitId: string | null = null; // Track the currently loaded commit
     let currentPlaygroundHash: string | null = null; // Track the currently loaded playground hash
+    takeEditKeyFromUrl();
     const baselineFiles = new Map<string, string>(); // Track file contents at last commit for diff comparison
 
     // Custom URI scheme for baseline content
@@ -205,6 +235,27 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
     });
 
     /**
+     * Turn the key this tab holds into ownership of the playground.
+     *
+     * A key the server will not take is not a failure to report: the save that
+     * follows then forks the playground, which is what saving a playground that
+     * is not the caller's has always done. The answer says which happened, so a
+     * caller does not tell the author their work was kept when it was not. A
+     * key that is taken is spent, so it leaves this tab's storage.
+     */
+    const claimWithEditKey = Effect.fnUntraced(function* (hash: string, editKey: string) {
+      return yield* httpApiClaimPlayground(hash, editKey).pipe(
+        Effect.tap(() => Effect.sync(() => forgetEditKey(hash))),
+        Effect.as(true),
+        Effect.catch((error) =>
+          Effect.logWarning("[ServerSync] The edit key did not claim the playground:", error).pipe(
+            Effect.as(false),
+          ),
+        ),
+      );
+    });
+
+    /**
      * Commit workspace to server
      */
     const commitWorkspace = Effect.fnUntraced(function* (message?: string) {
@@ -283,51 +334,63 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     username: me?.user?.username,
                   });
 
-                  // Strategy:
-                  // - Authenticated users: Save to server (update existing or create new)
-                  // - Anonymous users: Encode workspace as base64 URL (no server storage)
-                  //   Falls back to server-side anonymous save if payload > 16KB
+                  // A save goes to the server either way. An account is one way
+                  // to prove the playground on screen is the caller's to write
+                  // to; the key this tab holds for it is the other.
+                  //
+                  // Signing in while holding a key is how an unclaimed
+                  // playground gets an owner, so the claim goes first: from
+                  // then on the account is what the server matches against.
+                  // Which playground is on screen: the URL says so from the
+                  // first paint, while currentPlaygroundHash waits for the
+                  // workspace-loaded notification. A tab opened straight on a
+                  // playground can be saved before that arrives, and it must
+                  // save to the playground it is showing.
+                  const openPlayground = currentPlaygroundHash ?? getCurrentPlaygroundId();
 
-                  if (!isAuthenticated) {
-                    // Encode workspace as base64url for anonymous sharing
-                    // (base64url replaces +→- /→_ and strips = padding to be URL-safe)
-                    const payload = stringify({ files, activeFile });
-                    const encoded = btoa(unescape(encodeURIComponent(payload)))
-                      .replace(/\+/g, "-")
-                      .replace(/\//g, "_")
-                      .replace(/=+$/, "");
+                  const heldKey = heldEditKey(openPlayground);
+                  const claimedNow =
+                    isAuthenticated && heldKey !== null && openPlayground !== null
+                      ? yield* claimWithEditKey(openPlayground, heldKey)
+                      : false;
+                  const editKey = claimedNow ? null : heldKey;
 
-                    if (encoded.length <= 8192) {
-                      const shareUrl = `${window.location.origin}/s/${encoded}`;
-                      yield* Effect.tryPromise({
-                        try: () => navigator.clipboard.writeText(shareUrl),
-                        catch: toServerSyncError,
-                      });
-                      vscodeApi.window.showInformationMessage(
-                        "Shareable link copied to clipboard! Sign in for shorter, permanent URLs.",
-                      );
-                      return;
-                    }
+                  // With neither, the save starts a playground of its own.
+                  // Reading someone else's playground and saving is how a
+                  // visitor with no account keeps their work, and the server
+                  // would refuse a commit to a playground they cannot prove is
+                  // theirs.
+                  const saveTo =
+                    openPlayground !== null && (isAuthenticated || editKey !== null)
+                      ? openPlayground
+                      : null;
 
-                    // Payload too large for URL — signal to prompt sign-in after progress closes
-                    return yield* new SignInRequired();
-                  }
+                  // The two endpoints answer the same five fields and one of
+                  // their own, so each fills in the other's: one shape means
+                  // the code below reads a field instead of asking which
+                  // endpoint it came from.
+                  const saved = saveTo
+                    ? httpApiCreatePlaygroundCommit(saveTo, {
+                        message: commitMessage,
+                        files,
+                        activeFile,
+                        edit_key: editKey ?? undefined,
+                      }).pipe(
+                        Effect.map((result) => ({
+                          ...result,
+                          edit_key: null,
+                          expires_at: null,
+                        })),
+                      )
+                    : httpApiCreatePlayground({
+                        name: playgroundName,
+                        message: commitMessage,
+                        description: "New playground",
+                        files,
+                        activeFile,
+                      }).pipe(Effect.map((result) => ({ ...result, forked: false })));
 
-                  const result = yield* (
-                    currentPlaygroundHash && isAuthenticated
-                      ? httpApiCreatePlaygroundCommit(currentPlaygroundHash, {
-                          message: commitMessage,
-                          files,
-                          activeFile,
-                        })
-                      : httpApiCreatePlayground({
-                          name: playgroundName,
-                          message: commitMessage,
-                          description: "New playground",
-                          files,
-                          activeFile,
-                        })
-                  ).pipe(
+                  const result = yield* saved.pipe(
                     Effect.asSome,
                     Effect.catch((error) =>
                       Effect.gen(function* () {
@@ -387,7 +450,12 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     });
                   }
 
-                  yield* Effect.log("[ServerSync] Commit successful:", commitResult);
+                  // The key is answered once and the author keeps it. It must
+                  // not be the console that keeps a copy as well.
+                  yield* Effect.log("[ServerSync] Commit successful:", {
+                    ...commitResult,
+                    edit_key: commitResult.edit_key === null ? null : "[redacted]",
+                  });
                   yield* Effect.log(
                     "[ServerSync] Files committed:",
                     files.map((f) => ({ path: f.path, size: f.content.length })),
@@ -396,7 +464,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   // Check if playground hash changed (new playground created)
                   const playgroundHashChanged =
                     currentPlaygroundHash !== commitResult.playground_hash;
-                  const wasForked = "forked" in commitResult && commitResult.forked === true;
+                  const wasForked = commitResult.forked;
 
                   // A commit that moves the workspace to another playground (new or
                   // forked) changes which playground is loaded, though no file changes.
@@ -406,6 +474,13 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   currentCommitId = commitResult.commit_id;
                   if (commitResult.playground_hash) {
                     currentPlaygroundHash = commitResult.playground_hash;
+                  }
+
+                  // A playground started without an account comes back with the
+                  // key that holds it. The server answers it once and keeps only
+                  // its digest, so this is the only moment it can be kept.
+                  if (commitResult.edit_key !== null) {
+                    rememberEditKey(commitResult.playground_hash, commitResult.edit_key);
                   }
 
                   // Navigate to the playground URL if hash changed
@@ -424,7 +499,8 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                           : "(anonymous snapshot)",
                     );
 
-                    // Update URL to reflect the new playground
+                    // Update URL to reflect the new playground. The key stays
+                    // out of the address bar: session storage is holding it.
                     const path = buildPath({
                       type: "playground",
                       playgroundHash: commitResult.playground_hash,
@@ -452,34 +528,70 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     vscodeApi.window.showInformationMessage(
                       `Playground forked: ${files.length} file(s) saved. You now own this copy and can continue making commits.`,
                     );
-                  } else if (!isAuthenticated && playgroundHashChanged) {
-                    // Anonymous user created a new snapshot
+                  } else if (commitResult.edit_key !== null) {
+                    // A playground saved without an account is held by its key
+                    // and by nothing else: there is no password to recover and
+                    // no account to sign in to, so the link is the whole claim
+                    // to it. Hence the clipboard and the warning.
+                    const editLink = `${window.location.origin}${buildPath({
+                      type: "playground",
+                      playgroundHash: commitResult.playground_hash,
+                    })}${editKeyFragment(commitResult.edit_key)}`;
+                    const copied = yield* Effect.tryPromise({
+                      try: () => navigator.clipboard.writeText(editLink),
+                      catch: toServerSyncError,
+                    }).pipe(
+                      Effect.as(true),
+                      Effect.catch((error) =>
+                        Effect.logWarning("[ServerSync] Could not copy the edit link:", error).pipe(
+                          Effect.as(false),
+                        ),
+                      ),
+                    );
+
+                    // The clipboard refuses a write often enough - a browser
+                    // counts the time since the click - that a message saying
+                    // the link is on it would, on that day, lose the
+                    // playground. So the message carries the link itself when
+                    // the copy did not happen.
+                    const where = copied
+                      ? "Your edit link is on the clipboard"
+                      : `Your edit link is ${editLink}`;
+                    const until =
+                      commitResult.expires_at === null
+                        ? ""
+                        : ` It is removed on ${DateTime.formatIsoDate(commitResult.expires_at)} unless an account claims it.`;
                     const action = yield* Effect.tryPromise({
                       try: () =>
-                        vscodeApi.window.showInformationMessage(
-                          `Anonymous snapshot created: ${files.length} file(s) saved. Each sync creates a new shareable link.`,
-                          "Sign In for Continuous Sync",
+                        vscodeApi.window.showWarningMessage(
+                          `Saved ${files.length} file(s). ${where} - keep it, because it is the only way back into this playground, and anyone who has it can edit it.${until} Sign in to keep the playground on your account instead.`,
+                          "Sign In to Keep It",
                         ),
                       catch: toServerSyncError,
                     });
 
-                    if (action === "Sign In for Continuous Sync") {
-                      yield* Effect.tryPromise({
-                        try: () =>
-                          vscodeApi.authentication.getSession("github-auth", [], {
-                            createIfNone: true,
-                          }),
-                        catch: toServerSyncError,
-                      }).pipe(
-                        Effect.tap(() =>
-                          Effect.sync(() =>
-                            vscodeApi.window.showInformationMessage(
-                              "Signed in! Future syncs will update this playground.",
-                            ),
-                          ),
-                        ),
-                        Effect.ignore,
-                      );
+                    if (action === "Sign In to Keep It") {
+                      yield* Effect.gen(function* () {
+                        yield* Effect.tryPromise({
+                          try: () =>
+                            vscodeApi.authentication.getSession("github-auth", [], {
+                              createIfNone: true,
+                            }),
+                          catch: toServerSyncError,
+                        });
+
+                        // The key is what proves this playground is theirs to
+                        // keep, so the claim goes in while the tab still holds
+                        // it rather than waiting for the next save.
+                        const hash = commitResult.playground_hash;
+                        const key = heldEditKey(hash);
+                        if (key === null) return;
+                        if (yield* claimWithEditKey(hash, key)) {
+                          vscodeApi.window.showInformationMessage(
+                            "This playground is on your account now, and the edit link no longer opens it.",
+                          );
+                        }
+                      }).pipe(Effect.ignore);
                     }
                   } else {
                     // Authenticated user committing to their own playground
@@ -495,31 +607,8 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                 }),
               ),
           ),
-        catch: (error) => (Schema.is(SignInRequired)(error) ? error : toServerSyncError(error)),
-      }).pipe(
-        Effect.catchTag("SignInRequired", () =>
-          Effect.gen(function* () {
-            const choice = yield* Effect.tryPromise({
-              try: () =>
-                vscodeApi.window.showWarningMessage(
-                  "Workspace is too large to share anonymously. Sign in to save to the server.",
-                  "Sign In",
-                  "Cancel",
-                ),
-              catch: toServerSyncError,
-            });
-            if (choice === "Sign In") {
-              yield* Effect.tryPromise({
-                try: () =>
-                  vscodeApi.authentication.getSession("github-auth", [], {
-                    createIfNone: true,
-                  }),
-                catch: toServerSyncError,
-              }).pipe(Effect.ignore);
-            }
-          }),
-        ),
-      );
+        catch: toServerSyncError,
+      });
     });
 
     /**
