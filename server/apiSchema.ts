@@ -18,7 +18,7 @@ import {
   HttpApiMiddleware,
   HttpApiSecurity,
 } from "effect/http-api";
-import { Playground, Privacy, User, UserAuthentication, UserEmail } from "./models.js";
+import { Playground, Privacy, User, UserAuthentication, UserEmail, UserRole } from "./models.js";
 import {
   ApiError,
   Conflict,
@@ -44,16 +44,15 @@ export type SessionInfo = {
 };
 
 /**
- * Session state rehydrated from the Valkey cache. `role` is a plain string
- * rather than `UserRole` because the cache stores unparsed strings and
- * `validateSessionToken` defaults absent roles to "visitor", which is not a
- * member of the `UserRole` union.
+ * Session state rehydrated from the Valkey cache. `validateSessionToken`
+ * decodes the cached hash against a schema, so a session either carries the
+ * fields a user row has or there is no session at all.
  */
 export type SessionData = {
   readonly user: {
     readonly id: string;
     readonly username: string;
-    readonly role: string;
+    readonly role: typeof UserRole.Type;
     readonly is_verified: boolean;
   } | null;
   readonly session: SessionInfo | null;
@@ -506,23 +505,60 @@ const webhookGroup = HttpApiGroup.make("webhooks")
   .prefix("/webhooks");
 
 /**
- * The routes a sandboxed webview may ask the extension host to call for it.
- *
- * The webhook group is left out: GitHub posts to it with a signature and no
- * session, so a webview asking for it is a bug or an attack. The relay refuses
- * anything this list does not match, which is what keeps the contract the only
- * way in. Deriving it from the groups keeps it right when an endpoint is added,
- * and `:param` stands for exactly one path segment.
+ * The method and path of every endpoint in `groups`, as a matchable pattern.
+ * `:param` stands for exactly one path segment, and the group's own prefix is
+ * already part of `endpoint.path`.
  */
-export const webviewRelayRoutes = [systemGroup, authGroup, apiUsers, apiPlaygrounds].flatMap(
-  (group) =>
+const groupRoutes = <
+  G extends {
+    readonly endpoints: Record<string, { readonly method: string; readonly path: string }>;
+  },
+>(
+  groups: ReadonlyArray<G>,
+) =>
+  groups.flatMap((group) =>
     Object.values(group.endpoints).map((endpoint) => ({
       method: endpoint.method,
       pattern: new RegExp(
         `^${endpoint.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/:[^/]+/g, "[^/]+")}$`,
       ),
     })),
-);
+  );
+
+/**
+ * The routes a sandboxed webview may ask the extension host to call for it.
+ *
+ * The webhook group is left out: GitHub posts to it with a signature and no
+ * session, so a webview asking for it is a bug or an attack. The relay refuses
+ * anything this list does not match, which is what keeps the contract the only
+ * way in.
+ */
+export const webviewRelayRoutes = groupRoutes([
+  systemGroup,
+  authGroup,
+  apiUsers,
+  apiPlaygrounds,
+]);
+
+const allRoutes = groupRoutes([systemGroup, authGroup, apiUsers, apiPlaygrounds, webhookGroup]);
+
+/**
+ * Whether the server answers `pathname` from the API rather than from the page
+ * renderer.
+ *
+ * The auth group has no prefix, so `/register`, `/login`, `/me` and `/logout`
+ * sit beside the page routes and only the contract can tell them apart. Asking
+ * the contract means an endpoint added to a group is served the moment it is
+ * declared; a hand-kept list would answer the new path with the page shell and
+ * a 200, which fails nowhere.
+ *
+ * Everything under `/api` counts even with no endpoint to match, so a mistyped
+ * API path gets the API's own 404 instead of a page.
+ */
+export const isApiPath = (pathname: string): boolean =>
+  pathname === "/api" ||
+  pathname.startsWith("/api/") ||
+  allRoutes.some((route) => route.pattern.test(pathname));
 
 export class PgGardenApi extends HttpApi.make("PgGardenApi")
   .add(systemGroup)

@@ -1,8 +1,9 @@
 import { NodeCrypto } from "@effect/platform-node";
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Schema as S } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
+import { UserRole } from "../models.js";
 import { valkey } from "../valkey.js";
 
 export const sessionCookieName = "session";
@@ -16,6 +17,26 @@ const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 export function sessionKey(id: string) {
   return `postgres-garden:session:${id}`;
 }
+
+/**
+ * The fields `createSession` writes into the session's Valkey hash.
+ *
+ * Everything in a hash is a string, so the role and the verified flag are read
+ * back through this schema and the rest of the server works with the typed
+ * values. A hash that does not decode was not written by this code in this
+ * shape, so its bearer is an anonymous visitor: inventing a role or an empty
+ * user id would hand the contract a value it promises never to carry.
+ */
+const CachedSession = S.Struct({
+  secret_hash: S.String,
+  session_uuid: S.String.check(S.isUUID()),
+  user_id: S.String.check(S.isUUID()),
+  username: S.String,
+  role: UserRole,
+  is_verified: S.Literals(["0", "1"]),
+});
+
+const decodeCachedSession = S.decodeUnknownEffect(CachedSession);
 
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
   if (a.length !== b.length) return false;
@@ -100,10 +121,20 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         if (!(id && secret)) return anonymous;
 
         const data = yield* Effect.tryPromise(() => valkey.hgetall(sessionKey(id)));
-        if (!data || !data.secret_hash) return anonymous;
+
+        const decoded = yield* decodeCachedSession(data).pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("A cached session does not match the shape this server writes").pipe(
+              Effect.annotateLogs({ reason: error.message }),
+            ),
+          ),
+          Effect.option,
+        );
+        if (Option.isNone(decoded)) return anonymous;
+        const cached = decoded.value;
 
         const incomingHash = yield* hashSecret(secret);
-        const storedHash = Buffer.from(data.secret_hash, "hex");
+        const storedHash = Buffer.from(cached.secret_hash, "hex");
         if (!constantTimeEqual(incomingHash, storedHash)) return anonymous;
 
         // The Valkey cache can outlive the row it was minted from: password
@@ -117,7 +148,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
             rootDb
               .selectFrom("app_private.sessions")
               .select(["expires_at"])
-              .where("id", "=", data.session_uuid ?? ""),
+              .where("id", "=", cached.session_uuid),
           ).pipe(Effect.head, Effect.option),
         );
         if (
@@ -130,15 +161,15 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         }
 
         const user = {
-          id: data.user_id ?? "",
-          username: data.username ?? "",
-          role: data.role ?? "visitor",
-          is_verified: data.is_verified === "1",
+          id: cached.user_id,
+          username: cached.username,
+          role: cached.role,
+          is_verified: cached.is_verified === "1",
         };
         const session = {
-          id: data.session_uuid ?? "",
+          id: cached.session_uuid,
           cookie_id: id,
-          user_id: data.user_id ?? "",
+          user_id: cached.user_id,
           expires_at: dbSession.value.expires_at,
         };
         return { user, session };

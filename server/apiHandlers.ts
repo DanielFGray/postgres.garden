@@ -424,14 +424,7 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
         ),
       authMe: () =>
         CurrentSession.pipe(
-          Effect.map(({ user }) =>
-            user
-              ? {
-                  ...user,
-                  role: user.role as "user" | "sponsor" | "pro" | "admin",
-                }
-              : null,
-          ),
+          Effect.map(({ user }) => user),
         ),
       logout: () =>
         Effect.gen(function* () {
@@ -597,14 +590,7 @@ const usersLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
           UserService.use((service) => service.getProfile),
           request.headers,
         );
-        return {
-          user: profile
-            ? {
-                ...profile,
-                role: profile.role as "user" | "sponsor" | "pro" | "admin",
-              }
-            : null,
-        };
+        return { user: profile };
       }),
     deleteMe: ({ query, request }) =>
       Effect.gen(function* () {
