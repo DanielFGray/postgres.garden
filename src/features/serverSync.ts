@@ -17,6 +17,13 @@ import {
   httpApiListPlaygroundCommits,
   httpApiMe,
 } from "../httpapi-client";
+import {
+  editKeyLink,
+  forgetEditKey,
+  heldEditKey,
+  rememberEditKey,
+  takeEditKeyFromUrl,
+} from "../shared/editKey";
 import { buildPath, getCurrentPlaygroundId } from "../shared/routes";
 import { VSCodeService } from "../vscode/service";
 import { Workbench } from "../workbench";
@@ -75,27 +82,6 @@ class ServerSyncError extends Schema.TaggedError<
  * this tab can still save, and so a key for one playground can never go out
  * with a save to another.
  */
-const editKeyFragment = (key: string) => `#key=${key}`;
-
-const editKeyStorageKey = (hash: string) => `playground-edit-key:${hash}`;
-
-const rememberEditKey = (hash: string, key: string) =>
-  sessionStorage.setItem(editKeyStorageKey(hash), key);
-
-const forgetEditKey = (hash: string) => sessionStorage.removeItem(editKeyStorageKey(hash));
-
-const heldEditKey = (hash: string | null) =>
-  hash === null ? null : sessionStorage.getItem(editKeyStorageKey(hash));
-
-/** Moves a key the tab was opened with out of the address bar and into storage. */
-const takeEditKeyFromUrl = () => {
-  const key = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("key");
-  const hash = getCurrentPlaygroundId();
-  if (key === null || hash === null) return;
-  rememberEditKey(hash, key);
-  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-};
-
 const stringify = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeStringArgument = Schema.decodeUnknownOption(Schema.String);
 const CommandItem = Schema.Struct({ id: Schema.String });
@@ -243,8 +229,8 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
      * caller does not tell the author their work was kept when it was not. A
      * key that is taken is spent, so it leaves this tab's storage.
      */
-    const claimWithEditKey = Effect.fnUntraced(function* (hash: string, editKey: string) {
-      return yield* httpApiClaimPlayground(hash, editKey).pipe(
+    const claimWithEditKey = Effect.fnUntraced(function* (hash: string) {
+      return yield* httpApiClaimPlayground(hash).pipe(
         Effect.tap(() => Effect.sync(() => forgetEditKey(hash))),
         Effect.as(true),
         Effect.catch((error) =>
@@ -351,7 +337,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   const heldKey = heldEditKey(openPlayground);
                   const claimedNow =
                     isAuthenticated && heldKey !== null && openPlayground !== null
-                      ? yield* claimWithEditKey(openPlayground, heldKey)
+                      ? yield* claimWithEditKey(openPlayground)
                       : false;
                   const editKey = claimedNow ? null : heldKey;
 
@@ -374,7 +360,6 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                         message: commitMessage,
                         files,
                         activeFile,
-                        edit_key: editKey ?? undefined,
                       }).pipe(
                         Effect.map((result) => ({
                           ...result,
@@ -533,10 +518,13 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     // and by nothing else: there is no password to recover and
                     // no account to sign in to, so the link is the whole claim
                     // to it. Hence the clipboard and the warning.
-                    const editLink = `${window.location.origin}${buildPath({
-                      type: "playground",
-                      playgroundHash: commitResult.playground_hash,
-                    })}${editKeyFragment(commitResult.edit_key)}`;
+                    const editLink = editKeyLink(
+                      `${window.location.origin}${buildPath({
+                        type: "playground",
+                        playgroundHash: commitResult.playground_hash,
+                      })}`,
+                      commitResult.edit_key,
+                    );
                     const copied = yield* Effect.tryPromise({
                       try: () => navigator.clipboard.writeText(editLink),
                       catch: toServerSyncError,
@@ -586,7 +574,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                         const hash = commitResult.playground_hash;
                         const key = heldEditKey(hash);
                         if (key === null) return;
-                        if (yield* claimWithEditKey(hash, key)) {
+                        if (yield* claimWithEditKey(hash)) {
                           vscodeApi.window.showInformationMessage(
                             "This playground is on your account now, and the edit link no longer opens it.",
                           );

@@ -97,11 +97,43 @@ const claim = (db: KyselyDB, hash: string, editKeyHash: Buffer) =>
     ),
   );
 
+/**
+ * What the update handler calls: a metadata change proved by the caller's key.
+ * The patch's keys are the fields to set, so a field left out of it is left
+ * alone and one sent as null is cleared.
+ */
+const updateMetadata = (
+  db: KyselyDB,
+  hash: string,
+  patch: Record<string, string | null>,
+  editKeyHash: Buffer | null,
+) =>
+  runQuery(
+    db
+      .selectFrom(
+        sql<{ hash: string; name: string | null; description: string | null; privacy: string }>`
+          app_public.update_playground(
+            ${hash},
+            ${JSON.stringify(patch)}::jsonb,
+            ${editKeyHash}::bytea
+          )`.as("updated"),
+      )
+      .select(["hash", "name", "description", "privacy"]),
+  ).pipe(Effect.head);
+
 const readPlayground = (db: KyselyDB, hash: string) =>
   runQuery(
     db
       .selectFrom("app_public.playgrounds")
-      .select(["hash", "name", "user_id", "edit_key_hash", "expires_at"])
+      .select([
+        "hash",
+        "name",
+        "description",
+        "privacy",
+        "user_id",
+        "edit_key_hash",
+        "expires_at",
+      ])
       .where("hash", "=", hash),
   ).pipe(Effect.head);
 
@@ -239,6 +271,63 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), { timeout: 
         expect(code).toBe("MODAT");
         expect(message).toContain("An anonymous playground needs an edit key");
       }),
+    );
+
+    it.effect("lets the key holder change what the playground says about itself", () =>
+      withAnonymousPlayground(({ hash, keyHash }) =>
+        Effect.gen(function* () {
+          yield* asRoot((db) =>
+            runQuery(
+              db
+                .updateTable("app_public.playgrounds")
+                .set({ description: "as created" })
+                .where("hash", "=", hash),
+            ),
+          );
+
+          const updated = yield* asVisitor((db) =>
+            updateMetadata(db, hash, { name: "renamed", privacy: "public" }, keyHash),
+          ).pipe(anonymous);
+
+          expect(updated.name).toBe("renamed");
+          expect(updated.privacy).toBe("public");
+          // The patch said nothing about the description, so it still stands.
+          expect(updated.description).toBe("as created");
+
+          const cleared = yield* asVisitor((db) =>
+            updateMetadata(db, hash, { description: null }, keyHash),
+          ).pipe(anonymous);
+
+          expect(cleared.description).toBeNull();
+          expect(cleared.name).toBe("renamed");
+        }),
+      ),
+    );
+
+    it.effect("refuses a metadata change with the wrong key, and one with none", () =>
+      withAnonymousPlayground(({ hash }) =>
+        Effect.gen(function* () {
+          const wrongKey = yield* Secrets.use((secrets) => secrets.generate);
+          const wrongHash = yield* Secrets.use((secrets) => secrets.digest(wrongKey));
+
+          // No row answers both of these: a playground someone cannot write to
+          // is one they cannot tell from a playground that is not there.
+          const wrong = yield* Effect.flip(
+            asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, wrongHash)).pipe(
+              anonymous,
+            ),
+          );
+          expect(wrong._tag).toBe("NoSuchElementError");
+
+          const none = yield* Effect.flip(
+            asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, null)).pipe(anonymous),
+          );
+          expect(none._tag).toBe("NoSuchElementError");
+
+          const row = yield* asRoot((db) => readPlayground(db, hash));
+          expect(row.name).not.toBe("stolen");
+        }),
+      ),
     );
 
     it.effect("refuses a save larger than a playground with no account may hold", () =>
@@ -395,11 +484,12 @@ layer(
           expect(created.expires_at).not.toBeNull();
 
           const second = yield* PlaygroundService.use((service) =>
-            service.createCommit(null, created.playground_hash, {
-              message: "second",
-              files: [{ path: "a.sql", content: "select 2" }],
-              edit_key: created.edit_key ?? undefined,
-            }),
+            service.createCommit(
+              null,
+              created.playground_hash,
+              { message: "second", files: [{ path: "a.sql", content: "select 2" }] },
+              created.edit_key,
+            ),
           ).pipe(anonymous);
 
           expect(second.playground_hash).toBe(created.playground_hash);
@@ -408,10 +498,12 @@ layer(
           // A save with no key reaches the same playground and is refused:
           // the key is the whole claim to it.
           const refused = yield* PlaygroundService.use((service) =>
-            service.createCommit(null, created.playground_hash, {
-              message: "third",
-              files: [{ path: "a.sql", content: "select 3" }],
-            }),
+            service.createCommit(
+              null,
+              created.playground_hash,
+              { message: "third", files: [{ path: "a.sql", content: "select 3" }] },
+              null,
+            ),
           ).pipe(
             anonymous,
             Effect.flip,

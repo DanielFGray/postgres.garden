@@ -62,7 +62,15 @@ const resolveRelayUrl = (path: string, method: string, origin: string) =>
  * context, so a test can drive the whole path with a stub client instead of a
  * browser.
  */
-export const relayReply = Effect.fn("relayReply")(function* (request: RelayRequest) {
+export const relayReply = Effect.fn("relayReply")(function* (
+  request: RelayRequest,
+  /**
+   * Headers the host adds on the webview's behalf. A webview has its own
+   * storage and cannot see the page's, so credentials that live in the page -
+   * the playground's edit key - are added here rather than sent by the caller.
+   */
+  hostHeaders: Record<string, string>,
+) {
   const failure = (message: string) =>
     new RelayFailure({ type: "api-relay-failure", id: request.id, message });
 
@@ -78,7 +86,7 @@ export const relayReply = Effect.fn("relayReply")(function* (request: RelayReque
     const httpClient = yield* HttpClient.HttpClient;
     const response = yield* httpClient.execute(
       HttpClientRequest.make(request.method)(url.value, {
-        headers: request.headers,
+        headers: { ...request.headers, ...hostHeaders },
         body: Option.match(request.body, {
           onNone: () => HttpBody.empty,
           // Setting a body overwrites content-type from the body's own

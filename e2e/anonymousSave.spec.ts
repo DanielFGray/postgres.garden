@@ -10,6 +10,10 @@ import { waitForWorkbench } from "./helpers";
  * feature's own, so waiting for it is waiting for the save to work.
  */
 const saveWorkspace = async (page: Page) => {
+  // The files reach the workspace a moment after the workbench does, and a
+  // save before them has nothing to send. The explorer lists them once they
+  // are there.
+  await page.locator('.monaco-list-row[aria-label$=".sql"]').first().waitFor({ timeout: 30_000 });
   await page.getByRole("tab", { name: /Source Control/i }).click({ timeout: 30_000 });
   const sync = page.getByRole("button", { name: "Sync to Server", exact: true });
   await sync.waitFor({ timeout: 30_000 });
@@ -63,6 +67,34 @@ test.describe("saving without an account", () => {
 
     await expect(later.getByText(/file\(s\) saved/i).first()).toBeVisible({ timeout: 30_000 });
     await expect(later).toHaveURL(firstUrl);
+  });
+
+  test("lets the link holder make their playground public, and nobody else", async ({
+    request,
+  }) => {
+    const created = await request.post("/api/playgrounds", {
+      data: {
+        name: "held_by_a_key",
+        message: "first",
+        files: [{ path: "/workspace/a.sql", content: "select 1" }],
+      },
+    });
+    const { playground_hash, edit_key } = await created.json();
+
+    // Privacy is the one thing a playground cannot be created with, so the
+    // dropdown is the only way to make one public - and the key is what makes
+    // the dropdown theirs to use.
+    const withoutKey = await request.put(`/api/playgrounds/${playground_hash}`, {
+      data: { privacy: "public" },
+    });
+    expect(withoutKey.status()).toBe(404);
+
+    const withKey = await request.put(`/api/playgrounds/${playground_hash}`, {
+      headers: { "x-playground-edit-key": edit_key },
+      data: { privacy: "public" },
+    });
+    expect(withKey.status()).toBe(200);
+    expect((await withKey.json()).privacy).toBe("public");
   });
 
   test("keeps the work when the playground on screen is not theirs to write to", async ({

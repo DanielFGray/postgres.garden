@@ -9,6 +9,7 @@ import {
   RelayResponse,
   type RelayResponseEncoded,
 } from "./relayProtocol";
+import { editKeyHeaders } from "../../shared/editKey";
 import { relayHttpClient, relayReply } from "./relay";
 
 /**
@@ -30,7 +31,10 @@ export const handleRelayRequest = Effect.fn("handleRelayRequest")(function* (
           message: "You're offline",
         }),
       )
-    : relayReply(request).pipe(Effect.provide(relayHttpClient));
+    : // The session cookie reaches the server because the relay runs on the
+      // host origin. The edit key reaches it because the host reads it here: a
+      // webview has its own storage and cannot see the page's.
+      relayReply(request, editKeyHeaders()).pipe(Effect.provide(relayHttpClient));
   post(yield* S.encodeEffect(RelayResponse)(reply));
 });
 

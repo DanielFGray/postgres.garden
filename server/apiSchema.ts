@@ -123,6 +123,17 @@ const PlaygroundDetail = S.Struct({
 
 const PlaygroundRow = Playground;
 
+/**
+ * The header a caller with no account proves a playground is theirs to write to.
+ *
+ * The key is a credential, not data about the playground, so it travels the way
+ * the session cookie does and for the same reason: the client attaches it for
+ * whichever playground the page has open, no call site has to remember it, and
+ * no endpoint has to declare it. The database decides whether it matches; a
+ * handler only reads it off the request and passes it on.
+ */
+export const EDIT_KEY_HEADER = "x-playground-edit-key";
+
 export const CreatePlaygroundResult = S.Struct({
   commit_id: S.String,
   playground_hash: S.String,
@@ -380,7 +391,10 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         privacy: S.optional(Privacy),
       }),
       success: PlaygroundRow,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      // An account is one way to hold a playground and the key is the other,
+      // so this takes no session of its own: a caller with neither matches no
+      // row and is told the playground is not there.
+      error: [NotFound, ApiError, ServerError],
     }),
   )
   .add(
@@ -390,11 +404,6 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
         message: S.String,
         files: S.Array(PlaygroundFile),
         activeFile: S.optional(S.NullOr(S.String)),
-        /**
-         * The key a playground with no owner is held by. The caller sends it
-         * instead of a session; the database decides whether it matches.
-         */
-        edit_key: S.optional(S.String),
       }),
       success: CreateCommitResult,
       error: [NotFound, ApiError, ServerError],
@@ -403,7 +412,6 @@ const apiPlaygrounds = HttpApiGroup.make("apiPlaygrounds")
   .add(
     HttpApiEndpoint.post("claimPlayground", "/playgrounds/:hash/claim", {
       params: { hash: S.String },
-      payload: S.Struct({ edit_key: S.String }),
       success: PlaygroundRow,
       error: [Unauthorized, ApiError, ServerError],
     }),

@@ -6,6 +6,7 @@ import { HttpApiClient, type HttpApiError } from "effect/http-api";
 import { Context, Effect, Layer, Match, Option, type Schema } from "effect";
 import * as S from "effect/Schema";
 import { PgGardenApi } from "../server/apiSchema";
+import { editKeyHeaders } from "./shared/editKey";
 import {
   ApiError,
   Conflict,
@@ -124,13 +125,30 @@ export const makeApiCaller =
       );
     }).pipe(Effect.withSpan(`api ${action}`), Effect.mapError(toApiRequestError));
 
+/**
+ * Carries the edit key for the playground the page has open, the way the
+ * session cookie carries an account. A page holding no key sends none.
+ *
+ * Only the page does this. A webview cannot read the page's storage, so its
+ * relayed requests are given the key by the extension host instead
+ * (`features/webview/hostBridge.ts`).
+ */
+const withPageEditKey = Layer.effect(
+  HttpClient.HttpClient,
+  Effect.map(HttpClient.HttpClient, (httpClient) =>
+    HttpClient.mapRequest(httpClient, (request) =>
+      HttpClientRequest.setHeaders(request, editKeyHeaders()),
+    ),
+  ),
+);
+
 // Suspended so that importing this module reads no browser global: the
 // workbench's own origin is needed only when a call is actually made.
 const client = Effect.suspend(() =>
   makePgGardenClient({
     baseUrl: window.location.origin,
     transport: Layer.mergeAll(
-      FetchHttpClient.layer,
+      withPageEditKey.pipe(Layer.provide(FetchHttpClient.layer)),
       // The workbench is served from this origin, so the session cookie
       // travels with every call.
       Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
@@ -164,10 +182,10 @@ type CreatePlaygroundPayload = Parameters<
 export const httpApiCreatePlayground = (payload: CreatePlaygroundPayload) =>
   call("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
 
-export const httpApiClaimPlayground = (hash: string, edit_key: string) =>
-  call("playgrounds.claim", (api) =>
-    api.apiPlaygrounds.claimPlayground({ params: { hash }, payload: { edit_key } }),
-  );
+// The key this redeems rides on the request, like every other write that one
+// holds: see shared/editKey.
+export const httpApiClaimPlayground = (hash: string) =>
+  call("playgrounds.claim", (api) => api.apiPlaygrounds.claimPlayground({ params: { hash } }));
 
 export const httpApiTogglePlaygroundStar = (hash: string) =>
   call("playgrounds.star", (api) => api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }));

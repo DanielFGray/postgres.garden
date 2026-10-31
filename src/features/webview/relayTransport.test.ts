@@ -82,7 +82,9 @@ const connect = Effect.fnUntraced(function* (respond: (seen: Seen) => Response) 
   const runHost = (message: RelayRequestEncoded) =>
     Effect.gen(function* () {
       const request = yield* S.decodeEffect(RelayRequest)(message);
-      const reply = yield* relayReply(request);
+      // The host adds no credentials of its own in this test: the stub server
+      // answers whatever arrives.
+      const reply = yield* relayReply(request, {});
       const encoded = yield* S.encodeEffect(RelayResponse)(reply);
       // postMessage hands the other side a structured clone, never the value.
       for (const subscriber of subscribers) subscriber(structuredClone(encoded));
@@ -162,6 +164,7 @@ const refused = (method: RelayMethod, path: string) =>
       headers: {},
       body: Option.none(),
     }),
+    {},
   ).pipe(
     Effect.provide(refuseToSend),
     Effect.provideService(RelayOrigin, origin),

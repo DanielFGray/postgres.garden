@@ -1,7 +1,7 @@
 import { Cause, DateTime, Effect, Layer, Match, Schema as S } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { CurrentSession, PgGardenApi } from "./apiSchema.js";
+import { CurrentSession, EDIT_KEY_HEADER, PgGardenApi } from "./apiSchema.js";
 import { DatabaseLive, handleDbError } from "./db.js";
 import {
   ApiError,
@@ -202,6 +202,16 @@ const withDbErrorOrMissing = <A, E, R>(
         : dbFailure(route, e, headers),
     ),
   );
+
+/**
+ * The edit key a request carries, if any.
+ *
+ * Like the session cookie, the key is a credential the transport carries rather
+ * than data an endpoint declares, so it is read off the request here and handed
+ * to the database, which decides whether it holds.
+ */
+const editKeyFrom = (headers: RequestHeaders): string | null =>
+  readHeader(headers, EDIT_KEY_HEADER) ?? null;
 
 /** Require a session, fail with Unauthorized if missing. */
 const requireSession = (route: string, headers?: RequestHeaders) =>
@@ -785,20 +795,23 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
           request.headers,
         );
       }),
+    // A metadata change needs an account or the playground's edit key, and
+    // which of the two the caller has is the database's question: the function
+    // it calls matches on the session or on the key, and answers with no row
+    // when neither holds.
+    // Entitlement stays the database's call: the _200_privacy_entitlement
+    // trigger refuses 'private' for an anonymous or non-sponsor author and
+    // reaches the client as a 400 carrying its own message, the same way
+    // creating a playground does.
     updatePlayground: ({ params, payload, request }) =>
-      Effect.gen(function* () {
-        yield* requireSession("apiPlaygrounds.updatePlayground", request.headers);
-        // Entitlement is the database's call, not this handler's. The
-        // _200_privacy_entitlement trigger refuses 'private' for an anonymous
-        // or non-sponsor author and reaches the client as a 400 carrying its
-        // own message, the same way creating a playground does.
-        return yield* withDbErrorOrMissing(
-          "Failed to update playground",
-          PlaygroundService.use((service) => service.update(params.hash, payload)),
-          "Playground not found",
-          request.headers,
-        );
-      }),
+      withDbErrorOrMissing(
+        "Failed to update playground",
+        PlaygroundService.use((service) =>
+          service.update(params.hash, payload, editKeyFrom(request.headers)),
+        ),
+        "Playground not found",
+        request.headers,
+      ),
     // Saving needs an account or the playground's edit key, and which of the
     // two the caller has is the database's question, not this handler's: it
     // refuses a key that does not match with a 400 carrying its own message.
@@ -808,18 +821,25 @@ const playgroundsLive = HttpApiBuilder.group(PgGardenApi, "apiPlaygrounds", (han
         return yield* withDbErrorOrMissing(
           "Failed to create commit",
           PlaygroundService.use((service) =>
-            service.createCommit(user?.id ?? null, params.hash, payload),
+            service.createCommit(
+              user?.id ?? null,
+              params.hash,
+              payload,
+              editKeyFrom(request.headers),
+            ),
           ),
           "Playground not found",
           request.headers,
         );
       }),
-    claimPlayground: ({ params, payload, request }) =>
+    claimPlayground: ({ params, request }) =>
       Effect.gen(function* () {
         yield* requireSession("apiPlaygrounds.claimPlayground", request.headers);
         return yield* withDbError(
           "Failed to claim playground",
-          PlaygroundService.use((service) => service.claim(params.hash, payload.edit_key)),
+          PlaygroundService.use((service) =>
+            service.claim(params.hash, editKeyFrom(request.headers)),
+          ),
           request.headers,
         );
       }),

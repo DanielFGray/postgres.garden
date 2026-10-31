@@ -41,11 +41,6 @@ export interface CommitPayload {
     readonly content: string;
   }>;
   readonly activeFile?: string | null;
-  /**
-   * The key a playground with no owner is held by. A caller with an account
-   * sends none: the account is what the database matches against.
-   */
-  readonly edit_key?: string;
 }
 
 /**
@@ -350,8 +345,11 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
        * Hand an anonymous playground to the caller's account. The key stops
        * being the way in, and the playground stops expiring.
        */
-      claim: Effect.fnUntraced(function* (hash: string, editKey: string) {
-        const editKeyHash = yield* secrets.digest(editKey);
+      claim: Effect.fnUntraced(function* (hash: string, editKey: string | null) {
+        // A claim with no key is a claim with nothing to redeem. The digest of
+        // nothing is not null, so there is no digest to take: the function is
+        // handed null and refuses, the same as it does for a key that is wrong.
+        const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
 
         return yield* asVisitor((authDb) =>
           runQuery(
@@ -432,18 +430,55 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
       fork: (hash: string, name: string | null | undefined) =>
         asVisitor((authDb) => forkFrom(authDb, { hash, name: name ?? null })),
 
-      update: (hash: string, input: UpdatePlaygroundInput) =>
-        asVisitor((authDb) =>
-          pipe(
-            authDb.updateTable("app_public.playgrounds").where("hash", "=", hash),
-            (q) => (input.name !== undefined ? q.set("name", input.name) : q),
-            (q) => (input.description !== undefined ? q.set("description", input.description) : q),
-            (q) => (input.privacy != null ? q.set("privacy", input.privacy) : q),
-            (q) => q.returningAll(),
-          ),
-        ).pipe(Effect.head),
+      update: Effect.fnUntraced(function* (
+        hash: string,
+        input: UpdatePlaygroundInput,
+        editKey: string | null,
+      ) {
+        const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
+        // The patch says which fields to change by which keys it carries, so a
+        // field the caller left out keeps its value and one they sent as null
+        // is cleared. Dropping the absent keys here is what makes that true.
+        const patch = Object.fromEntries(
+          Object.entries(input).filter(([, value]) => value !== undefined),
+        );
 
-      createCommit: (userId: string | null, hash: string, body: CommitPayload) =>
+        return yield* asVisitor((authDb) =>
+          runQuery(
+            authDb
+              .selectFrom(
+                sql<Selectable<AppPublicPlaygrounds>>`app_public.update_playground(
+                  ${hash},
+                  ${JSON.stringify(patch)}::jsonb,
+                  ${editKeyHash}::bytea
+                )`.as("updated"),
+              )
+              // The columns the contract answers with: the row carries the
+              // digest of the key that authorised this write, and naming the
+              // columns keeps it on this side.
+              .select([
+                "hash",
+                "head_commit_id",
+                "user_id",
+                "fork_hash",
+                "privacy",
+                "created_at",
+                "updated_at",
+                "name",
+                "description",
+                "data_size",
+                "expires_at",
+              ]),
+          ),
+        ).pipe(Effect.head);
+      }),
+
+      createCommit: (
+        userId: string | null,
+        hash: string,
+        body: CommitPayload,
+        editKey: string | null,
+      ) =>
         asVisitor((authDb) =>
           Effect.gen(function* () {
             if (userId === null) {
@@ -451,8 +486,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
               // playground, and the database refuses a commit whose key does
               // not match. There is no fork to fall back to: a fork needs an
               // owner to belong to.
-              const editKeyHash =
-                body.edit_key === undefined ? null : yield* secrets.digest(body.edit_key);
+              const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
               const data = yield* encodeCommitData(body);
               return {
                 ...(yield* commitTo(authDb, {
