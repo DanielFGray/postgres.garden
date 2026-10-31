@@ -27,8 +27,6 @@
     "src/features/notebook/renderer/pev2/**",
     "src/features/notebook/renderer-dist/**",
     "src/webview-dist/**",
-    "src/features/remoteExtensionExample/**",
-    "server/vendor/**",
     "tools/ast-grep/tests/**",
     "tools/oxlint/qa-review/fixtures/**"
   ],

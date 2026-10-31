@@ -185,6 +185,3 @@ export class UserService extends Context.Service<UserService>()("UserService", {
 }) {
   static readonly layer = Layer.effect(this, this.make);
 }
-
-export const runUserService = <A, E>(effect: Effect.Effect<A, E, UserService>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(UserService.layer)));

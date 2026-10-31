@@ -91,7 +91,7 @@ import defaultKeybindings from "./user/keybindings.json?raw";
 import defaultConfiguration from "./user/configuration.json?raw";
 // import { TerminalBackend } from './features/terminal'
 import "vscode/localExtensionHost";
-import { fileSystemProvider } from "./filesystemProvider";
+import { fileSystemProvider, workspaceFile } from "./filesystemProvider";
 
 // const url = new URL(document.location.href)
 // const params = url.searchParams
@@ -105,8 +105,6 @@ import { fileSystemProvider } from "./filesystemProvider";
 // params.delete('resetLayout')
 
 // window.history.replaceState({}, document.title, url.href)
-
-export const workspaceFile = monaco.Uri.file("/workspace.code-workspace");
 
 // Workers
 type Workers = Partial<Record<string, Worker>>;

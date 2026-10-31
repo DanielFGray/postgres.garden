@@ -9,7 +9,7 @@ import { DateTime, Effect, Exit, Option, pipe } from "effect";
 import * as S from "effect/Schema";
 import { httpApiGetPlayground, httpApiGetPlaygroundCommit } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
-import { toError } from "../shared/index.js";
+import { toError } from "../shared/errors.js";
 import { CommitDetail } from "../../server/apiSchema.js";
 import { navigateTo } from "../shared/navigation";
 import { getSmallExampleWorkspace } from "../templates";

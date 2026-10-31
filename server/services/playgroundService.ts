@@ -2,7 +2,7 @@ import { Context, Effect, Layer, pipe } from "effect";
 import * as S from "effect/Schema";
 import { sql } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
-import { DatabaseLive, runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
+import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
 import { CurrentSession } from "../apiSchema.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
@@ -554,8 +554,3 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
 }) {
   static readonly layer = Layer.effect(this, this.make);
 }
-
-export const runPlaygroundService = <A, E>(effect: Effect.Effect<A, E, PlaygroundService>) =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(PlaygroundService.layer.pipe(Layer.provideMerge(DatabaseLive)))),
-  );

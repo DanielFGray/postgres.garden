@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { Effect, Option, Schema, pipe } from "effect";
 import { Introspection, makeIntrospectionQuery, parseIntrospectionResults } from "pg-introspection";
 import { PGLITE_EXECUTE, type ExtendedResults } from "./constants.js";
-import { toError } from "../shared/index.js";
+import { toError } from "../shared/errors.js";
 
 class IntrospectionError extends Schema.TaggedError<
   IntrospectionError,

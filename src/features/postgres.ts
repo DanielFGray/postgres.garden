@@ -2,7 +2,7 @@ import { Effect, Fiber, Layer, Scope } from "effect";
 import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { getCurrentPlaygroundId } from "../shared/routes.js";
-import { toError } from "../shared/index.js";
+import { toError } from "../shared/errors.js";
 import { VSCodeService } from "../vscode/service";
 import {
   DATABASE_EXPLORER,
