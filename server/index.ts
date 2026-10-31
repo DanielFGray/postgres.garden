@@ -15,6 +15,7 @@ import { getPageData } from "./layers/getPageData.js";
 import { waitForDependencies } from "./ready.js";
 import { PageStateSchema, type PageState } from "../src/shared/dehydrate.js";
 import { HttpApiLive } from "./apiHandlers.js";
+import { isApiPath } from "./apiSchema.js";
 
 const path = Effect.runSync(Path.Path.pipe(Effect.provide(NodePath.layer)));
 const { IncomingMessage, ServerResponse: ServerResponseConstructor } = await import("node:http");
@@ -314,17 +315,6 @@ const createProdResponder = (runtime: Runtime): Promise<NonApiResponder> => {
     close: () => Promise.resolve(),
   }));
 };
-
-const isApiPath = (pathname: string): boolean =>
-  pathname === "/healthz" ||
-  pathname === "/api" ||
-  pathname.startsWith("/api/") ||
-  pathname === "/register" ||
-  pathname === "/login" ||
-  pathname === "/logout" ||
-  pathname === "/me" ||
-  pathname.startsWith("/auth/") ||
-  pathname.startsWith("/webhooks/");
 
 const runWebServer = () => {
   const runtime = makeRuntime();
