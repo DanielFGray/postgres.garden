@@ -1,3 +1,5 @@
+// Patch VS Code's Delayer before any of it is constructed.
+import "./suppressCancellationErrors";
 import { render } from "@solidjs/web";
 import { Cause, Console, Effect, Fiber, Layer, Schema } from "effect";
 import { TelemetryLive } from "./telemetry";
