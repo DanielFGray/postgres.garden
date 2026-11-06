@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { parseRoute } from "../shared/routes";
+import type { ApiCaller } from "../httpapi-client";
 import type { LoadedWorkspace } from "./loadedWorkspace";
 import { loadWorkspace, loadWorkspaceFromSharedUrl } from "./workspaceSwitcher";
 
@@ -29,7 +30,7 @@ const loadCurrentRoute = () => {
 
 export const RouterFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const runtime = yield* Effect.context<LoadedWorkspace>();
+    const runtime = yield* Effect.context<ApiCaller | LoadedWorkspace>();
     const onPopState = () => {
       Effect.runForkWith(runtime)(
         loadCurrentRoute().pipe(

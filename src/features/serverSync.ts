@@ -8,6 +8,7 @@ import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vsc
 import { DateTime, Effect, Layer, Match, Option, pipe, Schema } from "effect";
 import { navigateTo } from "../shared/navigation";
 import {
+  type ApiCaller,
   httpApiClaimPlayground,
   httpApiCreatePlayground,
   httpApiCreatePlaygroundCommit,
@@ -108,7 +109,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
     const vscodeService = yield* VSCodeService;
     const { runFork } = yield* Workbench;
     const loadedWorkspace = yield* LoadedWorkspace;
-    const runtime = yield* Effect.context<never>();
+    const runtime = yield* Effect.context<ApiCaller>();
     const vscodeApi = vscodeService.api;
 
     yield* Effect.log("[ServerSync] API received, checking workspace...");

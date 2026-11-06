@@ -4,7 +4,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { Effect, Match, Option } from "effect";
 import * as S from "effect/Schema";
-import { makeApiCaller, makePgGardenClient } from "../../httpapi-client";
+import { ApiCaller, apiCall, type ClientFailure, type PgGardenClient } from "../../httpapi-client";
 import {
   RelayMethod,
   RelayRequest,
@@ -183,14 +183,18 @@ export const createWebviewApiClient = <Message, Encoded>(options: {
   readonly messages: S.Codec<Message, Encoded>;
   readonly channel: RelayChannel<Encoded>;
 }) => {
-  const client = makePgGardenClient({
+  const caller = ApiCaller.layer({
     baseUrl: relayBaseUrl,
     transport: makeRelayTransport(options.channel),
+    feature: options.feature,
   });
 
   return {
     /** Makes one call against the contract, attributed to a named UI action. */
-    apiCall: makeApiCaller({ client, feature: options.feature }),
+    apiCall: <A, E extends ClientFailure>(
+      action: string,
+      run: (api: PgGardenClient) => Effect.Effect<A, E>,
+    ) => apiCall(action, run).pipe(Effect.provide(caller)),
     /** Sends one of the feature's own messages to the extension host. */
     postMessage: (message: Message) =>
       S.encodeEffect(options.messages)(message).pipe(

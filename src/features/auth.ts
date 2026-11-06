@@ -5,8 +5,8 @@
 
 import * as vscode from "vscode";
 import * as S from "effect/Schema";
-import { Effect, Layer, Match, Option } from "effect";
-import { httpApiLogout, httpApiMe } from "../httpapi-client";
+import { type Context, Effect, Layer, Match, Option } from "effect";
+import { type ApiCaller, httpApiLogout, httpApiMe } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import type { User } from "../shared/schemas";
 import {
@@ -82,7 +82,11 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
     return this._onDidChangeSessions.event;
   }
 
-  constructor(user: Option.Option<User>) {
+  constructor(
+    user: Option.Option<User>,
+    /** What the sign-in and sign-out flows run in: they start from VS Code callbacks, outside the layer graph. */
+    private readonly context: Context.Context<ApiCaller>,
+  ) {
     if (Option.isSome(user)) {
       this.currentUsername = user.value.username;
       localStorage.setItem(AuthProvider.storageKey, this.currentUsername);
@@ -201,7 +205,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 
   removeSession(): Promise<void> {
-    return Effect.runPromise(
+    return Effect.runPromiseWith(this.context)(
       Effect.gen({ self: this }, function* () {
         const username = this.currentUsername;
         if (!username) return;
@@ -235,7 +239,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   createSessionWithGitHub(): Promise<AuthSession> {
     this.ensureInitialized();
 
-    return Effect.runPromise(
+    return Effect.runPromiseWith(this.context)(
       Effect.callback<AuthSession, AuthError>((resume) => {
         // The browser's own window, not VSCode's window API.
         const popup = globalThis.window.open(
@@ -266,7 +270,9 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
         // Every same-origin tab shares this channel, so a message that is not an
         // outcome belongs to someone else and the sign-in keeps waiting.
         channel.onmessage = (event: MessageEvent) =>
-          Option.map(decodeAuthOutcome(event.data), (outcome) => resume(onOutcome(outcome)));
+          Option.map(decodeAuthOutcome(event.data), (outcome) =>
+            resume(onOutcome(outcome).pipe(Effect.provideContext(this.context))),
+          );
 
         return Effect.sync(() => channel.close());
       }).pipe(
@@ -310,7 +316,7 @@ interface AccountMenuItem extends vscode.QuickPickItem {
   value: "profile" | "settings" | "signout";
 }
 
-export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbench> =
+export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeService | Workbench> =
   Layer.effectDiscard(
     Effect.gen(function* () {
       const vscodeService = yield* VSCodeService;
@@ -319,10 +325,10 @@ export const AuthFeatureLive: Layer.Layer<never, never, VSCodeService | Workbenc
       const user = Option.fromNullishOr(initialUser);
       const vscodeApi = vscodeService.api;
       const extensionUri = vscodeService.extensionUri;
-      const runtime = yield* Effect.context<never>();
+      const runtime = yield* Effect.context<ApiCaller>();
 
       // Register the authentication provider
-      const provider = new AuthProvider(user);
+      const provider = new AuthProvider(user, runtime);
       authProviderInstance = provider;
       provider.setExtensionUri(extensionUri);
 

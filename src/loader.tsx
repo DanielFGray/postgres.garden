@@ -4,6 +4,7 @@ import { render } from "@solidjs/web";
 import { Cause, Console, Effect, Fiber, Layer, Schema } from "effect";
 import { TelemetryLive } from "./telemetry";
 import { AuthFeatureLive } from "./features/auth";
+import { ApiCaller } from "./httpapi-client";
 import { AiFeatureLive } from "./features/ai";
 import { LoadedWorkspace } from "./features/loadedWorkspace";
 import { LspFeatureLive } from "./features/lsp";
@@ -87,6 +88,7 @@ const pluginLayers = Layer.mergeAll(
   Layer.provide(PGlite.layer),
   Layer.provide(LoadedWorkspace.layer),
   Layer.provide(Workbench.layer),
+  Layer.provide(ApiCaller.workbench),
 );
 
 const program = Effect.gen(function* () {

@@ -7,7 +7,11 @@ import * as vscode from "vscode";
 import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
 import { DateTime, Effect, Exit, Option, pipe } from "effect";
 import * as S from "effect/Schema";
-import { httpApiGetPlayground, httpApiGetPlaygroundCommit } from "../httpapi-client";
+import {
+  type ApiCaller,
+  httpApiGetPlayground,
+  httpApiGetPlaygroundCommit,
+} from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import { toError } from "../shared/errors.js";
 import { CommitDetail } from "../../server/apiSchema.js";
@@ -452,21 +456,25 @@ const loadWorkspaceCore = (
  */
 export const loadWorkspace = (
   options: LoadWorkspaceOptions,
-): Effect.Effect<void, WorkspaceError, LoadedWorkspace> =>
+): Effect.Effect<void, WorkspaceError, LoadedWorkspace | ApiCaller> =>
   replaceWorkspace(
-    Effect.callback<void, WorkspaceError>((resume) => {
-      void vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: options.commitId ? "Loading commit..." : "Loading playground...",
-          cancellable: false,
-        },
-        (progress) =>
-          Effect.runPromiseExit(loadWorkspaceCore(options, progress)).then((exit) => {
-            resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause));
-          }),
-      );
-    }),
+    Effect.flatMap(Effect.context<ApiCaller>(), (context) =>
+      Effect.callback<void, WorkspaceError>((resume) => {
+        void vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: options.commitId ? "Loading commit..." : "Loading playground...",
+            cancellable: false,
+          },
+          (progress) =>
+            Effect.runPromiseExitWith(context)(loadWorkspaceCore(options, progress)).then(
+              (exit) => {
+                resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause));
+              },
+            ),
+        );
+      }),
+    ),
   ).pipe(
     Effect.tapError((err) =>
       Effect.annotateCurrentSpan({
