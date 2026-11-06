@@ -35,23 +35,23 @@ Boot sequence starts at `src/loader.tsx`. VSCode service overrides in `src/setup
 
 ## Task Tracking
 
-This project uses **prog** for cross-session task management. **Do NOT use internal planning tools** — use `prog` for all task tracking.
-Run `prog prime` for workflow context
+This project uses **tasks** for cross-session task management. **Do NOT use internal planning tools** — use `tasks` for all task tracking.
+Run `tasks prime` for workflow context
 
 **Quick reference:**
 
 ```
-prog ready -p postgres.garden         # Find unblocked work
-prog add "Title" -p postgres.garden   # Create task
-prog start <id>                 # Claim work
-prog log <id> "msg"             # Log progress
-prog done <id>                  # Complete work
+tasks ready -p postgres.garden        # Find unblocked work
+tasks add "Title" -p postgres.garden  # Create task
+tasks start <id>                      # Claim work
+tasks log <id> "msg"                  # Log progress
+tasks done <id>                       # Complete work
 ```
 
-MUST use `-p postgres.garden` for all commands that dont have an <id>
+MUST use `-p postgres.garden` for all commands that do not have an <id>
 
-For full workflow: `prog prime`
+For full workflow: `tasks prime`
 
 ## Landing the plane
 
-When you believe changes are complete, mark the current `prog` task as done and prompt the user with a commit message to describe changes.
+When you believe changes are complete, mark the current `tasks` task as done and prompt the user with a commit message to describe changes.
