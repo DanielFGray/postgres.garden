@@ -20,6 +20,10 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
+# Commit being built; served as the x-commit header on /healthz
+ARG GIT_COMMIT
+ENV GIT_COMMIT=$GIT_COMMIT
+
 # Built output: esbuild server bundle + Vite client assets
 COPY --from=builder /app/dist ./dist
 

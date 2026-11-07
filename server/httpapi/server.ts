@@ -1209,7 +1209,14 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
 // ---------------------------------------------------------------------------
 
 const systemLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
-  handlers.handle("healthz", () => Effect.succeed({ ok: true })),
+  handlers.handleRaw("healthz", () =>
+    Effect.succeed(
+      HttpServerResponse.unsafeJson(
+        { ok: true },
+        { headers: { "x-commit": process.env.GIT_COMMIT || "unknown", "cache-control": "no-store" } },
+      ),
+    ),
+  ),
 );
 
 // ---------------------------------------------------------------------------
