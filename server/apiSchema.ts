@@ -204,7 +204,8 @@ const CommitHistoryResponse = S.Struct({
 const CommitDiffResponse = S.Struct({
   isRootCommit: S.Boolean,
   added: S.Array(PlaygroundFile),
-  modified: S.Array(PlaygroundFile),
+  /** `content` is the file in this commit, `parentContent` the file in its parent. */
+  modified: S.Array(S.Struct({ ...PlaygroundFile.fields, parentContent: S.String })),
   deleted: S.Array(PlaygroundFile),
 });
 

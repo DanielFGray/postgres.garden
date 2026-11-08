@@ -945,58 +945,37 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                       return;
                     }
 
-                    // Result is the diff object directly
-                    const diff = result as {
-                      readonly added: readonly {
-                        readonly path: string;
-                        readonly content?: string;
-                        readonly oldContent?: string;
-                      }[];
-                      readonly modified: readonly {
-                        readonly path: string;
-                        readonly content?: string;
-                        readonly oldContent?: string;
-                      }[];
-                      readonly deleted: readonly {
-                        readonly path: string;
-                        readonly content?: string;
-                        readonly oldContent?: string;
-                      }[];
-                    };
+
 
                     runFork(Effect.log("[ServerSync] Viewing commit diff:", parsed));
                     runFork(
                       Effect.log("[ServerSync] Files changed:", {
-                        added: diff.added.length,
-                        modified: diff.modified.length,
-                        deleted: diff.deleted.length,
+                        added: result.added.length,
+                        modified: result.modified.length,
+                        deleted: result.deleted.length,
                       }),
                     );
 
                     // Show quick pick for file selection
                     interface DiffFileItem extends vscode.QuickPickItem {
-                      file: { path: string; content?: string; oldContent?: string };
-                      type: "added" | "modified" | "deleted";
+                      file: { path: string; content: string; parentContent: string };
                     }
 
                     const items: DiffFileItem[] = [
-                      ...diff.added.map((f) => ({
+                      ...result.added.map((f) => ({
                         label: `$(diff-added) ${f.path}`,
                         description: "Added",
-                        file: f,
-                        type: "added" as const,
+                        file: { ...f, parentContent: "" },
                       })),
-                      ...diff.modified.map((f) => ({
+                      ...result.modified.map((f) => ({
                         label: `$(diff-modified) ${f.path}`,
                         description: "Modified",
                         file: f,
-                        type: "modified" as const,
                       })),
-                      ...diff.deleted.map((f) => ({
+                      ...result.deleted.map((f) => ({
                         label: `$(diff-removed) ${f.path}`,
                         description: "Deleted",
-                        file: f,
-                        type: "deleted" as const,
+                        file: { path: f.path, content: "", parentContent: f.content },
                       })),
                     ];
 
@@ -1021,51 +1000,29 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     // Create virtual documents for diff view
                     const scheme = "server-sync-commit";
 
-                    if (selected.type === "added") {
-                      // Show new file (no diff needed, just open the file)
-                      const uri = vscode.Uri.file(selected.file.path);
-                      yield* Effect.tryPromise({
-                        try: () => vscodeApi.commands.executeCommand(VSCODE_OPEN, uri),
-                        catch: toServerSyncError,
-                      });
-                    } else if (selected.type === "deleted") {
-                      // Show deleted file content (read-only)
-                      vscodeApi.window.showInformationMessage(
-                        `File was deleted: ${selected.file.path}`,
-                      );
-                    } else {
-                      // Show diff for modified files
-                      const leftUri = vscode.Uri.parse(`${scheme}:${selected.file.path}?old`);
-                      const rightUri = vscode.Uri.file(selected.file.path);
-
-                      // Register content provider for old version
-                      const disposable = vscodeApi.workspace.registerTextDocumentContentProvider(
-                        scheme,
-                        {
-                          provideTextDocumentContent(uri: vscode.Uri): string {
-                            if (uri.query === "old") {
-                              return selected.file.oldContent || "";
-                            }
-                            return "";
-                          },
-                        },
-                      );
-
-                      try {
-                        yield* Effect.tryPromise({
+                    // The parent's version on the left, this commit's on the
+                    // right; an added or deleted file is empty on one side.
+                    const { file } = selected;
+                    yield* Effect.acquireUseRelease(
+                      Effect.sync(() =>
+                        vscodeApi.workspace.registerTextDocumentContentProvider(scheme, {
+                          provideTextDocumentContent: (uri) =>
+                            uri.query === "parent" ? file.parentContent : file.content,
+                        }),
+                      ),
+                      () =>
+                        Effect.tryPromise({
                           try: () =>
                             vscodeApi.commands.executeCommand(
                               VSCODE_DIFF,
-                              leftUri,
-                              rightUri,
-                              `${selected.file.path} (Commit ${parsed.substring(0, 8)}) ↔ Current`,
+                              vscode.Uri.parse(`${scheme}:${file.path}?parent`),
+                              vscode.Uri.parse(`${scheme}:${file.path}?commit`),
+                              `${file.path} (Commit ${parsed.substring(0, 8)})`,
                             ),
                           catch: toServerSyncError,
-                        });
-                      } finally {
-                        disposable.dispose();
-                      }
-                    }
+                        }),
+                      (registration) => Effect.sync(() => registration.dispose()),
+                    );
                   }),
                 ),
             ),

@@ -671,9 +671,11 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
             const parentFileMap = new Map(parentFiles.map((f) => [f.path, f.content]));
 
             const added = currentFiles.filter((f) => !parentFileMap.has(f.path));
-            const modified = currentFiles.filter((f) => {
+            const modified = currentFiles.flatMap((f) => {
               const parentContent = parentFileMap.get(f.path);
-              return parentContent !== undefined && parentContent !== f.content;
+              return parentContent !== undefined && parentContent !== f.content
+                ? [{ ...f, parentContent }]
+                : [];
             });
             const deleted = parentFiles.filter((f) => !currentFileMap.has(f.path));
 
