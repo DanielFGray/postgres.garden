@@ -55,11 +55,16 @@ export class ServerSyncError extends Schema.TaggedError<
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
-/** What `workspaceSwitcher` reports after it loads a commit into the workspace. */
+/**
+ * What `workspaceSwitcher` reports after it fills the workspace. `commit` names
+ * the commit that holds `files`, and is none for files that no commit holds,
+ * such as the sample or a shared link.
+ */
 export const WorkspaceLoaded = Schema.Struct({
-  commitId: Schema.String,
-  playgroundHash: Schema.String,
   files: Schema.Array(WorkspaceFile),
+  commit: Schema.OptionFromNullOr(
+    Schema.Struct({ commitId: Schema.String, playgroundHash: Schema.String }),
+  ),
 });
 
 /** The playground and commit the workspace holds. Each is none until a load or a save names it. */
@@ -611,23 +616,23 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       navigateTo(path);
     });
 
-    /** Makes the commit `workspaceSwitcher` just loaded the position and the baseline. */
+    /**
+     * Makes the files `workspaceSwitcher` just loaded the baseline, and their
+     * commit the position. Loaded files are not changes, even when no commit
+     * holds them: the author has not edited them yet.
+     */
     const workspaceLoaded = Effect.fn("ServerSync.workspaceLoaded")(function* (
       loaded: typeof WorkspaceLoaded.Type,
     ) {
       yield* Effect.log(
         "[ServerSync] Workspace loaded notification:",
-        loaded.commitId,
-        loaded.playgroundHash,
+        Option.getOrNull(loaded.commit),
         `${loaded.files.length} files`,
       );
-      yield* Ref.update(position, (current) => ({
-        commitId: Option.some(loaded.commitId),
-        playgroundHash: Option.orElse(
-          Option.liftPredicate(loaded.playgroundHash, Str.isNonEmpty),
-          () => current.playgroundHash,
-        ),
-      }));
+      yield* Ref.set(position, {
+        commitId: Option.map(loaded.commit, ({ commitId }) => commitId),
+        playgroundHash: Option.map(loaded.commit, ({ playgroundHash }) => playgroundHash),
+      });
       yield* resetBaseline(loaded.files);
       commitHistory.refresh();
       forkHistory.refresh();

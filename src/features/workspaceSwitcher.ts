@@ -20,6 +20,7 @@ import {
   WORKBENCH_ACTION_CLOSE_ALL_EDITORS,
 } from "./constants";
 import { LoadedWorkspace } from "./loadedWorkspace";
+import { WorkspaceLoaded } from "./serverSync/service";
 import { VSCodeService } from "../vscode/service";
 
 /** Schema for base64-encoded shared workspace payloads */
@@ -215,13 +216,9 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
             navigateTo(path);
           }
 
-          // Notify serverSync extension about the loaded workspace
-          yield* fromPromise(() =>
-            vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
-              commitId: workspace.id,
-              playgroundHash,
-              files: workspace.files,
-            }),
+          yield* reportLoaded(
+            workspace.files,
+            Option.some({ commitId: workspace.id, playgroundHash }),
           );
 
           vscode.window.showInformationMessage(
@@ -334,11 +331,11 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
 
             yield* openPreferredFile(commit.activeFile, commit.files, "initial");
 
-            yield* fromPromise(() =>
-              vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
+            yield* reportLoaded(
+              commit.files,
+              Option.some({
                 commitId: commit.id,
                 playgroundHash: route.playgroundHash ?? commit.playground_hash,
-                files: commit.files,
               }),
             );
 
@@ -381,6 +378,20 @@ const fromPromise = <A>(run: () => PromiseLike<A>) =>
     try: run,
     catch: (cause) => new WorkspaceError({ message: toError(cause).message, cause }),
   });
+
+/**
+ * Tells server sync which files the workspace now holds, so that they become
+ * its baseline and `commit` its position.
+ */
+const reportLoaded = (
+  files: ReadonlyArray<WorkspaceFile>,
+  commit: (typeof WorkspaceLoaded.Type)["commit"],
+) =>
+  S.encodeEffect(WorkspaceLoaded)({ files, commit }).pipe(
+    Effect.flatMap((notice) =>
+      fromPromise(() => vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, notice)),
+    ),
+  );
 
 const deleteWorkspaceFiles = (files: readonly vscode.Uri[]) =>
   Effect.forEach(
@@ -583,6 +594,10 @@ const loadSampleWorkspace = Effect.gen(function* () {
       fromPromise(() => vscode.commands.executeCommand(VSCODE_OPEN, vscode.Uri.file(editor.uri))),
     { concurrency: 1 },
   );
+  yield* reportLoaded(
+    Object.entries(template.files).map(([path, content]) => ({ path, content })),
+    Option.none(),
+  );
 
   yield* Effect.log("[WorkspaceSwitcher] Sample workspace loaded");
 }).pipe(Effect.withSpan("workspace.loadSample"));
@@ -627,6 +642,7 @@ const loadSharedWorkspaceContent = (data: string) =>
 
     yield* writeWorkspaceFiles(payload.files, "load");
     yield* openPreferredFile(payload.activeFile, payload.files, "shared");
+    yield* reportLoaded(payload.files, Option.none());
 
     vscode.window.showInformationMessage(
       `Loaded shared workspace: ${payload.files.length} file(s)`,
