@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode";
 import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
-import { Context, DateTime, Effect, Exit, Layer, Option, pipe } from "effect";
+import { Context, DateTime, Effect, Layer, Option, pipe } from "effect";
 import * as S from "effect/Schema";
 import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
@@ -20,6 +20,7 @@ import {
   WORKBENCH_ACTION_CLOSE_ALL_EDITORS,
 } from "./constants";
 import { LoadedWorkspace } from "./loadedWorkspace";
+import { VSCodeService } from "../vscode/service";
 
 /** Schema for base64-encoded shared workspace payloads */
 const SharedWorkspacePayload = S.Struct({
@@ -67,6 +68,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
     make: Effect.gen(function* () {
       const { call } = yield* ApiCaller;
       const { replace: replaceWorkspace } = yield* LoadedWorkspace;
+      const { withProgress } = yield* VSCodeService;
 
       /**
        * Core workspace loading logic (runs inside withProgress)
@@ -240,22 +242,13 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
        */
       const loadWorkspace = (options: LoadWorkspaceOptions): Effect.Effect<void, WorkspaceError> =>
         replaceWorkspace(
-          Effect.flatMap(Effect.context<never>(), (context) =>
-            Effect.callback<void, WorkspaceError>((resume) => {
-              void vscode.window.withProgress(
-                {
-                  location: vscode.ProgressLocation.Notification,
-                  title: options.commitId ? "Loading commit..." : "Loading playground...",
-                  cancellable: false,
-                },
-                (progress) =>
-                  Effect.runPromiseExitWith(context)(loadWorkspaceCore(options, progress)).then(
-                    (exit) => {
-                      resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause));
-                    },
-                  ),
-              );
-            }),
+          withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: options.commitId ? "Loading commit..." : "Loading playground...",
+              cancellable: false,
+            },
+            (progress) => loadWorkspaceCore(options, progress),
           ),
         ).pipe(
           Effect.tapError((err) =>

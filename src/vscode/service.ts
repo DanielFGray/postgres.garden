@@ -248,6 +248,15 @@ type VSCodeServiceApi = {
     callback: (...args: readonly unknown[]) => unknown,
   ) => Effect.Effect<void, never, Scope.Scope>;
   readonly registerFileUrl: (path: string, url: string) => Effect.Effect<void, never, Scope.Scope>;
+  /**
+   * Runs `task` in the calling fiber while VS Code shows a progress
+   * notification. The notification closes when the task ends, fails or is
+   * interrupted.
+   */
+  readonly withProgress: <A, E, R>(
+    options: vscode.ProgressOptions,
+    task: (progress: vscode.Progress<{ message?: string }>) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
 };
 
 export class VSCodeService extends Context.Service<VSCodeService>()("app/VSCodeService", {
@@ -279,11 +288,25 @@ export class VSCodeService extends Context.Service<VSCodeService>()("app/VSCodeS
         (disposable) => Effect.sync(() => disposable.dispose()),
       ).pipe(Effect.asVoid);
 
+    // VS Code keeps the notification open until the Promise the task callback
+    // returns settles. The task itself resumes the calling fiber, so it keeps
+    // that fiber's services, span and interruption.
+    const withProgress: VSCodeServiceApi["withProgress"] = (options, task) =>
+      Effect.callback((resume) => {
+        const finished = Promise.withResolvers<void>();
+        void api.window.withProgress(options, (progress) => {
+          resume(task(progress).pipe(Effect.ensuring(Effect.sync(() => finished.resolve()))));
+          return finished.promise;
+        });
+        return Effect.sync(() => finished.resolve());
+      });
+
     return {
       api,
       extensionUri,
       registerCommand,
       registerFileUrl,
+      withProgress,
     };
   }),
 }) {
