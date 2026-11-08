@@ -10,6 +10,9 @@ import { editKeyHeaders } from "./shared/editKey";
 import { ApiError, Conflict, Locked, NotFound, ServerError, Unauthorized } from "../server/errors";
 import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
+/** The generated client for `PgGardenApi`. */
+export type PgGardenClient = HttpApiClient.ForApi<typeof PgGardenApi>;
+
 /**
  * Makes calls against `PgGardenApi` as named UI actions: attributes each for
  * tracing and flattens every way it can fail into `ApiRequestError`.
@@ -34,7 +37,37 @@ export class ApiCaller extends Context.Service<
     readonly baseUrl: string;
     readonly transport: Layer.Layer<HttpClient.HttpClient>;
     readonly feature: string;
-  }) => Layer.effect(ApiCaller, makeApiCaller(options));
+  }) =>
+    Layer.effect(
+      ApiCaller,
+      Effect.gen(function* () {
+        // Built once per layer, not once per call.
+        const client = yield* HttpApiClient.make(PgGardenApi, {
+          baseUrl: options.baseUrl,
+          transformClient: (httpClient) =>
+            HttpClient.mapRequestEffect(httpClient, (request) =>
+              Effect.map(
+                CurrentRequestTelemetry,
+                Option.match({
+                  onNone: () => request,
+                  onSome: (telemetry) =>
+                    HttpClientRequest.setHeaders(request, telemetryHeaders(telemetry)),
+                }),
+              ),
+            ),
+        }).pipe(Effect.provide(options.transport));
+
+        const call: ApiCaller["Service"]["call"] = (action, run) =>
+          Effect.gen(function* () {
+            const telemetry = yield* makeRequestTelemetry({ action, feature: options.feature });
+            return yield* run(client).pipe(
+              Effect.provideService(CurrentRequestTelemetry, Option.some(telemetry)),
+            );
+          }).pipe(Effect.withSpan(`api ${action}`), Effect.mapError(toApiRequestError));
+
+        return { call };
+      }),
+    );
 
   /** Calls over `fetch` from the workbench page. */
   static readonly workbench = Layer.suspend(() =>
@@ -65,94 +98,6 @@ export class ApiRequestError extends S.TaggedError<
   message: S.String,
 }) {}
 
-/** Makes `run`'s call through the `ApiCaller` in scope. */
-export const apiCall = <A, E extends ClientFailure>(
-  action: string,
-  run: (api: PgGardenClient) => Effect.Effect<A, E>,
-): Effect.Effect<A, ApiRequestError, ApiCaller> =>
-  ApiCaller.use((caller) => caller.call(action, run));
-
-/**
- * Observability context for the call in flight. `ApiCaller` provides it around
- * each call; the client turns it into request headers the server reads back.
- * None means there is no UI action to attribute the call to.
- */
-export const CurrentRequestTelemetry = Context.Reference<Option.Option<RequestTelemetry>>(
-  "postgres-garden/CurrentRequestTelemetry",
-  { defaultValue: Option.none },
-);
-
-/** Builds the typed client for `PgGardenApi` over one transport. */
-export const makePgGardenClient = (options: {
-  readonly baseUrl: string;
-  readonly transport: Layer.Layer<HttpClient.HttpClient>;
-}) =>
-  HttpApiClient.make(PgGardenApi, {
-    baseUrl: options.baseUrl,
-    transformClient: withTelemetryHeaders,
-  }).pipe(Effect.provide(options.transport));
-
-export type PgGardenClient = Effect.Success<ReturnType<typeof makePgGardenClient>>;
-
-// --- Session ---------------------------------------------------------------
-
-export const httpApiMe = apiCall("me", (api) => api.apiUsers.me({}));
-
-export const httpApiLogout = apiCall("logout", (api) => api.auth.logout({}));
-
-// --- Playgrounds -----------------------------------------------------------
-
-export const httpApiGetPlayground = (hash: string) =>
-  apiCall("playgrounds.get", (api) => api.apiPlaygrounds.playgroundByHash({ params: { hash } }));
-
-/**
- * What the create endpoint accepts, taken from the contract rather than written
- * out again here. A field added to the endpoint reaches this caller's type with
- * no edit, which is how `privacy` was found missing: the hand-written copy this
- * replaces had no such field, so the client could not ask for one.
- */
-type CreatePlaygroundPayload = Parameters<
-  PgGardenClient["apiPlaygrounds"]["createPlayground"]
->[0]["payload"];
-
-export const httpApiCreatePlayground = (payload: CreatePlaygroundPayload) =>
-  apiCall("playgrounds.create", (api) => api.apiPlaygrounds.createPlayground({ payload }));
-
-// The key this redeems rides on the request, like every other write that one
-// holds: see shared/editKey.
-export const httpApiClaimPlayground = (hash: string) =>
-  apiCall("playgrounds.claim", (api) => api.apiPlaygrounds.claimPlayground({ params: { hash } }));
-
-export const httpApiTogglePlaygroundStar = (hash: string) =>
-  apiCall("playgrounds.star", (api) =>
-    api.apiPlaygrounds.togglePlaygroundStar({ params: { hash } }),
-  );
-
-// --- Commits ---------------------------------------------------------------
-
-/** Taken from the contract for the same reason as CreatePlaygroundPayload. */
-type CreateCommitPayload = Parameters<
-  PgGardenClient["apiPlaygrounds"]["createCommit"]
->[0]["payload"];
-
-export const httpApiCreatePlaygroundCommit = (hash: string, payload: CreateCommitPayload) =>
-  apiCall("commits.create", (api) =>
-    api.apiPlaygrounds.createCommit({ params: { hash }, payload }),
-  );
-
-export const httpApiListPlaygroundCommits = (hash: string) =>
-  apiCall("commits.list", (api) => api.apiPlaygrounds.listCommits({ params: { hash } }));
-
-export const httpApiGetPlaygroundCommit = (hash: string, commit_id: string) =>
-  apiCall("commits.get", (api) => api.apiPlaygrounds.getCommit({ params: { hash, commit_id } }));
-
-export const httpApiGetPlaygroundCommitDiff = (hash: string, commit_id: string) =>
-  apiCall("commits.diff", (api) =>
-    api.apiPlaygrounds.getCommitDiff({ params: { hash, commit_id } }),
-  );
-
-// --- Internals -------------------------------------------------------------
-
 /** Everything a call through the generated client can fail with. */
 export type ClientFailure =
   | ApiError
@@ -165,23 +110,16 @@ export type ClientFailure =
   | ServerError
   | Unauthorized;
 
-const makeApiCaller = (options: {
-  readonly baseUrl: string;
-  readonly transport: Layer.Layer<HttpClient.HttpClient>;
-  readonly feature: string;
-}) =>
-  Effect.gen(function* () {
-    // Built once per layer, not once per call.
-    const api = yield* makePgGardenClient(options);
-    const call: ApiCaller["Service"]["call"] = (action, run) =>
-      Effect.gen(function* () {
-        const telemetry = yield* makeRequestTelemetry({ action, feature: options.feature });
-        return yield* run(api).pipe(
-          Effect.provideService(CurrentRequestTelemetry, Option.some(telemetry)),
-        );
-      }).pipe(Effect.withSpan(`api ${action}`), Effect.mapError(toApiRequestError));
-    return { call };
-  });
+/**
+ * Observability context for the call in flight. `ApiCaller` provides it around
+ * each call; the client turns it into request headers the server reads back.
+ * The generated client takes no per-call headers, so this is the only channel.
+ * None means there is no UI action to attribute the call to.
+ */
+const CurrentRequestTelemetry = Context.Reference<Option.Option<RequestTelemetry>>(
+  "postgres-garden/CurrentRequestTelemetry",
+  { defaultValue: Option.none },
+);
 
 const toApiRequestError = Match.type<ClientFailure>().pipe(
   Match.tag("ApiError", (error) => new ApiRequestError({ status: 400, message: error.error })),
@@ -207,17 +145,6 @@ const toApiRequestError = Match.type<ClientFailure>().pipe(
   Match.tag("SchemaError", (error) => new ApiRequestError({ status: 500, message: error.message })),
   Match.exhaustive,
 );
-
-const withTelemetryHeaders = (httpClient: HttpClient.HttpClient) =>
-  HttpClient.mapRequestEffect(httpClient, (request) =>
-    Effect.map(
-      CurrentRequestTelemetry,
-      Option.match({
-        onNone: () => request,
-        onSome: (telemetry) => HttpClientRequest.setHeaders(request, telemetryHeaders(telemetry)),
-      }),
-    ),
-  );
 
 /**
  * Carries the edit key for the playground the page has open, the way the

@@ -3,7 +3,6 @@ import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-
 import getWorkbenchServiceOverride from "@codingame/monaco-vscode-workbench-service-override";
 import { Context, Effect, FiberSet, Layer, Schema } from "effect";
 import { commonServices, constructOptions, envOptions, initializeCommon } from "./setup.common";
-import type { ApiCaller } from "./httpapi-client";
 
 class WorkbenchInitError extends Schema.TaggedError<
   WorkbenchInitError,
@@ -94,8 +93,8 @@ export class Workbench extends Context.Service<Workbench>()("app/Workbench", {
       Effect.withSpan("workbench.initializeMonaco"),
     );
 
-    const runFork = yield* FiberSet.makeRuntime<ApiCaller>();
-    const runPromise = yield* FiberSet.makeRuntimePromise<ApiCaller>();
+    const runFork = yield* FiberSet.makeRuntime();
+    const runPromise = yield* FiberSet.makeRuntimePromise();
 
     return { runFork, runPromise } as const;
   }).pipe(Effect.withSpan("workbench.boot")),

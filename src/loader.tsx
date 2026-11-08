@@ -14,6 +14,7 @@ import { PlaygroundExtensionLive } from "./features/playground/extension";
 import { PostgresFeatureLive } from "./features/postgres";
 import { RouterFeatureLive } from "./features/router";
 import { ServerSyncFeatureLive } from "./features/serverSync";
+import { WorkspaceSwitcher } from "./features/workspaceSwitcher";
 import { VSCodeService } from "./vscode/service";
 import { Workbench } from "./workbench";
 import "./style.css";
@@ -86,6 +87,7 @@ const pluginLayers = Layer.mergeAll(
 ).pipe(
   Layer.provide(VSCodeService.layer),
   Layer.provide(PGlite.layer),
+  Layer.provide(WorkspaceSwitcher.layer),
   Layer.provide(LoadedWorkspace.layer),
   Layer.provide(Workbench.layer),
   Layer.provide(ApiCaller.workbench),

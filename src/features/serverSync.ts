@@ -7,17 +7,7 @@ import * as vscode from "vscode";
 import type { SourceControlResourceState, TreeDataProvider, TreeItem } from "vscode";
 import { DateTime, Effect, Layer, Match, Option, pipe, Schema } from "effect";
 import { navigateTo } from "../shared/navigation";
-import {
-  type ApiCaller,
-  httpApiClaimPlayground,
-  httpApiCreatePlayground,
-  httpApiCreatePlaygroundCommit,
-  httpApiGetPlayground,
-  httpApiGetPlaygroundCommit,
-  httpApiGetPlaygroundCommitDiff,
-  httpApiListPlaygroundCommits,
-  httpApiMe,
-} from "../httpapi-client";
+import { ApiCaller } from "../httpapi-client";
 import {
   editKeyLink,
   forgetEditKey,
@@ -83,7 +73,6 @@ class ServerSyncError extends Schema.TaggedError<
  * this tab can still save, and so a key for one playground can never go out
  * with a save to another.
  */
-const stringify = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeStringArgument = Schema.decodeUnknownOption(Schema.String);
 const CommandItem = Schema.Struct({ id: Schema.String });
 const decodeCommandItem = Schema.decodeUnknownOption(CommandItem);
@@ -98,18 +87,13 @@ const toServerSyncError = (cause: unknown) =>
     message: cause instanceof Error ? cause.message : String(cause),
     cause,
   });
-const isApiRequestError = Schema.is(
-  Schema.Struct({
-    status: Schema.Finite,
-    value: Schema.Unknown,
-  }),
-);
 export const ServerSyncFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const vscodeService = yield* VSCodeService;
     const { runFork } = yield* Workbench;
     const loadedWorkspace = yield* LoadedWorkspace;
-    const runtime = yield* Effect.context<ApiCaller>();
+    const runtime = yield* Effect.context<never>();
+    const { call } = yield* ApiCaller;
     const vscodeApi = vscodeService.api;
 
     yield* Effect.log("[ServerSync] API received, checking workspace...");
@@ -231,7 +215,9 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
      * key that is taken is spent, so it leaves this tab's storage.
      */
     const claimWithEditKey = Effect.fnUntraced(function* (hash: string) {
-      return yield* httpApiClaimPlayground(hash).pipe(
+      return yield* call("apiPlaygrounds.claimPlayground", (api) =>
+        api.apiPlaygrounds.claimPlayground({ params: { hash } }),
+      ).pipe(
         Effect.tap(() => Effect.sync(() => forgetEditKey(hash))),
         Effect.as(true),
         Effect.catch((error) =>
@@ -307,7 +293,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   // Check if user is authenticated by querying the server
                   // We check with the server instead of just the local auth provider
                   // because the session cookie is the source of truth for authentication
-                  const me = yield* httpApiMe.pipe(
+                  const me = yield* call("apiUsers.me", (api) => api.apiUsers.me({})).pipe(
                     Effect.catch((error) =>
                       Effect.logWarning("[ServerSync] Failed to check auth status:", error).pipe(
                         Effect.map(() => null),
@@ -357,31 +343,40 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                   // the code below reads a field instead of asking which
                   // endpoint it came from.
                   const saved = saveTo
-                    ? httpApiCreatePlaygroundCommit(saveTo, {
-                        message: commitMessage,
-                        files,
-                        activeFile,
-                      }).pipe(
+                    ? call("apiPlaygrounds.createCommit", (api) =>
+                        api.apiPlaygrounds.createCommit({
+                          params: { hash: saveTo },
+                          payload: {
+                            message: commitMessage,
+                            files,
+                            activeFile,
+                          },
+                        }),
+                      ).pipe(
                         Effect.map((result) => ({
                           ...result,
                           edit_key: null,
                           expires_at: null,
                         })),
                       )
-                    : httpApiCreatePlayground({
-                        name: playgroundName,
-                        message: commitMessage,
-                        description: "New playground",
-                        files,
-                        activeFile,
-                      }).pipe(Effect.map((result) => ({ ...result, forked: false })));
+                    : call("apiPlaygrounds.createPlayground", (api) =>
+                        api.apiPlaygrounds.createPlayground({
+                          payload: {
+                            name: playgroundName,
+                            message: commitMessage,
+                            description: "New playground",
+                            files,
+                            activeFile,
+                          },
+                        }),
+                      ).pipe(Effect.map((result) => ({ ...result, forked: false })));
 
                   const result = yield* saved.pipe(
                     Effect.asSome,
                     Effect.catch((error) =>
                       Effect.gen(function* () {
                         yield* Effect.logError("[ServerSync] Commit failed:", error);
-                        if (isApiRequestError(error) && error.status === 401) {
+                        if (error.status === 401) {
                           const choice = yield* Effect.tryPromise({
                             try: () =>
                               vscodeApi.window.showWarningMessage(
@@ -419,7 +414,7 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                           return Option.none();
                         }
                         return yield* new ServerSyncError({
-                          message: `Failed to commit workspace: ${isApiRequestError(error) ? `${error.status} ${stringify(error.value)}` : String(error)}`,
+                          message: `Failed to commit workspace: ${error.status} ${error.message}`,
                           cause: error,
                         });
                       }),
@@ -708,7 +703,11 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
               return [];
             }
 
-            const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
+            const hash = currentPlaygroundHash;
+
+            const commits = yield* call("apiPlaygrounds.listCommits", (api) =>
+              api.apiPlaygrounds.listCommits({ params: { hash } }),
+            ).pipe(
               Effect.catch((error) =>
                 Effect.logError("[ServerSync] Error loading commits:", error).pipe(
                   Effect.map(() => null),
@@ -789,7 +788,10 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
             let currentHash: string | null = currentPlaygroundHash;
 
             while (currentHash) {
-              const playground = yield* httpApiGetPlayground(currentHash).pipe(
+              const hash = currentHash;
+              const playground = yield* call("apiPlaygrounds.playgroundByHash", (api) =>
+                api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
+              ).pipe(
                 Effect.catch((error) =>
                   Effect.logError("[ServerSync] Error loading fork history:", error).pipe(
                     Effect.map(() => null),
@@ -922,14 +924,16 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
                     }
 
                     // Fetch diff from server - GET /playgrounds/:hash/commits/:commit_id/diff
-                    const result = yield* httpApiGetPlaygroundCommitDiff(
-                      currentPlaygroundHash,
-                      parsed,
+                    const hash = currentPlaygroundHash;
+                    const result = yield* call("apiPlaygrounds.getCommitDiff", (api) =>
+                      api.apiPlaygrounds.getCommitDiff({
+                        params: { hash, commit_id: parsed },
+                      }),
                     ).pipe(
                       Effect.catch((error) =>
                         Effect.sync(() => {
                           vscodeApi.window.showErrorMessage(
-                            `Failed to load commit diff: ${isApiRequestError(error) ? `${error.status} ${stringify(error.value)}` : String(error)}`,
+                            `Failed to load commit diff: ${error.status} ${error.message}`,
                           );
                           return null;
                         }),
@@ -1131,14 +1135,16 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
           }
 
           // Fetch commit - GET /playgrounds/:hash/commits/:commit_id
-          const commitOrNull = yield* httpApiGetPlaygroundCommit(
-            currentPlaygroundHash,
-            commitId,
+          const hash = currentPlaygroundHash;
+          const commitOrNull = yield* call("apiPlaygrounds.getCommit", (api) =>
+            api.apiPlaygrounds.getCommit({
+              params: { hash, commit_id: commitId },
+            }),
           ).pipe(
             Effect.catch((error) =>
               Effect.sync(() => {
                 void vscodeApi.window.showErrorMessage(
-                  `Failed to load commit: ${isApiRequestError(error) ? `${error.status} ${stringify(error.value)}` : String(error)}`,
+                  `Failed to load commit: ${error.status} ${error.message}`,
                 );
                 return null;
               }),
@@ -1336,7 +1342,11 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
         return;
       }
 
-      const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
+      const hash = currentPlaygroundHash;
+
+      const commits = yield* call("apiPlaygrounds.listCommits", (api) =>
+        api.apiPlaygrounds.listCommits({ params: { hash } }),
+      ).pipe(
         Effect.catch(() =>
           Effect.sync(() => {
             scm.statusBarCommands = undefined;
@@ -1374,7 +1384,11 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
             return;
           }
 
-          const commits = yield* httpApiListPlaygroundCommits(currentPlaygroundHash).pipe(
+          const hash = currentPlaygroundHash;
+
+          const commits = yield* call("apiPlaygrounds.listCommits", (api) =>
+            api.apiPlaygrounds.listCommits({ params: { hash } }),
+          ).pipe(
             Effect.catch(() => {
               void vscodeApi.window.showErrorMessage("Failed to load commits");
               return Effect.succeed(null);

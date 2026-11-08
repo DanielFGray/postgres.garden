@@ -5,8 +5,8 @@
 
 import * as vscode from "vscode";
 import * as S from "effect/Schema";
-import { type Context, Effect, Layer, Match, Option } from "effect";
-import { type ApiCaller, httpApiLogout, httpApiMe } from "../httpapi-client";
+import { Effect, Layer, Match, Option } from "effect";
+import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import type { User } from "../shared/schemas";
 import {
@@ -84,8 +84,13 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
 
   constructor(
     user: Option.Option<User>,
-    /** What the sign-in and sign-out flows run in: they start from VS Code callbacks, outside the layer graph. */
-    private readonly context: Context.Context<ApiCaller>,
+    /** The caller for server requests, taken when the layer is built. */
+    private readonly call: ApiCaller["Service"]["call"],
+    /**
+     * Runs the sign-in and sign-out flows in the workbench's runtime. VS Code
+     * calls into this class from outside the layer graph and expects Promises.
+     */
+    private readonly run: Workbench["Service"]["runPromise"],
   ) {
     if (Option.isSome(user)) {
       this.currentUsername = user.value.username;
@@ -153,7 +158,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
     this.ensureInitialized();
 
     // Open auth panel with login/register/GitHub options
-    return Effect.runPromise(
+    return this.run(
       Effect.callback<vscode.AuthenticationSession, AuthError>((resume) => {
         if (!this.extensionUri) {
           resume(Effect.fail(new AuthError({ message: "Extension URI not set" })));
@@ -205,14 +210,14 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 
   removeSession(): Promise<void> {
-    return Effect.runPromiseWith(this.context)(
+    return this.run(
       Effect.gen({ self: this }, function* () {
         const username = this.currentUsername;
         if (!username) return;
 
         localStorage.removeItem(AuthProvider.storageKey);
         this.currentUsername = undefined;
-        yield* httpApiLogout.pipe(
+        yield* this.call("auth.logout", (api) => api.auth.logout({})).pipe(
           Effect.catch((error) => Effect.logError("Failed to sync logout with server", error)),
         );
         this._onDidChangeSessions.fire({
@@ -239,7 +244,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   createSessionWithGitHub(): Promise<AuthSession> {
     this.ensureInitialized();
 
-    return Effect.runPromiseWith(this.context)(
+    return this.run(
       Effect.callback<AuthSession, AuthError>((resume) => {
         // The browser's own window, not VSCode's window API.
         const popup = globalThis.window.open(
@@ -270,9 +275,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
         // Every same-origin tab shares this channel, so a message that is not an
         // outcome belongs to someone else and the sign-in keeps waiting.
         channel.onmessage = (event: MessageEvent) =>
-          Option.map(decodeAuthOutcome(event.data), (outcome) =>
-            resume(onOutcome(outcome).pipe(Effect.provideContext(this.context))),
-          );
+          Option.map(decodeAuthOutcome(event.data), (outcome) => resume(onOutcome(outcome)));
 
         return Effect.sync(() => channel.close());
       }).pipe(
@@ -293,7 +296,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
    * that the flow finished, never who finished it.
    */
   private get sessionFromServer() {
-    return httpApiMe.pipe(
+    return this.call("apiUsers.me", (api) => api.apiUsers.me({})).pipe(
       Effect.mapError((error) => new AuthError({ message: error.message })),
       Effect.flatMap(({ user }) =>
         Option.match(Option.fromNullishOr(user), {
@@ -306,9 +309,6 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 }
 
-// Export provider instance for use in other modules
-export let authProviderInstance: AuthProvider | undefined;
-
 /**
  * Extended QuickPickItem with a value property for menu actions
  */
@@ -320,16 +320,14 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
   Layer.effectDiscard(
     Effect.gen(function* () {
       const vscodeService = yield* VSCodeService;
-      const { runFork } = yield* Workbench;
+      const { runFork, runPromise } = yield* Workbench;
       const { user: initialUser } = readInitialData();
       const user = Option.fromNullishOr(initialUser);
       const vscodeApi = vscodeService.api;
       const extensionUri = vscodeService.extensionUri;
-      const runtime = yield* Effect.context<ApiCaller>();
+      const { call } = yield* ApiCaller;
 
-      // Register the authentication provider
-      const provider = new AuthProvider(user, runtime);
-      authProviderInstance = provider;
+      const provider = new AuthProvider(user, call, runPromise);
       provider.setExtensionUri(extensionUri);
 
       yield* Effect.acquireRelease(
@@ -356,10 +354,8 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
         (item) => Effect.sync(() => item.dispose()),
       );
 
-      // Update status bar based on current auth state
-      // Kept as plain async closure — fire-and-forget via void updateStatusBar()
       const updateStatusBar = () =>
-        Effect.runPromiseWith(runtime)(
+        runPromise(
           Effect.gen(function* () {
             // Use provider directly since vscode.authentication.getSession() may not
             // surface sessions from our provider without user interaction

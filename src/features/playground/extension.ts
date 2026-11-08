@@ -6,7 +6,7 @@ import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
 import { PlaygroundBrowserPanel } from "./providers/PlaygroundBrowserEditor";
 import { PlaygroundMetadataViewProvider } from "./providers/PlaygroundMetadataViewProvider";
-import { httpApiTogglePlaygroundStar } from "../../httpapi-client";
+import { ApiCaller } from "../../httpapi-client";
 import { getCurrentPlaygroundId } from "../../shared/routes";
 import { Workbench } from "../../workbench";
 import {
@@ -22,6 +22,7 @@ import { VSCodeService } from "../../vscode/service";
 const activatePlaygroundExtension = Effect.gen(function* () {
   const vscodeService = yield* VSCodeService;
   const { runFork } = yield* Workbench;
+  const { call } = yield* ApiCaller;
   const vscodeApi = vscodeService.api;
 
   const subscriptions: vscode.Disposable[] = [];
@@ -86,7 +87,9 @@ const activatePlaygroundExtension = Effect.gen(function* () {
         const playgroundId = getCurrentPlaygroundId();
         if (!playgroundId) return;
 
-        yield* httpApiTogglePlaygroundStar(playgroundId);
+        yield* call("apiPlaygrounds.togglePlaygroundStar", (api) =>
+          api.apiPlaygrounds.togglePlaygroundStar({ params: { hash: playgroundId } }),
+        );
         yield* refreshMetadata;
       }).pipe(
         Effect.tapError((error) =>

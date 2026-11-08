@@ -5,13 +5,9 @@
 
 import * as vscode from "vscode";
 import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
-import { DateTime, Effect, Exit, Option, pipe } from "effect";
+import { Context, DateTime, Effect, Exit, Layer, Option, pipe } from "effect";
 import * as S from "effect/Schema";
-import {
-  type ApiCaller,
-  httpApiGetPlayground,
-  httpApiGetPlaygroundCommit,
-} from "../httpapi-client";
+import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import { toError } from "../shared/errors.js";
 import { CommitDetail } from "../../server/apiSchema.js";
@@ -61,19 +57,337 @@ class WorkspaceError extends S.TaggedError<WorkspaceError, { readonly brand: uni
   },
 ) {}
 
+/**
+ * Loads playgrounds, commits and shared links into the workspace folder. Each
+ * load replaces what is there, one at a time (see `LoadedWorkspace`).
+ */
+export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
+  "app/WorkspaceSwitcher",
+  {
+    make: Effect.gen(function* () {
+      const { call } = yield* ApiCaller;
+      const { replace: replaceWorkspace } = yield* LoadedWorkspace;
+
+      /**
+       * Core workspace loading logic (runs inside withProgress)
+       */
+      const loadWorkspaceCore = (
+        options: LoadWorkspaceOptions,
+        progress: vscode.Progress<{ message?: string }>,
+      ) =>
+        Effect.gen(function* () {
+          const { playgroundHash, commitId, updateUrl = false } = options;
+          progress.report({ message: "Fetching data..." });
+
+          let data: CommitData;
+
+          if (commitId) {
+            // Loading a specific commit
+            const result = yield* call("apiPlaygrounds.getCommit", (api) =>
+              api.apiPlaygrounds.getCommit({
+                params: { hash: playgroundHash, commit_id: commitId },
+              }),
+            ).pipe(
+              Effect.catch((error) => {
+                if (error.status === 404) {
+                  return clearWorkspace.pipe(
+                    Effect.tap(() =>
+                      Effect.sync(() => {
+                        vscode.window.showWarningMessage(
+                          `Commit not found: ${commitId.substring(0, 8)}`,
+                        );
+                      }),
+                    ),
+                    Effect.map(() => null),
+                  );
+                }
+                return Effect.fail(
+                  new WorkspaceError({
+                    message: `Failed to fetch workspace: ${error.status} ${error.message}`,
+                  }),
+                );
+              }),
+            );
+            if (result === null) return;
+            data = result;
+          } else {
+            // Loading the playground's newest commit, which the playground names. A
+            // fork and the save that lands on it are written in one transaction and
+            // so carry the same timestamp, which leaves a commit list unable to say
+            // which of the two came last.
+            const playground = yield* call("apiPlaygrounds.playgroundByHash", (api) =>
+              api.apiPlaygrounds.playgroundByHash({ params: { hash: playgroundHash } }),
+            ).pipe(
+              Effect.catch((error) => {
+                if (error.status === 404) {
+                  return clearWorkspace.pipe(
+                    Effect.tap(() =>
+                      Effect.sync(() => {
+                        vscode.window.showWarningMessage(`Playground not found: ${playgroundHash}`);
+                      }),
+                    ),
+                    Effect.map(() => null),
+                  );
+                }
+                if (error.status === 401) {
+                  return clearWorkspace.pipe(
+                    Effect.tap(() =>
+                      Effect.sync(() => {
+                        vscode.window.showWarningMessage(
+                          "You don't have permission to view this playground",
+                        );
+                      }),
+                    ),
+                    Effect.map(() => null),
+                  );
+                }
+                return Effect.fail(
+                  new WorkspaceError({
+                    message: `Failed to fetch playground: ${error.status} ${error.message}`,
+                  }),
+                );
+              }),
+            );
+
+            if (playground === null) return;
+
+            const head = playground.head_commit_id;
+
+            if (head === null) {
+              progress.report({ message: "Clearing workspace..." });
+              yield* clearWorkspace;
+              vscode.window.showInformationMessage(
+                `Playground #${playgroundHash} is empty. Create some files and click "Sync to Server" to save your first commit.`,
+              );
+              return;
+            }
+
+            data = yield* call("apiPlaygrounds.getCommit", (api) =>
+              api.apiPlaygrounds.getCommit({
+                params: { hash: playgroundHash, commit_id: head },
+              }),
+            ).pipe(
+              Effect.mapError(
+                (error) =>
+                  new WorkspaceError({
+                    message: `Failed to fetch workspace: ${error.status} ${error.message}`,
+                  }),
+              ),
+            );
+          }
+
+          const workspace: WorkspaceData = {
+            id: data.id,
+            name: data.message || `Playground ${playgroundHash}`,
+            message: data.message || "",
+            timestamp: data.timestamp,
+            files: data.files,
+            activeFile: data.activeFile,
+          };
+
+          yield* Effect.log("[WorkspaceSwitcher] Loading workspace:", workspace.id, workspace.name);
+          yield* Effect.log("[WorkspaceSwitcher] Files:", workspace.files.length);
+
+          progress.report({ message: `Loading ${workspace.files.length} files...` });
+
+          // Close all open editors first
+          yield* fromPromise(() =>
+            vscode.commands.executeCommand(WORKBENCH_ACTION_CLOSE_ALL_EDITORS),
+          );
+
+          // Delete all existing files
+          const allFiles = yield* fromPromise(() =>
+            vscode.workspace.findFiles("**/*", "**/node_modules/**"),
+          );
+          yield* deleteWorkspaceFiles(allFiles);
+
+          // Load files from workspace
+          yield* writeWorkspaceFiles(workspace.files, "load");
+          yield* openPreferredFile(workspace.activeFile, workspace.files, "workspace");
+
+          // Update URL if requested (client-side navigation)
+          if (updateUrl) {
+            const path = commitId
+              ? `/playgrounds/${playgroundHash}/commits/${commitId}`
+              : `/playgrounds/${playgroundHash}`;
+            navigateTo(path);
+          }
+
+          // Notify serverSync extension about the loaded workspace
+          yield* fromPromise(() =>
+            vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
+              commitId: workspace.id,
+              playgroundHash,
+              files: workspace.files,
+            }),
+          );
+
+          vscode.window.showInformationMessage(
+            `Loaded ${workspace.name}: ${workspace.files.length} file(s)`,
+          );
+        }).pipe(
+          // Normalize all errors to WorkspaceError
+          Effect.mapError((e) =>
+            S.is(WorkspaceError)(e)
+              ? e
+              : new WorkspaceError({ message: toError(e).message, cause: e }),
+          ),
+        );
+
+      /**
+       * Load a workspace (playground or specific commit) into the editor
+       * This is the central function for all workspace loading operations
+       */
+      const loadWorkspace = (options: LoadWorkspaceOptions): Effect.Effect<void, WorkspaceError> =>
+        replaceWorkspace(
+          Effect.flatMap(Effect.context<never>(), (context) =>
+            Effect.callback<void, WorkspaceError>((resume) => {
+              void vscode.window.withProgress(
+                {
+                  location: vscode.ProgressLocation.Notification,
+                  title: options.commitId ? "Loading commit..." : "Loading playground...",
+                  cancellable: false,
+                },
+                (progress) =>
+                  Effect.runPromiseExitWith(context)(loadWorkspaceCore(options, progress)).then(
+                    (exit) => {
+                      resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause));
+                    },
+                  ),
+              );
+            }),
+          ),
+        ).pipe(
+          Effect.tapError((err) =>
+            Effect.annotateCurrentSpan({
+              error: true,
+              "error.message": err.message,
+              "error.type": "workspace_load",
+            }),
+          ),
+          Effect.tapError((err) =>
+            Effect.logError("[WorkspaceSwitcher] Error loading workspace:", err).pipe(
+              Effect.tap(() =>
+                Effect.sync(() =>
+                  vscode.window.showErrorMessage(`Failed to load workspace: ${err.message}`),
+                ),
+              ),
+            ),
+          ),
+          Effect.withSpan("workspace.load", {
+            attributes: { playgroundHash: options.playgroundHash, commitId: options.commitId },
+          }),
+        );
+
+      /**
+       * Load workspace from a base64-encoded shared URL
+       * Decodes the data parameter and writes files to the workspace
+       */
+      const loadWorkspaceFromSharedUrl = (data: string): Effect.Effect<void> =>
+        replaceWorkspace(loadSharedWorkspaceContent(data)).pipe(
+          Effect.withSpan("workspace.loadFromSharedUrl"),
+        );
+
+      /**
+       * Load workspace from the server-injected initial data.
+       * Used during page load.
+       */
+      const loadWorkspaceFromInitialData: Effect.Effect<void, Error> = replaceWorkspace(
+        Effect.gen(function* () {
+          const { route, commit } = readInitialData();
+
+          if (!route && !commit) {
+            yield* Effect.log("[WorkspaceSwitcher] No initial state available");
+            yield* loadExistingOrSample;
+            return;
+          }
+
+          if (route?.type === "shared") {
+            // Already inside replaceWorkspace — reuse the content op, do not nest replace.
+            if (route.data) yield* loadSharedWorkspaceContent(route.data);
+            return;
+          }
+
+          if (!commit || !route) {
+            yield* Effect.log("[WorkspaceSwitcher] No workspace data to load");
+            yield* loadExistingOrSample;
+            return;
+          }
+
+          yield* Effect.log(
+            "[WorkspaceSwitcher] Loading from initial data:",
+            route.type,
+            route.playgroundHash,
+            route.commitId,
+          );
+
+          // A failed restore is logged and shown to the user below, so the
+          // switch ignores it instead of failing a second time.
+          yield* Effect.gen(function* () {
+            yield* fromPromise(() =>
+              vscode.commands.executeCommand(WORKBENCH_ACTION_CLOSE_ALL_EDITORS),
+            );
+            const allFiles = yield* fromPromise(() =>
+              vscode.workspace.findFiles("**/*", "**/node_modules/**"),
+            );
+            yield* deleteWorkspaceFiles(allFiles);
+
+            const errorCount = yield* writeWorkspaceFiles(commit.files, "restore");
+            const restoredCount = commit.files.length - errorCount;
+
+            yield* Effect.log(
+              `[WorkspaceSwitcher] Restoration complete: ${restoredCount} files restored, ${errorCount} errors`,
+            );
+
+            yield* openPreferredFile(commit.activeFile, commit.files, "initial");
+
+            yield* fromPromise(() =>
+              vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
+                commitId: commit.id,
+                playgroundHash: route.playgroundHash ?? commit.playground_hash,
+                files: commit.files,
+              }),
+            );
+
+            if (restoredCount > 0) {
+              vscode.window.showInformationMessage(
+                `Workspace restored: ${restoredCount} file(s) from ${DateTime.makeUnsafe(commit.timestamp).toLocaleString()}`,
+              );
+            }
+          }).pipe(
+            Effect.tapError((err) =>
+              Effect.annotateCurrentSpan({
+                error: true,
+                "error.message": err instanceof Error ? err.message : String(err),
+                "error.type": "workspace_restore",
+              }),
+            ),
+            Effect.tapError((err) =>
+              Effect.logError("[WorkspaceSwitcher] Failed to restore workspace:", err).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() =>
+                    vscode.window.showErrorMessage(`Failed to restore workspace: ${String(err)}`),
+                  ),
+                ),
+              ),
+            ),
+            Effect.ignore,
+          );
+        }),
+      ).pipe(Effect.withSpan("workspace.loadFromInitialData"));
+
+      return { loadWorkspace, loadWorkspaceFromSharedUrl, loadWorkspaceFromInitialData };
+    }),
+  },
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
+
 const fromPromise = <A>(run: () => PromiseLike<A>) =>
   Effect.tryPromise({
     try: run,
     catch: (cause) => new WorkspaceError({ message: toError(cause).message, cause }),
   });
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/** Runs `self` as a replacement of the loaded workspace content. */
-const replaceWorkspace = <A, E, R>(self: Effect.Effect<A, E, R>) =>
-  LoadedWorkspace.use((loaded) => loaded.replace(self));
 
 const deleteWorkspaceFiles = (files: readonly vscode.Uri[]) =>
   Effect.forEach(
@@ -293,209 +607,8 @@ const loadExistingOrSample = Effect.gen(function* () {
   }
 }).pipe(Effect.withSpan("workspace.loadExistingOrSample"));
 
-// ---------------------------------------------------------------------------
-// Public functions
-// ---------------------------------------------------------------------------
-
 /** Commit data shape returned by the API */
 type CommitData = typeof CommitDetail.Type;
-
-/**
- * Core workspace loading logic (runs inside withProgress)
- */
-const loadWorkspaceCore = (
-  options: LoadWorkspaceOptions,
-  progress: vscode.Progress<{ message?: string }>,
-) =>
-  Effect.gen(function* () {
-    const { playgroundHash, commitId, updateUrl = false } = options;
-    progress.report({ message: "Fetching data..." });
-
-    let data: CommitData;
-
-    if (commitId) {
-      // Loading a specific commit
-      const result = yield* httpApiGetPlaygroundCommit(playgroundHash, commitId).pipe(
-        Effect.catch((error) => {
-          if (error.status === 404) {
-            return clearWorkspace.pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  vscode.window.showWarningMessage(`Commit not found: ${commitId.substring(0, 8)}`);
-                }),
-              ),
-              Effect.map(() => null),
-            );
-          }
-          return Effect.fail(
-            new WorkspaceError({
-              message: `Failed to fetch workspace: ${error.status} ${error.message}`,
-            }),
-          );
-        }),
-      );
-      if (result === null) return;
-      data = result;
-    } else {
-      // Loading the playground's newest commit, which the playground names. A
-      // fork and the save that lands on it are written in one transaction and
-      // so carry the same timestamp, which leaves a commit list unable to say
-      // which of the two came last.
-      const playground = yield* httpApiGetPlayground(playgroundHash).pipe(
-        Effect.catch((error) => {
-          if (error.status === 404) {
-            return clearWorkspace.pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  vscode.window.showWarningMessage(`Playground not found: ${playgroundHash}`);
-                }),
-              ),
-              Effect.map(() => null),
-            );
-          }
-          if (error.status === 401) {
-            return clearWorkspace.pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  vscode.window.showWarningMessage(
-                    "You don't have permission to view this playground",
-                  );
-                }),
-              ),
-              Effect.map(() => null),
-            );
-          }
-          return Effect.fail(
-            new WorkspaceError({
-              message: `Failed to fetch playground: ${error.status} ${error.message}`,
-            }),
-          );
-        }),
-      );
-
-      if (playground === null) return;
-
-      const head = playground.head_commit_id;
-
-      if (head === null) {
-        progress.report({ message: "Clearing workspace..." });
-        yield* clearWorkspace;
-        vscode.window.showInformationMessage(
-          `Playground #${playgroundHash} is empty. Create some files and click "Sync to Server" to save your first commit.`,
-        );
-        return;
-      }
-
-      data = yield* httpApiGetPlaygroundCommit(playgroundHash, head).pipe(
-        Effect.mapError(
-          (error) =>
-            new WorkspaceError({
-              message: `Failed to fetch workspace: ${error.status} ${error.message}`,
-            }),
-        ),
-      );
-    }
-
-    const workspace: WorkspaceData = {
-      id: data.id,
-      name: data.message || `Playground ${playgroundHash}`,
-      message: data.message || "",
-      timestamp: data.timestamp,
-      files: data.files,
-      activeFile: data.activeFile,
-    };
-
-    yield* Effect.log("[WorkspaceSwitcher] Loading workspace:", workspace.id, workspace.name);
-    yield* Effect.log("[WorkspaceSwitcher] Files:", workspace.files.length);
-
-    progress.report({ message: `Loading ${workspace.files.length} files...` });
-
-    // Close all open editors first
-    yield* fromPromise(() => vscode.commands.executeCommand(WORKBENCH_ACTION_CLOSE_ALL_EDITORS));
-
-    // Delete all existing files
-    const allFiles = yield* fromPromise(() =>
-      vscode.workspace.findFiles("**/*", "**/node_modules/**"),
-    );
-    yield* deleteWorkspaceFiles(allFiles);
-
-    // Load files from workspace
-    yield* writeWorkspaceFiles(workspace.files, "load");
-    yield* openPreferredFile(workspace.activeFile, workspace.files, "workspace");
-
-    // Update URL if requested (client-side navigation)
-    if (updateUrl) {
-      const path = commitId
-        ? `/playgrounds/${playgroundHash}/commits/${commitId}`
-        : `/playgrounds/${playgroundHash}`;
-      navigateTo(path);
-    }
-
-    // Notify serverSync extension about the loaded workspace
-    yield* fromPromise(() =>
-      vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
-        commitId: workspace.id,
-        playgroundHash,
-        files: workspace.files,
-      }),
-    );
-
-    vscode.window.showInformationMessage(
-      `Loaded ${workspace.name}: ${workspace.files.length} file(s)`,
-    );
-  }).pipe(
-    // Normalize all errors to WorkspaceError
-    Effect.mapError((e) =>
-      S.is(WorkspaceError)(e) ? e : new WorkspaceError({ message: toError(e).message, cause: e }),
-    ),
-  );
-
-/**
- * Load a workspace (playground or specific commit) into the editor
- * This is the central function for all workspace loading operations
- */
-export const loadWorkspace = (
-  options: LoadWorkspaceOptions,
-): Effect.Effect<void, WorkspaceError, LoadedWorkspace | ApiCaller> =>
-  replaceWorkspace(
-    Effect.flatMap(Effect.context<ApiCaller>(), (context) =>
-      Effect.callback<void, WorkspaceError>((resume) => {
-        void vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: options.commitId ? "Loading commit..." : "Loading playground...",
-            cancellable: false,
-          },
-          (progress) =>
-            Effect.runPromiseExitWith(context)(loadWorkspaceCore(options, progress)).then(
-              (exit) => {
-                resume(Exit.isSuccess(exit) ? Effect.void : Effect.failCause(exit.cause));
-              },
-            ),
-        );
-      }),
-    ),
-  ).pipe(
-    Effect.tapError((err) =>
-      Effect.annotateCurrentSpan({
-        error: true,
-        "error.message": err.message,
-        "error.type": "workspace_load",
-      }),
-    ),
-    Effect.tapError((err) =>
-      Effect.logError("[WorkspaceSwitcher] Error loading workspace:", err).pipe(
-        Effect.tap(() =>
-          Effect.sync(() =>
-            vscode.window.showErrorMessage(`Failed to load workspace: ${err.message}`),
-          ),
-        ),
-      ),
-    ),
-    Effect.withSpan("workspace.load", {
-      attributes: { playgroundHash: options.playgroundHash, commitId: options.commitId },
-    }),
-  );
 
 /**
  * Decodes a shared-link payload and writes its files. Callers that already hold
@@ -546,102 +659,3 @@ const loadSharedWorkspaceContent = (data: string) =>
     ),
     Effect.ignore,
   );
-
-/**
- * Load workspace from a base64-encoded shared URL
- * Decodes the data parameter and writes files to the workspace
- */
-export const loadWorkspaceFromSharedUrl = (
-  data: string,
-): Effect.Effect<void, never, LoadedWorkspace> =>
-  replaceWorkspace(loadSharedWorkspaceContent(data)).pipe(
-    Effect.withSpan("workspace.loadFromSharedUrl"),
-  );
-
-/**
- * Load workspace from the server-injected initial data.
- * Used during page load.
- */
-export const loadWorkspaceFromInitialData: Effect.Effect<void, Error, LoadedWorkspace> =
-  replaceWorkspace(
-    Effect.gen(function* () {
-      const { route, commit } = readInitialData();
-
-      if (!route && !commit) {
-        yield* Effect.log("[WorkspaceSwitcher] No initial state available");
-        yield* loadExistingOrSample;
-        return;
-      }
-
-      if (route?.type === "shared") {
-        // Already inside replaceWorkspace — reuse the content op, do not nest replace.
-        if (route.data) yield* loadSharedWorkspaceContent(route.data);
-        return;
-      }
-
-      if (!commit || !route) {
-        yield* Effect.log("[WorkspaceSwitcher] No workspace data to load");
-        yield* loadExistingOrSample;
-        return;
-      }
-
-      yield* Effect.log(
-        "[WorkspaceSwitcher] Loading from initial data:",
-        route.type,
-        route.playgroundHash,
-        route.commitId,
-      );
-
-      // Restoration — errors caught internally (matches original try/catch that doesn't re-throw)
-      yield* Effect.gen(function* () {
-        yield* fromPromise(() =>
-          vscode.commands.executeCommand(WORKBENCH_ACTION_CLOSE_ALL_EDITORS),
-        );
-        const allFiles = yield* fromPromise(() =>
-          vscode.workspace.findFiles("**/*", "**/node_modules/**"),
-        );
-        yield* deleteWorkspaceFiles(allFiles);
-
-        const errorCount = yield* writeWorkspaceFiles(commit.files, "restore");
-        const restoredCount = commit.files.length - errorCount;
-
-        yield* Effect.log(
-          `[WorkspaceSwitcher] Restoration complete: ${restoredCount} files restored, ${errorCount} errors`,
-        );
-
-        yield* openPreferredFile(commit.activeFile, commit.files, "initial");
-
-        yield* fromPromise(() =>
-          vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, {
-            commitId: commit.id,
-            playgroundHash: route.playgroundHash ?? commit.playground_hash,
-            files: commit.files,
-          }),
-        );
-
-        if (restoredCount > 0) {
-          vscode.window.showInformationMessage(
-            `Workspace restored: ${restoredCount} file(s) from ${DateTime.makeUnsafe(commit.timestamp).toLocaleString()}`,
-          );
-        }
-      }).pipe(
-        Effect.tapError((err) =>
-          Effect.annotateCurrentSpan({
-            error: true,
-            "error.message": err instanceof Error ? err.message : String(err),
-            "error.type": "workspace_restore",
-          }),
-        ),
-        Effect.tapError((err) =>
-          Effect.logError("[WorkspaceSwitcher] Failed to restore workspace:", err).pipe(
-            Effect.tap(() =>
-              Effect.sync(() =>
-                vscode.window.showErrorMessage(`Failed to restore workspace: ${String(err)}`),
-              ),
-            ),
-          ),
-        ),
-        Effect.ignore,
-      );
-    }),
-  ).pipe(Effect.withSpan("workspace.loadFromInitialData"));

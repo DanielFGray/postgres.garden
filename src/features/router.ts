@@ -1,36 +1,36 @@
 import { Effect, Layer } from "effect";
 import { parseRoute } from "../shared/routes";
-import type { ApiCaller } from "../httpapi-client";
-import type { LoadedWorkspace } from "./loadedWorkspace";
-import { loadWorkspace, loadWorkspaceFromSharedUrl } from "./workspaceSwitcher";
-
-const loadCurrentRoute = () => {
-  const route = parseRoute(window.location.href);
-  if (!route) return Effect.void;
-
-  switch (route.type) {
-    case "playground":
-      return route.playgroundHash
-        ? loadWorkspace({ playgroundHash: route.playgroundHash, updateUrl: false })
-        : Effect.void;
-    case "commit":
-      return route.playgroundHash && route.commitId
-        ? loadWorkspace({
-            playgroundHash: route.playgroundHash,
-            commitId: route.commitId,
-            updateUrl: false,
-          })
-        : Effect.void;
-    case "shared":
-      return route.data ? loadWorkspaceFromSharedUrl(route.data) : Effect.void;
-    default:
-      return Effect.void;
-  }
-};
+import { WorkspaceSwitcher } from "./workspaceSwitcher";
 
 export const RouterFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const runtime = yield* Effect.context<ApiCaller | LoadedWorkspace>();
+    const workspace = yield* WorkspaceSwitcher;
+    const runtime = yield* Effect.context<never>();
+
+    const loadCurrentRoute = () => {
+      const route = parseRoute(window.location.href);
+      if (!route) return Effect.void;
+
+      switch (route.type) {
+        case "playground":
+          return route.playgroundHash
+            ? workspace.loadWorkspace({ playgroundHash: route.playgroundHash, updateUrl: false })
+            : Effect.void;
+        case "commit":
+          return route.playgroundHash && route.commitId
+            ? workspace.loadWorkspace({
+                playgroundHash: route.playgroundHash,
+                commitId: route.commitId,
+                updateUrl: false,
+              })
+            : Effect.void;
+        case "shared":
+          return route.data ? workspace.loadWorkspaceFromSharedUrl(route.data) : Effect.void;
+        default:
+          return Effect.void;
+      }
+    };
+
     const onPopState = () => {
       Effect.runForkWith(runtime)(
         loadCurrentRoute().pipe(

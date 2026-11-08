@@ -4,7 +4,6 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { Array, DateTime, Effect, Option, Ref } from "effect";
 import * as S from "effect/Schema";
-import { makePgGardenClient } from "../../httpapi-client";
 import { RelayOrigin, relayReply } from "./relay";
 import {
   RelayRequest,
@@ -12,7 +11,7 @@ import {
   type RelayRequestEncoded,
   RelayResponse,
 } from "./relayProtocol";
-import { type RelayChannel, makeRelayTransport } from "./relayTransport";
+import { type RelayChannel, createWebviewApiClient } from "./relayTransport";
 
 const origin = "http://localhost:3000";
 
@@ -98,10 +97,8 @@ const connect = Effect.fnUntraced(function* (respond: (seen: Seen) => Response) 
     subscribe: (handler) => subscribers.push(handler),
   };
 
-  const client = yield* makePgGardenClient({
-    baseUrl: "http://webview-relay.invalid",
-    transport: makeRelayTransport(channel),
-  });
+  // This test sends the host no messages of its own, only relayed requests.
+  const client = createWebviewApiClient({ feature: "relay-test", messages: S.Never, channel });
 
   return { client, request: Ref.get(seen).pipe(Effect.map(Array.get(0))) };
 });
@@ -110,7 +107,7 @@ it.effect("a GET crosses the relay and comes back decoded against the contract",
   Effect.gen(function* () {
     const { client, request } = yield* connect(() => json(userJson));
 
-    const result = yield* client.apiUsers.me();
+    const result = yield* client.apiCall("test", (api) => api.apiUsers.me());
 
     expect(Option.map(Option.fromNullishOr(result.user), (user) => user.username)).toStrictEqual(
       Option.some("ada"),
@@ -130,7 +127,9 @@ it.effect("a PATCH keeps the JSON content type its body would otherwise overwrit
   Effect.gen(function* () {
     const { client, request } = yield* connect(() => json(JSON.stringify(user)));
 
-    yield* client.apiUsers.patchMe({ payload: { name: "Ada Lovelace" } });
+    yield* client.apiCall("test", (api) =>
+      api.apiUsers.patchMe({ payload: { name: "Ada Lovelace" } }),
+    );
 
     expect(
       Option.map(yield* request, (seen) => [seen.method, seen.contentType, seen.body]),

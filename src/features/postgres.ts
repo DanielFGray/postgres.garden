@@ -30,7 +30,7 @@ import { MarkdownSerializer } from "./notebook/markdown.js";
 import { SQLNotebookExecutionController } from "./notebook/controller.js";
 import { SQLSerializer } from "./notebook/sql.js";
 import { PGlite } from "./pglite";
-import { loadWorkspaceFromInitialData } from "./workspaceSwitcher";
+import { WorkspaceSwitcher } from "./workspaceSwitcher";
 
 const fromPromise = <A>(run: () => PromiseLike<A>) =>
   Effect.tryPromise({
@@ -126,6 +126,7 @@ const activatePostgresFeature = Effect.gen(function* () {
   const vscodeService = yield* VSCodeService;
   const vscodeApi = vscodeService.api;
   const runtime = yield* Effect.context<never>();
+  const workspace = yield* WorkspaceSwitcher;
 
   yield* registerFeatureAssets(vscodeService);
 
@@ -153,7 +154,7 @@ const activatePostgresFeature = Effect.gen(function* () {
   const pglite = yield* PGlite;
 
   yield* Effect.forkScoped(
-    loadWorkspaceFromInitialData.pipe(
+    workspace.loadWorkspaceFromInitialData.pipe(
       Effect.tapError((error) =>
         Effect.annotateCurrentSpan({
           error: true,

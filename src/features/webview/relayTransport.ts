@@ -2,9 +2,9 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
-import { Effect, Match, Option } from "effect";
+import { Context, Effect, ManagedRuntime, Match, Option } from "effect";
 import * as S from "effect/Schema";
-import { ApiCaller, apiCall, type ClientFailure, type PgGardenClient } from "../../httpapi-client";
+import { ApiCaller, type ClientFailure, type PgGardenClient } from "../../httpapi-client";
 import {
   RelayMethod,
   RelayRequest,
@@ -183,18 +183,25 @@ export const createWebviewApiClient = <Message, Encoded>(options: {
   readonly messages: S.Codec<Message, Encoded>;
   readonly channel: RelayChannel<Encoded>;
 }) => {
-  const caller = ApiCaller.layer({
-    baseUrl: relayBaseUrl,
-    transport: makeRelayTransport(options.channel),
-    feature: options.feature,
-  });
+  // A webview has no layer graph of its own. The runtime builds the caller once,
+  // on the first call, and keeps it for the webview's lifetime.
+  const caller = ManagedRuntime.make(
+    ApiCaller.layer({
+      baseUrl: relayBaseUrl,
+      transport: makeRelayTransport(options.channel),
+      feature: options.feature,
+    }),
+  );
 
   return {
     /** Makes one call against the contract, attributed to a named UI action. */
     apiCall: <A, E extends ClientFailure>(
       action: string,
       run: (api: PgGardenClient) => Effect.Effect<A, E>,
-    ) => apiCall(action, run).pipe(Effect.provide(caller)),
+    ) =>
+      caller.contextEffect.pipe(
+        Effect.flatMap((context) => Context.get(context, ApiCaller).call(action, run)),
+      ),
     /** Sends one of the feature's own messages to the extension host. */
     postMessage: (message: Message) =>
       S.encodeEffect(options.messages)(message).pipe(
