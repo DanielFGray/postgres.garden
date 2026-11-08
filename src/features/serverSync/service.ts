@@ -573,7 +573,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
         ),
       );
       const items = commits.map((commit, index) => ({
-        label: `${Option.contains(commitId, commit.id) ? "✓ " : ""}Version ${index + 1}`,
+        label: `${Option.contains(commitId, commit.id) ? "✓ " : ""}Version ${versionAt(commits, index)}`,
         description: commit.message || `Commit ${commit.id.substring(0, 8)}`,
         detail: `${commit.username ?? "Unknown"} • ${DateTime.formatLocal(DateTime.makeUnsafe(commit.timestamp))}`,
         commitId: commit.id,
@@ -706,15 +706,26 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
 const toServerSyncError = (cause: unknown) =>
   new ServerSyncError({ message: toErrorMessage(cause), cause });
 
-/** Where `commitId` stands among `commits`, newest first, counting from 1. The newest when it is not among them. */
+/**
+ * The version number of the commit at `index` in `commits`, which the server
+ * lists newest first. Versions count from the oldest, so the latest save is
+ * the highest number.
+ */
+const versionAt = (commits: ReadonlyArray<{ readonly id: string }>, index: number) =>
+  commits.length - index;
+
+/** The version number of `commitId` among `commits`. The newest when it is not among them. */
 const versionOf = (
   commits: ReadonlyArray<{ readonly id: string }>,
   commitId: Option.Option<string>,
 ) =>
-  Option.getOrElse(
-    Arr.findFirstIndex(commits, (commit) => Option.contains(commitId, commit.id)),
-    () => 0,
-  ) + 1;
+  versionAt(
+    commits,
+    Option.getOrElse(
+      Arr.findFirstIndex(commits, (commit) => Option.contains(commitId, commit.id)),
+      () => 0,
+    ),
+  );
 
 /** One file of a commit, in the commit and in its parent. An absent side is empty. */
 interface CommitFileChange {

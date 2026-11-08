@@ -128,9 +128,8 @@ test.describe("source control", () => {
     await waitForWorkbench(page);
     await page.locator('.monaco-list-row[aria-label="history.sql"]').waitFor({ timeout: 60_000 });
     await showSourceControl(page);
-    // Versions count from the newest, which is Version 1.
     const versionStatus = page.locator(".statusbar-item", { hasText: /Version \d+\/\d+/ });
-    await expect(versionStatus).toHaveText(/Version 1\/2/, { timeout: 15_000 });
+    await expect(versionStatus).toHaveText(/Version 2\/2/, { timeout: 15_000 });
     const historySection = page.getByRole("button", { name: "Commit History Section" });
     await historySection.click();
     await expect(historySection).toHaveAttribute("aria-expanded", "true");
@@ -149,13 +148,13 @@ test.describe("source control", () => {
     await expect(diff.locator(".editor.modified")).toContainText(/select\s2;/);
 
     await versionStatus.click();
-    await page.getByRole("option", { name: /^Version 2/ }).click({ timeout: 15_000 });
-    await expect(versionStatus).toHaveText(/Version 2\/2/, { timeout: 30_000 });
+    await page.getByRole("option", { name: /^Version 1/ }).click({ timeout: 15_000 });
+    await expect(versionStatus).toHaveText(/Version 1\/2/, { timeout: 30_000 });
     await expect(page).toHaveURL(new RegExp(`/playgrounds/${playground_hash}/commits/`));
 
     // The inline action passes the history item itself, not a commit id.
     await secondRow.hover();
     await secondRow.getByRole("button", { name: "Load Commit" }).click();
-    await expect(versionStatus).toHaveText(/Version 1\/2/, { timeout: 30_000 });
+    await expect(versionStatus).toHaveText(/Version 2\/2/, { timeout: 30_000 });
   });
 });
