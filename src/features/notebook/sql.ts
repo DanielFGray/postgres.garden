@@ -1,7 +1,14 @@
 import * as vscode from "vscode";
+import { Option, Schema } from "effect";
 
 // Cell block delimiter
 const DELIMITER = "\n\n";
+
+// A rule cell keeps the divider it was read from, because `---` and `/***/`
+// both show as a rule: writing every rule back as `---` would change a file
+// that the author only opened and saved.
+const RuleMetadata = Schema.Struct({ divider: Schema.String });
+const decodeRuleMetadata = Schema.decodeUnknownOption(RuleMetadata);
 
 export class SQLSerializer implements vscode.NotebookSerializer {
   deserializeNotebook(context: Uint8Array): vscode.NotebookData {
@@ -10,7 +17,9 @@ export class SQLSerializer implements vscode.NotebookSerializer {
 
     const cells = blocks.map((query) => {
       if (/^(---+|\/\*+\*\/)$/.test(query)) {
-        return new vscode.NotebookCellData(vscode.NotebookCellKind.Markup, "***", "markdown");
+        const rule = new vscode.NotebookCellData(vscode.NotebookCellKind.Markup, "***", "markdown");
+        rule.metadata = RuleMetadata.make({ divider: query });
+        return rule;
       }
       if (query.startsWith("/*") && query.endsWith("*/")) {
         return new vscode.NotebookCellData(
@@ -28,9 +37,14 @@ export class SQLSerializer implements vscode.NotebookSerializer {
   serializeNotebook(data: vscode.NotebookData): Uint8Array {
     return new TextEncoder().encode(
       data.cells
-        .map(({ value, kind }) => {
+        .map(({ value, kind, metadata }) => {
           if (kind === vscode.NotebookCellKind.Code) return value;
-          if (value === "***") return "---";
+          if (value === "***") {
+            return Option.match(decodeRuleMetadata(metadata), {
+              onNone: () => "---",
+              onSome: ({ divider }) => divider,
+            });
+          }
           const lines = value.split("\n");
           if (lines[0]?.trim().length === 0) return "";
           const withCommentChars = lines.map((line) => (!line ? " *" : " * " + line)).join("\n");

@@ -42,6 +42,8 @@ test.describe("saving without an account", () => {
     await expect(page.getByText(/only way back into this playground/i).first()).toBeVisible({
       timeout: 30_000,
     });
+    // The warning waits for an answer, and the save is over while it waits.
+    await expect(page.getByText(/Syncing workspace to server/i)).toHaveCount(0);
 
     // The playground is now this tab's URL, and the key is not: a URL copied
     // from the bar must not hand out the right to edit.
