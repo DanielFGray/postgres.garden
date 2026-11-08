@@ -108,7 +108,7 @@ export class PlaygroundBrowserPanel {
         "node_modules/@vscode/codicons/dist/codicon.css",
         "src/webview-dist/postgres-garden.css",
       ],
-      scripts: ["src/webview-dist/signals.module.js", "src/webview-dist/playground-view.js"],
+      scripts: ["src/webview-dist/playground-view.js"],
     });
   }
 }
