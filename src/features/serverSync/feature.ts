@@ -19,7 +19,8 @@ import {
   SERVER_SYNC_VIEW_FORK_SOURCE,
   SERVER_SYNC_WORKSPACE_LOADED,
 } from "../constants";
-import { ServerSync, ServerSyncError, WorkspaceLoaded } from "./service";
+import type { PlaygroundSaveError } from "./playgroundSaver";
+import { ServerSync, type ServerSyncError, WorkspaceLoaded } from "./service";
 
 /** A commit id, given directly or as the commit history item a context menu passes. */
 const CommitArgument = Schema.Union([
@@ -52,7 +53,10 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
     const sync = yield* ServerSync;
 
     /** Runs `task` without waiting for it. A failure is logged and shown to the user. */
-    const run = <A>(failure: string, task: Effect.Effect<A, ServerSyncError>) =>
+    const run = <A>(
+      failure: string,
+      task: Effect.Effect<A, ServerSyncError | PlaygroundSaveError>,
+    ) =>
       runFork(
         task.pipe(
           Effect.catch((error) =>

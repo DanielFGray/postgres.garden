@@ -15,19 +15,14 @@ import {
   Effect,
   Equal,
   Layer,
+  Match,
   Option,
   Ref,
   Schema,
   String as Str,
 } from "effect";
 import { ApiCaller } from "../../httpapi-client";
-import {
-  editKeyLink,
-  forgetEditKey,
-  heldEditKey,
-  rememberEditKey,
-  takeEditKeyFromUrl,
-} from "../../shared/editKey";
+import { takeEditKeyFromUrl } from "../../shared/editKey";
 import { toErrorMessage } from "../../shared/errors";
 import { navigateTo } from "../../shared/navigation";
 import { buildPath, getCurrentPlaygroundId } from "../../shared/routes";
@@ -50,6 +45,7 @@ import {
   forkTreeItem,
   ListTreeProvider,
 } from "./historyTree";
+import { PlaygroundSaver, type Saved, WorkspaceFile } from "./playgroundSaver";
 
 export class ServerSyncError extends Schema.TaggedError<
   ServerSyncError,
@@ -58,12 +54,6 @@ export class ServerSyncError extends Schema.TaggedError<
   message: Schema.String,
   cause: Schema.optional(Schema.Unknown),
 }) {}
-
-const WorkspaceFile = Schema.Struct({
-  path: Schema.String,
-  content: Schema.String,
-});
-type WorkspaceFile = typeof WorkspaceFile.Type;
 
 /** What `workspaceSwitcher` reports after it loads a commit into the workspace. */
 export const WorkspaceLoaded = Schema.Struct({
@@ -84,6 +74,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     const { runPromise } = yield* Workbench;
     const loadedWorkspace = yield* LoadedWorkspace;
     const { call } = yield* ApiCaller;
+    const saver = yield* PlaygroundSaver;
 
     yield* Effect.sync(takeEditKeyFromUrl);
 
@@ -323,42 +314,14 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       );
     });
 
-    /**
-     * Turn the key this tab holds into ownership of the playground.
-     *
-     * A key the server will not take is not a failure to report: the save that
-     * follows then forks the playground, which is what saving a playground that
-     * is not the caller's has always done. The answer says which happened, so a
-     * caller does not tell the author their work was kept when it was not. A
-     * key that is taken is spent, so it leaves this tab's storage.
-     */
-    const claimWithEditKey = (hash: string) =>
-      call("apiPlaygrounds.claimPlayground", (api) =>
-        api.apiPlaygrounds.claimPlayground({ params: { hash } }),
-      ).pipe(
-        Effect.tap(() => Effect.sync(() => forgetEditKey(hash))),
-        Effect.as(true),
-        Effect.catch((error) =>
-          Effect.logWarning("[ServerSync] The edit key did not claim the playground:", error).pipe(
-            Effect.as(false),
-          ),
-        ),
-      );
-
     const showWarning = (message: string, ...actions: Array<string>) =>
       Effect.tryPromise({
         try: () => vscodeApi.window.showWarningMessage(message, ...actions),
         catch: toServerSyncError,
       });
 
-    const signIn = (options: vscode.AuthenticationGetSessionOptions) =>
-      Effect.tryPromise({
-        try: () => vscodeApi.authentication.getSession("github-auth", [], options),
-        catch: toServerSyncError,
-      });
-
-    /** Saves the workspace as a commit, or as a new playground when it holds none it may write to. */
-    const save = Effect.fn("ServerSync.save")(function* (
+    /** Reads the workspace and sends it to the server. None when the workspace holds no files. */
+    const upload = Effect.fnUntraced(function* (
       message: Option.Option<string>,
       progress: vscode.Progress<{ message?: string }>,
     ) {
@@ -372,276 +335,85 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       progress.report({ message: "Scanning files..." });
       const files = yield* findFiles().pipe(Effect.flatMap(readFiles));
       yield* Effect.log(`[ServerSync] Scanned workspace: ${files.length} files`);
-      if (files.length === 0) {
-        void vscodeApi.window.showWarningMessage("No files to sync");
-        return;
-      }
+      if (files.length === 0) return Option.none();
 
       progress.report({ message: `Uploading ${files.length} files...` });
-      const activeFile = vscodeApi.window.activeTextEditor?.document.uri.path ?? null;
       const now = yield* DateTime.now;
-      const commitMessage = message.pipe(
-        Option.orElse(() => Option.liftPredicate(scm.inputBox.value, Str.isNonEmpty)),
-        Option.getOrElse(() => `Workspace snapshot at ${DateTime.formatIso(now)}`),
-      );
-
-      const before = yield* Ref.get(position);
-      yield* Effect.log("[ServerSync] Sending commit request:", {
-        playground_hash: Option.getOrNull(before.playgroundHash),
-        fileCount: files.length,
-        message: commitMessage,
-      });
-
-      // The session cookie, not the local auth provider, says who the caller
-      // is, so the server is asked.
-      const user = yield* call("apiUsers.me", (api) => api.apiUsers.me({})).pipe(
-        Effect.map(({ user }) => Option.fromNullishOr(user)),
-        Effect.catch((error) =>
-          Effect.logWarning("[ServerSync] Failed to check auth status:", error).pipe(
-            Effect.as(Option.none()),
-          ),
+      const { playgroundHash } = yield* Ref.get(position);
+      const outcome = yield* saver.upload({
+        files,
+        message: message.pipe(
+          Option.orElse(() => Option.liftPredicate(scm.inputBox.value, Str.isNonEmpty)),
+          Option.getOrElse(() => `Workspace snapshot at ${DateTime.formatIso(now)}`),
         ),
-      );
-      const isAuthenticated = Option.isSome(user);
-      yield* Effect.log("[ServerSync] Auth check:", {
-        isAuthenticated,
-        username: Option.getOrNull(Option.map(user, ({ username }) => username)),
-      });
-
-      // Which playground is on screen: the URL says so from the first paint,
-      // while the position waits for the workspace-loaded notification. A tab
-      // opened straight on a playground can be saved before that arrives, and
-      // it must save to the playground it is showing.
-      const openPlayground = Option.orElse(before.playgroundHash, () =>
-        Option.fromNullishOr(getCurrentPlaygroundId()),
-      );
-
-      // An account is one way to prove the playground on screen is the
-      // caller's to write to; the key this tab holds for it is the other.
-      // Signing in while holding a key is how an unclaimed playground gets an
-      // owner, so the claim goes first: from then on the account is what the
-      // server matches against.
-      const keyHeldFor = Option.filter(openPlayground, (hash) => heldEditKey(hash) !== null);
-      const claimed = isAuthenticated
-        ? yield* Option.match(keyHeldFor, {
-            onNone: () => Effect.succeed(false),
-            onSome: claimWithEditKey,
-          })
-        : false;
-      const holdsKey = Option.isSome(keyHeldFor) && !claimed;
-
-      // With neither, the save starts a playground of its own. Reading
-      // someone else's playground and saving is how a visitor with no account
-      // keeps their work, and the server would refuse a commit to a playground
-      // they cannot prove is theirs.
-      const saveTo = Option.filter(openPlayground, () => isAuthenticated || holdsKey);
-
-      // The two endpoints answer the same five fields and one of their own,
-      // so each fills in the other's: one shape means the code below reads a
-      // field instead of asking which endpoint it came from.
-      const saved = Option.match(saveTo, {
-        onSome: (hash) =>
-          call("apiPlaygrounds.createCommit", (api) =>
-            api.apiPlaygrounds.createCommit({
-              params: { hash },
-              payload: { message: commitMessage, files, activeFile },
-            }),
-          ).pipe(
-            Effect.map((result) => ({
-              ...result,
-              edit_key: null,
-              expires_at: null,
-            })),
-          ),
-        onNone: () =>
-          call("apiPlaygrounds.createPlayground", (api) =>
-            api.apiPlaygrounds.createPlayground({
-              payload: {
-                name: playgroundName(now),
-                message: commitMessage,
-                description: "New playground",
-                files,
-                activeFile,
-              },
-            }),
-          ).pipe(Effect.map((result) => ({ ...result, forked: false }))),
-      });
-
-      const outcome = yield* saved.pipe(
-        Effect.asSome,
-        Effect.catch((error) =>
-          Effect.gen(function* () {
-            yield* Effect.logError("[ServerSync] Commit failed:", error);
-            if (error.status !== 401) {
-              return yield* new ServerSyncError({
-                message: `Failed to commit workspace: ${error.status} ${error.message}`,
-                cause: error,
-              });
-            }
-            const choice = yield* showWarning(
-              "Your session has expired. Please sign in again to sync.",
-              "Sign In",
-              "Cancel",
-            );
-            if (choice === "Sign In") {
-              yield* signIn({
-                createIfNone: true,
-                forceNewSession: true,
-              }).pipe(
-                Effect.tap(() =>
-                  Effect.sync(() =>
-                    vscodeApi.window.showInformationMessage(
-                      "Signed in successfully. Please try syncing again.",
-                    ),
-                  ),
-                ),
-                Effect.catch(() =>
-                  Effect.sync(() =>
-                    vscodeApi.window.showErrorMessage("Authentication failed. Please try again."),
-                  ),
-                ),
-              );
-            }
-            return Option.none();
-          }),
+        activeFile: Option.fromNullishOr(vscodeApi.window.activeTextEditor?.document.uri.path),
+        // The URL names the playground on screen from the first paint, while
+        // the position waits for the workspace-loaded notification. A tab
+        // opened straight on a playground can be saved before that arrives,
+        // and it must save to the playground it shows.
+        openPlayground: Option.orElse(playgroundHash, () =>
+          Option.fromNullishOr(getCurrentPlaygroundId()),
         ),
-      );
-      if (Option.isNone(outcome)) return;
-      const result = outcome.value;
-
-      // The key is answered once and the author keeps it. It must not be the
-      // console that keeps a copy as well.
-      yield* Effect.log("[ServerSync] Commit successful:", {
-        ...result,
-        edit_key: result.edit_key === null ? null : "[redacted]",
       });
+      return Option.some({ outcome, files });
+    });
 
-      const current = yield* Ref.get(position);
-      const movedPlayground = !Option.contains(current.playgroundHash, result.playground_hash);
-
+    /** Makes the commit that a save just made the position and the baseline. */
+    const applySaved = Effect.fnUntraced(function* (
+      saved: typeof Saved.Type,
+      files: ReadonlyArray<WorkspaceFile>,
+    ) {
+      const { playgroundHash } = yield* Ref.get(position);
       // A save that moves the workspace to another playground (new or forked)
       // changes which playground is loaded, though no file changes.
-      if (movedPlayground) yield* loadedWorkspace.replace(Effect.void);
-      yield* Ref.set(position, {
-        playgroundHash: Option.some(result.playground_hash),
-        commitId: Option.some(result.commit_id),
-      });
-
-      // A playground started without an account comes back with the key that
-      // holds it. The server answers it once and keeps only its digest, so
-      // this is the only moment it can be kept.
-      if (result.edit_key !== null) rememberEditKey(result.playground_hash, result.edit_key);
-
-      const playgroundPath = buildPath({
-        type: "playground",
-        playgroundHash: result.playground_hash,
-      });
-      if (movedPlayground) {
+      if (!Option.contains(playgroundHash, saved.playgroundHash)) {
+        yield* loadedWorkspace.replace(Effect.void);
         yield* Effect.log(
-          "[ServerSync] Playground hash changed - updating URL to:",
-          result.playground_hash,
-          result.forked ? "(forked)" : isAuthenticated ? "(first sync)" : "(anonymous snapshot)",
+          "[ServerSync] Playground changed - updating URL to:",
+          saved.playgroundHash,
         );
         // The key stays out of the address bar: session storage holds it.
-        window.history.replaceState(null, "", playgroundPath);
+        window.history.replaceState(
+          null,
+          "",
+          buildPath({ type: "playground", playgroundHash: saved.playgroundHash }),
+        );
       }
-
+      yield* Ref.set(position, {
+        playgroundHash: Option.some(saved.playgroundHash),
+        commitId: Option.some(saved.commitId),
+      });
       scm.inputBox.value = "";
       yield* resetBaseline(files);
-
-      if (result.forked) {
-        void vscodeApi.window.showInformationMessage(
-          `Playground forked: ${files.length} file(s) saved. You now own this copy and can continue making commits.`,
-        );
-      } else if (result.edit_key !== null) {
-        yield* offerEditLink({
-          fileCount: files.length,
-          hash: result.playground_hash,
-          link: editKeyLink(`${window.location.origin}${playgroundPath}`, result.edit_key),
-          expiresAt: Option.fromNullishOr(result.expires_at),
-        });
-      } else {
-        void vscodeApi.window.showInformationMessage(
-          `Workspace synced: ${files.length} file(s) saved`,
-        );
-      }
-
       commitHistory.refresh();
       forkHistory.refresh();
       yield* updateStatusBar;
     });
 
     /**
-     * Gives the author of a playground saved without an account its edit link.
-     *
-     * Such a playground is held by its key and by nothing else: there is no
-     * password to recover and no account to sign in to, so the link is the
-     * whole claim to it. Hence the clipboard and the warning.
+     * Saves the workspace, with `message` or the input box's text as the
+     * commit message. The progress notification closes before a dialog about
+     * the outcome opens, because a dialog waits for an answer.
      */
-    const offerEditLink = Effect.fnUntraced(function* (saved: {
-      readonly fileCount: number;
-      readonly hash: string;
-      readonly link: string;
-      readonly expiresAt: Option.Option<DateTime.Utc>;
-    }) {
-      const copied = yield* Effect.tryPromise({
-        try: () => navigator.clipboard.writeText(saved.link),
-        catch: toServerSyncError,
-      }).pipe(
-        Effect.as(true),
-        Effect.catch((error) =>
-          Effect.logWarning("[ServerSync] Could not copy the edit link:", error).pipe(
-            Effect.as(false),
-          ),
-        ),
-      );
-
-      // The clipboard refuses a write often enough - a browser counts the time
-      // since the click - that a message saying the link is on it would, on
-      // that day, lose the playground. So the message carries the link itself
-      // when the copy did not happen.
-      const where = copied
-        ? "Your edit link is on the clipboard"
-        : `Your edit link is ${saved.link}`;
-      const until = Option.match(saved.expiresAt, {
-        onNone: () => "",
-        onSome: (expiresAt) =>
-          ` It is removed on ${DateTime.formatIsoDate(expiresAt)} unless an account claims it.`,
-      });
-      const action = yield* showWarning(
-        `Saved ${saved.fileCount} file(s). ${where} - keep it, because it is the only way back into this playground, and anyone who has it can edit it.${until} Sign in to keep the playground on your account instead.`,
-        "Sign In to Keep It",
-      );
-      if (action !== "Sign In to Keep It") return;
-
-      // The key is what proves this playground is theirs to keep, so the
-      // claim goes in while the tab still holds it rather than waiting for the
-      // next save.
-      yield* Effect.gen(function* () {
-        yield* signIn({ createIfNone: true });
-        if (heldEditKey(saved.hash) === null) return;
-        if (yield* claimWithEditKey(saved.hash)) {
-          void vscodeApi.window.showInformationMessage(
-            "This playground is on your account now, and the edit link no longer opens it.",
-          );
-        }
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("[ServerSync] Sign-in to keep the playground did not finish:", error),
-        ),
-      );
-    });
-
-    /** Saves the workspace, with `message` or the input box's text as the commit message. */
-    const commit = (message: Option.Option<string>) =>
-      withProgress(
+    const commit = Effect.fn("ServerSync.commit")(function* (message: Option.Option<string>) {
+      const uploaded = yield* withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: "Syncing workspace to server...",
           cancellable: false,
         },
-        (progress) => save(message, progress),
+        (progress) => upload(message, progress),
       );
+      yield* Option.match(uploaded, {
+        onNone: () =>
+          Effect.sync(() => void vscodeApi.window.showWarningMessage("No files to sync")),
+        onSome: ({ outcome, files }) =>
+          Match.valueTags(outcome, {
+            Saved: (saved) => applySaved(saved, files),
+            SessionExpired: () => Effect.void,
+          }).pipe(Effect.andThen(saver.announce(outcome))),
+      });
+    });
 
     /** Replaces the workspace with the files of `commitId`, which becomes the baseline. */
     const restore = Effect.fn("ServerSync.restore")(function* (commitId: string) {
@@ -938,13 +710,6 @@ const versionOf = (
     Arr.findFirstIndex(commits, (commit) => Option.contains(commitId, commit.id)),
     () => 0,
   ) + 1;
-
-/** A unique name for a new playground: workspace_YYYYMMDD_HHMMSS_milliseconds. */
-const playgroundName = (now: DateTime.Utc) => {
-  const date = DateTime.toDate(now);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `workspace_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}_${date.getMilliseconds()}`;
-};
 
 /** One file of a commit, in the commit and in its parent. An absent side is empty. */
 interface CommitFileChange {
