@@ -13,7 +13,7 @@ import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
 import { getPageData } from "./layers/getPageData.js";
 import { waitForDependencies } from "./ready.js";
-import { PageStateSchema, type PageState } from "../src/shared/dehydrate.js";
+import { injectInitialData } from "./initialData.js";
 import { HttpApiLive } from "./apiHandlers.js";
 import { isApiPath } from "./apiSchema.js";
 
@@ -42,22 +42,6 @@ const applySecurityHeaders = (response: Response): Response => {
     statusText: response.statusText,
     headers,
   });
-};
-
-const serializeInitialData = (state: PageState): string =>
-  S.encodeSync(S.fromJsonString(PageStateSchema))(state)
-    .replace(/</g, "\\u003c")
-    .replace(/-->/g, "--\\u003e");
-
-const injectInitialData = (html: string, state: PageState): string => {
-  const payload = `<script>window.__INITIAL_DATA__=${serializeInitialData(state)}</script>`;
-  if (html.includes("<!-- {INITIAL_DATA} -->")) {
-    return html.replace("<!-- {INITIAL_DATA} -->", payload);
-  }
-  if (html.includes("</body>")) {
-    return html.replace("</body>", `${payload}</body>`);
-  }
-  return `${html}${payload}`;
 };
 
 const makeRuntime = () => {
