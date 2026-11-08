@@ -1,4 +1,4 @@
-import { Cause, DateTime, Effect, Layer, Match, Schema as S } from "effect";
+import { Cause, Config, DateTime, Effect, Layer, Match, Schema as S } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { CurrentSession, EDIT_KEY_HEADER, PgGardenApi } from "./apiSchema.js";
@@ -431,10 +431,7 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
               }).pipe(Effect.andThen(Effect.fail(new Locked({ error: e.message })))),
           }),
         ),
-      authMe: () =>
-        CurrentSession.pipe(
-          Effect.map(({ user }) => user),
-        ),
+      authMe: () => CurrentSession.pipe(Effect.map(({ user }) => user)),
       logout: () =>
         Effect.gen(function* () {
           const { session } = yield* CurrentSession;
@@ -990,20 +987,28 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
 // ---------------------------------------------------------------------------
 
 const systemLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
-  handlers.handleAll({
-    healthz: () =>
-      checkDependencies.pipe(
-        Effect.as({ ok: true }),
-        Effect.catchTag("DependencyUnavailable", (e) =>
-          // The dependency's name reaches the client; its error text only the
-          // logs, since a health endpoint is unauthenticated.
-          Effect.logWarning(`healthz: ${e.dependency} unavailable: ${e.message}`).pipe(
-            Effect.andThen(Effect.fail(new ServiceUnavailable({ error: e.dependency }))),
-          ),
+  handlers.handleRaw("healthz", () =>
+    checkDependencies.pipe(
+      Effect.andThen(deployedCommit),
+      Effect.map((commit) =>
+        HttpServerResponse.jsonUnsafe(
+          { ok: true },
+          { headers: { "x-commit": commit, "cache-control": "no-store" } },
         ),
       ),
-  }),
+      Effect.catchTag("DependencyUnavailable", (e) =>
+        // The dependency's name reaches the client; its error text only the
+        // logs, since a health endpoint is unauthenticated.
+        Effect.logWarning(`healthz: ${e.dependency} unavailable: ${e.message}`).pipe(
+          Effect.andThen(Effect.fail(new ServiceUnavailable({ error: e.dependency }))),
+        ),
+      ),
+    ),
+  ),
 );
+
+/** The commit the deploy runs, for the x-commit header; the platform sets GIT_COMMIT. */
+const deployedCommit = Config.String("GIT_COMMIT").pipe(Effect.orElseSucceed(() => "unknown"));
 
 // ---------------------------------------------------------------------------
 // Composition
