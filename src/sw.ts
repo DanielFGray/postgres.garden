@@ -2,8 +2,8 @@
  * Service Worker for postgres.garden
  *
  * Caching strategy:
+ * - HTML navigation: network, with the precached shell as the offline fallback
  * - Precached assets (from Vite manifest): cache-first (hash-versioned, immutable)
- * - HTML navigation: network-first with offline fallback
  * - API calls: network-only (never cache auth/mutation endpoints)
  * - WASM files: cache-first on first use (large, content-hashed)
  *
@@ -12,8 +12,13 @@
  * works even when served from cache (required for VSCode language features).
  */
 
-import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
-import { registerRoute, setDefaultHandler, setCatchHandler } from "workbox-routing";
+import { cleanupOutdatedCaches, matchPrecache, precacheAndRoute } from "workbox-precaching";
+import {
+  NavigationRoute,
+  registerRoute,
+  setDefaultHandler,
+  setCatchHandler,
+} from "workbox-routing";
 import { CacheFirst, NetworkFirst, NetworkOnly } from "workbox-strategies";
 import { CacheableResponsePlugin } from "workbox-cacheable-response";
 import { clientsClaim } from "workbox-core";
@@ -56,6 +61,18 @@ function addCoiHeaders(response: Response): Response {
     headers,
   });
 }
+
+// ── Navigation: network ────────────────────────────────────────────────
+// The page names the hashed scripts it loads, and a deploy removes the
+// previous build's scripts from the server. A page served from the cache
+// after a deploy loads scripts that are gone: the language server worker and
+// the notebook renderer fail to load. So a page always comes from the server
+// while the server answers, and the precached shell is only the offline
+// fallback (see setCatchHandler). This route comes before the precache route,
+// because the router takes the first route that matches, and the precache
+// route matches "/" through its "index.html" entry.
+
+registerRoute(new NavigationRoute(new NetworkOnly()));
 
 // ── Precache (Vite build manifest injection) ───────────────────────────
 // vite-plugin-pwa injects the precache manifest here at build time.
@@ -126,29 +143,8 @@ setDefaultHandler(
 
 setCatchHandler(async ({ request }) => {
   if (request.destination === "document") {
-    const cache = await caches.open("workbox-precache-v2");
-    const keys = await cache.keys();
-    const precachedDocument = await keys.reduce<Promise<Response | undefined>>(
-      async (prev, key) => {
-        const resolved = await prev;
-        if (resolved) {
-          return resolved;
-        }
-        if (key.url.endsWith("index.html") || key.url === new URL("/", self.location.origin).href) {
-          const response = await cache.match(key);
-          if (response) {
-            return addCoiHeaders(response);
-          }
-        }
-        return undefined;
-      },
-      Promise.resolve(undefined),
-    );
-    if (precachedDocument) {
-      return precachedDocument;
-    }
-    const fallback = await caches.match(new URL("/", self.location.origin).href);
-    if (fallback) return addCoiHeaders(fallback);
+    const shell = await matchPrecache("index.html");
+    if (shell) return addCoiHeaders(shell);
   }
   return Response.error();
 });
