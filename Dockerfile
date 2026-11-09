@@ -29,7 +29,7 @@ COPY worker ./worker
 
 # Migrations and graphile-migrate config
 COPY migrations ./migrations
-COPY .gmrc ./
+COPY .gmrc.js ./
 
 # Scripts + lib (for first-deploy db:init via Dokploy terminal)
 COPY scripts ./scripts
