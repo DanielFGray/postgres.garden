@@ -8,6 +8,7 @@ import {
   forgotPassword,
   login,
   loginWithPassword,
+  notebookOutputFrame,
   notebookResultTable,
   openAccountSettings,
   openExplorerFile,
@@ -382,5 +383,33 @@ test.describe("workbench basics", () => {
     await runAllNotebookCells(page);
 
     await expect(notebookResultTable(page)).toContainText("test_column", { timeout: 20_000 });
+  });
+
+  test("shows the Postgres message when a notebook query fails", async ({ page }) => {
+    await login(page, { verified: true });
+    await waitForWorkbench(page);
+
+    await expect(page.getByRole("treeitem", { name: /workspace/i })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await createFileFromExplorer(page, "broken.sql");
+
+    await openExplorerFile(page, "broken.sql");
+    await expect(page.getByRole("button", { name: "SQL Notebook" }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await addNotebookCodeCell(page);
+
+    const editor = await firstNotebookEditor(page);
+    await editor.click();
+    await page.keyboard.insertText("SELECT '<b>x</b>'::int;");
+
+    await runAllNotebookCells(page);
+
+    await expect(
+      notebookOutputFrame(page).getByText('invalid input syntax for type integer: "<b>x</b>"'),
+    ).toBeVisible({ timeout: 20_000 });
   });
 });

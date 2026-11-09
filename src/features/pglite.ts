@@ -3,13 +3,18 @@ import { live } from "@electric-sql/pglite/live";
 import { PGliteWorker } from "@electric-sql/pglite/worker";
 import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect";
 import * as semicolons from "postgres-semicolons";
+import { toErrorMessage } from "../shared/errors.js";
 
 class PGliteError extends Schema.TaggedError<PGliteError, { readonly brand: unique symbol }>()(
   "PGliteError",
   {
-    cause: Schema.optional(Schema.String),
+    cause: Schema.String,
   },
-) {}
+) {
+  override get message() {
+    return this.cause;
+  }
+}
 
 type WorkerMessageValue =
   | string
@@ -238,7 +243,7 @@ export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
           const db = yield* initializeUnlocked;
           return yield* Effect.tryPromise({
             try: () => use(db),
-            catch: (cause) => new PGliteError({ cause: String(cause) }),
+            catch: (cause) => new PGliteError({ cause: toErrorMessage(cause) }),
           }).pipe(Effect.uninterruptible);
         }),
       );
@@ -373,7 +378,7 @@ const createInstance = Effect.tryPromise({
       extensions: { live },
     }).then((db) => ({ worker, db, fs: createFsChannel(worker) }) as const);
   },
-  catch: (cause) => new PGliteError({ cause: String(cause) }),
+  catch: (cause) => new PGliteError({ cause: toErrorMessage(cause) }),
 });
 
 function metadataFromQueries(sql: string) {

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { toErrorMessage } from "../../shared/errors.js";
 import { PGLITE_EXECUTE, type ExtendedResults } from "../constants.js";
 
 export class SQLNotebookExecutionController {
@@ -58,12 +59,7 @@ export class SQLNotebookExecutionController {
         execution.replaceOutput(
           results.map((result) => {
             if ("error" in result) {
-              return new vscode.NotebookCellOutput([
-                vscode.NotebookCellOutputItem.text(
-                  `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${result.error?.message ?? "Unknown error"}</div>`,
-                  "text/markdown",
-                ),
-              ]);
+              return errorOutput(result.error.message);
             }
             if (result.fields.length > 0) {
               return new vscode.NotebookCellOutput([
@@ -89,19 +85,36 @@ export class SQLNotebookExecutionController {
         return !hasError;
       },
       (err) => {
-        execution.replaceOutput([
-          new vscode.NotebookCellOutput([
-            vscode.NotebookCellOutputItem.text(
-              `<div style="font-weight:550;background:#f009;padding:0.25em;color:white;">${err instanceof Error ? err.message : String(err)}</div>`,
-              "text/markdown",
-            ),
-          ]),
-        ]);
+        execution.replaceOutput([errorOutput(toErrorMessage(err))]);
         execution.end(false, performance.now());
         return false;
       },
     );
   }
+}
+
+/**
+ * The markdown renderer passes raw HTML through, so the message is escaped:
+ * Postgres errors often quote user input such as `<tag>`. A blank line would
+ * end the HTML block, so newlines become `<br>`.
+ */
+function errorOutput(message: string): vscode.NotebookCellOutput {
+  const text = message.trim() === "" ? "Unknown error" : escapeHtml(message);
+  return new vscode.NotebookCellOutput([
+    vscode.NotebookCellOutputItem.text(
+      `<div style="box-sizing:border-box;font-weight:550;padding:0.25em 0.5em;color:var(--vscode-errorForeground);background:var(--vscode-inputValidation-errorBackground);border:1px solid var(--vscode-inputValidation-errorBorder);">${text}</div>`,
+      "text/markdown",
+    ),
+  ]);
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("\n", "<br>");
 }
 
 function renderRowsAsTable(result: ExtendedResults): string {

@@ -334,19 +334,23 @@ export async function runAllNotebookCells(page: Page) {
 }
 
 /**
- * The table the SQL renderer draws for a cell's result.
+ * The frame that holds the cell outputs of the notebook opened last.
  *
  * Cell output lives in a VS Code webview, which nests a second iframe, and the
- * renderer builds its table inside a shadow root in there, so nothing in the
+ * renderers build their output inside shadow roots in there, so nothing in the
  * page's own document can see it. One webview exists per open notebook editor,
  * in the order they were opened, so the notebook opened last is the last one.
  */
-export function notebookResultTable(page: Page) {
+export function notebookOutputFrame(page: Page) {
   return page
     .locator("iframe.webview")
     .last()
     .contentFrame()
     .locator("#active-frame")
-    .contentFrame()
-    .locator("table.sql-table");
+    .contentFrame();
+}
+
+/** The table the SQL renderer draws for a cell's result. */
+export function notebookResultTable(page: Page) {
+  return notebookOutputFrame(page).locator("table.sql-table");
 }

@@ -321,7 +321,7 @@ const applyEdit = Effect.fnUntraced(function* (
 const runSql = (run: AgentRun, params: typeof RunSqlParams.Type) =>
   run.database.exec(params.sql).pipe(
     Effect.catchTag("PGliteError", (error) =>
-      Effect.fail(new SqlError({ cause: error.cause ?? "unknown PGlite error" })),
+      Effect.fail(new SqlError({ cause: error.cause })),
     ),
     Effect.map((results) => {
       const statements = results.map((result) => {
