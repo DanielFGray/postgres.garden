@@ -23,6 +23,17 @@ Bun + Effect Platform backend. Look at `server/apiHandlers.ts` for routes and `s
 
 Boot sequence starts at `src/loader.tsx`. VSCode service overrides in `src/setup.*.ts`. Feature modules live in `src/features/` — each is an Effect Layer (auth, notebook, playground, serverSync, pglite, etc.).
 
+## Backend reference
+
+The backend follows ~/build/effect-web-template. Before you add or change a
+backend pattern (config, HTTP server, database access, errors, sessions, rate
+limits, Valkey, realtime, worker, tests), read how the template does it and do
+the same. Security code and auth SQL come from the ~/build/effect-backend
+packages.
+
+When the template has no pattern for what you need, file a task in
+effect-web-template and ask; do not invent a local one.
+
 ## Code Quality Rules
 
 - Use Effect for all code — services, layers, error handling
