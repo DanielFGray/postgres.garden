@@ -290,7 +290,7 @@
     "@types/wicg-file-system-access": "^2023.10.7",
     "@vitejs/plugin-vue": "^6.0.10",
     "effect-devtui": "^0.4.6",
-    "esbuild": "^0.24.0",
+    "esbuild": "0.28.2",
     "lefthook": "^2.2.2",
     "oxfmt": "^0.78.0",
     "oxlint": "1.93.0",
@@ -300,8 +300,7 @@
     "vite": "^8.3.7"
   },
   "overrides": {
-    "dotenv": "^16.6.1",
-    "esbuild": "^0.24.0"
+    "dotenv": "^16.6.1"
   },
   "fromEmail": "noreply@postgres.garden",
   "legalText": "Postgres Garden - Open Source PostgreSQL Development Environment",
