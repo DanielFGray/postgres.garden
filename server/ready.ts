@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { CurrentSession } from "./apiSchema.js";
 import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { valkey } from "./valkey.js";
+import { workerFailed } from "./worker.js";
 
 /** A service the server cannot work without did not answer. */
 export class DependencyUnavailable extends S.TaggedError<
@@ -40,7 +41,7 @@ export const waitForDependencies = Effect.suspend(() =>
  * and report healthy on the way out.
  */
 export const checkDependencies = Effect.suspend(() =>
-  Effect.all([ownerPool.checked, visitorPool.checked, cache.checked], {
+  Effect.all([ownerPool.checked, visitorPool.checked, cache.checked, worker], {
     concurrency: "unbounded",
   }),
 ).pipe(
@@ -88,6 +89,16 @@ const probe = <A, E, R>(dependency: string, check: Effect.Effect<A, E, R>) => {
 };
 
 const ping = (db: KyselyDB) => runQuery(db.selectNoFrom([sql.lit(1).as("ready")]));
+
+// Not in waitForDependencies: a worker that fails should not hold the server
+// back from serving. Health reports it instead.
+const worker = Effect.suspend(() =>
+  workerFailed()
+    ? Effect.fail(
+        new DependencyUnavailable({ dependency: "worker", message: "the worker has stopped" }),
+      )
+    : Effect.void,
+);
 
 // Both pools, because they log in as different roles. The visitor probe runs as
 // an anonymous visitor, so it exercises the role switch as well as the socket.

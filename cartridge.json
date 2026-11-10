@@ -16,7 +16,7 @@
       "containerPort": 3000,
       "healthCheck": { "type": "http", "path": "/healthz" },
       "cpu": 300,
-      "memoryMB": 512,
+      "memoryMB": 768,
       "networkMode": "bridge",
       "command": "bun",
       "args": ["run", "start:prod"],
@@ -38,7 +38,9 @@
         { "name": "VITE_ROOT_URL", "value": "https://postgres.garden" },
         { "name": "DATABASE_NAME", "value": "postgres_garden" },
         { "name": "DATABASE_OWNER", "database": "postgres_garden", "role": "owner" },
-        { "name": "DATABASE_VISITOR", "database": "postgres_garden", "role": "visitor" }
+        { "name": "DATABASE_VISITOR", "database": "postgres_garden", "role": "visitor" },
+        { "name": "MAIL_PROVIDER", "value": "cloudflare" },
+        { "name": "EMAIL_FROM", "value": "postgres.garden <noreply@postgres.garden>" }
       ],
       "connections": [],
       "secrets": [
@@ -72,32 +74,6 @@
           "path": "secret/data/postgres-garden",
           "key": "github_pat",
           "env": "GITHUB_PAT"
-        }
-      ]
-    },
-    {
-      "name": "postgres-garden-worker",
-      "image": "registry.cluster:5000/postgres-garden",
-      "hostPort": "dynamic",
-      "containerPort": 3000,
-      "cpu": 200,
-      "memoryMB": 256,
-      "networkMode": "bridge",
-      "command": "bun",
-      "args": ["run", "worker:prod"],
-      "environment": [
-        { "name": "NODE_ENV", "value": "production" },
-        { "name": "VITE_ROOT_URL", "value": "https://postgres.garden" },
-        { "name": "MAIL_PROVIDER", "value": "cloudflare" },
-        { "name": "EMAIL_FROM", "value": "postgres.garden <noreply@postgres.garden>" }
-      ],
-      "connections": [],
-      "secrets": [
-        {
-          "_tag": "PostgresCredentials",
-          "database": "postgres_garden",
-          "login": "migration",
-          "urlEnv": "DATABASE_URL"
         },
         {
           "_tag": "KvSecret",

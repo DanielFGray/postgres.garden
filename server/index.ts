@@ -16,6 +16,7 @@ import { waitForDependencies } from "./ready.js";
 import { injectInitialData } from "./initialData.js";
 import { HttpApiLive } from "./apiHandlers.js";
 import { isApiPath } from "./apiSchema.js";
+import { startWorker, stopWorker } from "./worker.js";
 
 const path = Effect.runSync(Path.Path.pipe(Effect.provide(NodePath.layer)));
 const { IncomingMessage, ServerResponse: ServerResponseConstructor } = await import("node:http");
@@ -363,6 +364,10 @@ const runWebServer = () => {
    `),
       );
 
+      // Started after listening, so the server answers while the worker's
+      // migrations run. A failure is reported by /healthz, not by stopping here.
+      void startWorker();
+
       let shuttingDown = false;
       const shutdown = (signal: string) => {
         if (shuttingDown) {
@@ -370,12 +375,16 @@ const runWebServer = () => {
         }
         shuttingDown = true;
         Effect.runSync(Effect.log(`\n${signal} received, shutting down...`));
-        Promise.all([
-          responder.close(),
-          apiWebHandler.dispose(),
-          testingHandler?.then((handler) => handler.dispose()),
-          runtime.dispose(),
-        ])
+        // The worker goes first: its jobs may still use the database.
+        stopWorker()
+          .then(() =>
+            Promise.all([
+              responder.close(),
+              apiWebHandler.dispose(),
+              testingHandler?.then((handler) => handler.dispose()),
+              runtime.dispose(),
+            ]),
+          )
           .then(() => {
             void server.stop();
             process.exit(0);

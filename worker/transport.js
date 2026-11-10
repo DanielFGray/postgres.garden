@@ -2,6 +2,7 @@
 import fs from "fs/promises";
 import * as nodemailer from "nodemailer";
 import { styleText } from "node:util";
+import { fileURLToPath } from "node:url";
 
 /** @typedef {"development" | "test" | "cloudflare"} MailProvider */
 
@@ -47,7 +48,8 @@ export function cloudflareSmtpOptions(env = process.env) {
 
 /** @type {nodemailer.Transporter | undefined} */
 let transporter;
-const etherealFilename = `${process.cwd()}/.ethereal`;
+// Beside this file, so the server process and the worker CLI share one test account.
+const etherealFilename = fileURLToPath(new URL(".ethereal", import.meta.url));
 
 let logged = false;
 

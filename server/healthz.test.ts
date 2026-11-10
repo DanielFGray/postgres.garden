@@ -16,6 +16,16 @@ import { HttpApiLive } from "./apiHandlers.js";
 // from dependency name to `failed` all run as in production.
 const databaseDown = vi.hoisted(() => ({ on: false }));
 
+// The worker's runner is started only by the server, so the test flips the flag
+// the probe reads. The probe itself is the real one.
+const workerStopped = vi.hoisted(() => ({ on: false }));
+
+// @effect-diagnostics asyncFunction:off
+vi.mock("./worker.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./worker.js")>();
+  return { ...actual, workerFailed: () => workerStopped.on };
+});
+
 // The factory is async because vitest's `importOriginal` is; it is a test-harness
 // API, not Effect control flow.
 // @effect-diagnostics asyncFunction:off
@@ -82,6 +92,17 @@ layer(WebHandler.layer, { timeout: "30 seconds" })("GET /healthz", (it) => {
       const { status, body } = yield* getHealthz();
       expect(status).toBe(200);
       expect(body).toEqual({ status: "ok", commit: COMMIT });
+    }),
+  );
+
+  it.effect('answers 503 naming "worker" when the worker runner has stopped', () =>
+    Effect.gen(function* () {
+      workerStopped.on = true;
+      const { status, body } = yield* getHealthz().pipe(
+        Effect.ensuring(Effect.sync(() => (workerStopped.on = false))),
+      );
+      expect(status).toBe(503);
+      expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["worker"] });
     }),
   );
 

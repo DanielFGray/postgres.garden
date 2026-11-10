@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev:client": "vite dev",
-    "dev": "mprocs 'bun dev:server' 'bun db:watch' 'bun worker' 'bun test:watch' 'bun typecheck:watch' 'bun build:renderer --watch' 'bun build:webviews --watch' 'effect-devtui'",
+    "dev": "mprocs 'bun dev:server' 'bun db:watch' 'bun test:watch' 'bun typecheck:watch' 'bun build:renderer --watch' 'bun build:webviews --watch' 'effect-devtui'",
     "dev:server": "bun --hot server/index.ts 2>&1 | tee -a ./server.log",
     "predev": "run-s db:ensure",
     "prebuild": "rm -fr dist",
@@ -37,7 +37,6 @@
     "smoke": "bun scripts/smoke.ts",
     "test": "run-s -c typecheck lint ast-grep test:unit test:e2e",
     "worker": "bun --cwd=worker --env-file=../.env graphile-worker",
-    "worker:prod": "bun --cwd=worker graphile-worker",
     "worker:schema:prod": "bun --cwd=worker graphile-worker --schema-only",
     "worker:schema": "run-s 'worker --schema-only'",
     "env:init": "bun scripts/generateEnvFile.ts",
