@@ -25,7 +25,7 @@ describe("rate-limit rules", () => {
 describe("rate limits", { timeout: 30_000 }, () => {
   it.live("login answers 429 after the address limit; another address is not affected", () =>
     Effect.gen(function* () {
-      const [ipA, ipB] = [yield* testAddress, yield* testAddress];
+      const [ipA, ipB] = yield* testAddresses;
 
       for (let i = 0; i < rules["auth:login"].limit; i++) {
         expect((yield* login(ipA)).status).toBe(401);
@@ -93,8 +93,15 @@ const limitedClient = (limiter: Layer.Layer<RateLimiter> = RateLimiterMemory) =>
     ),
   );
 
-/** An address in TEST-NET-3, so a run never counts against a real caller. */
-const testAddress = Random.nextIntBetween(1, 254).pipe(Effect.map((n) => `203.0.113.${n}`));
+/**
+ * Two different addresses in TEST-NET-3, so a run never counts against a real
+ * caller. One draw gives both: two draws are equal once in 254 runs.
+ */
+const testAddresses = Random.nextIntBetween(1, 253).pipe(
+  Effect.map((n) => [`203.0.113.${n}`, `203.0.113.${n + 1}`] as const),
+);
+
+const testAddress = testAddresses.pipe(Effect.map(([address]) => address));
 
 const post = Effect.fnUntraced(function* (
   path: string,
