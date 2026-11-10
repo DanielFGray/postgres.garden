@@ -103,24 +103,6 @@ const callbackError = (message: string) =>
 const mapDecodeError = (message: string) =>
   Effect.mapError(() => new OAuthCallbackError({ message, isBadCode: false }));
 
-const fetchGitHubJson = (url: string, token: string, errorPrefix: string) =>
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* client.get(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return yield* response.json;
-  }).pipe(
-    Effect.provide(FetchHttpClient.layer),
-    Effect.mapError(
-      (err) =>
-        new OAuthCallbackError({
-          message: `${errorPrefix}: ${err instanceof Error ? err.message : String(err)}`,
-          isBadCode: false,
-        }),
-    ),
-  );
-
 export class OAuthService extends Context.Service<OAuthService>()("OAuthService", {
   make: Effect.gen(function* () {
     const githubPat = Option.getOrUndefined(yield* Config.option(Config.Redacted("GITHUB_PAT")));
@@ -132,6 +114,19 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     const cookies = yield* Cookies;
     const asRoot = yield* rootQuerier;
     const sessions = yield* SessionService;
+    const client = yield* HttpClient.HttpClient;
+
+    const fetchGitHubJson = (url: string, token: string, errorPrefix: string) =>
+      client.get(url, { headers: { Authorization: `Bearer ${token}` } }).pipe(
+        Effect.flatMap((response) => response.json),
+        Effect.mapError(
+          (err) =>
+            new OAuthCallbackError({
+              message: `${errorPrefix}: ${err instanceof Error ? err.message : String(err)}`,
+              isBadCode: false,
+            }),
+        ),
+      );
 
     const resolveRole = (login: string): Effect.Effect<Option.Option<UserRole>, never> => {
       if (!githubPat) {
@@ -139,7 +134,6 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
       }
 
       return Effect.gen(function* () {
-        const client = yield* HttpClient.HttpClient;
         const request = HttpClientRequest.post("https://api.github.com/graphql", {
           headers: { Authorization: `Bearer ${Redacted.value(githubPat)}` },
         }).pipe(
@@ -156,7 +150,6 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
         const response = yield* client.execute(request);
         return yield* response.json;
       }).pipe(
-        Effect.provide(FetchHttpClient.layer),
         Effect.flatMap((sponsorJson) => S.decodeUnknownEffect(SponsorInfoSchema)(sponsorJson)),
         Effect.map((result) => result.data),
         Effect.map((sponsorInfo) => {
@@ -326,7 +319,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer)),
+    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer, FetchHttpClient.layer)),
   );
 }
 
