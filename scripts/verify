@@ -1,0 +1,10 @@
+#!/bin/bash
+# What "checked" means for postgres.garden: `ops signoff` and foreman run this on an exported
+# tree, which has no .git, no .env and no database. So it runs the checks that need none of
+# them. The vitest suites read the server environment, and the browser tests need a running
+# server, so both stay in `bun run test`.
+set -euo pipefail
+
+bun run typecheck
+bun run lint
+bun run ast-grep

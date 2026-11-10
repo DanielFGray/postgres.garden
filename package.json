@@ -30,7 +30,7 @@
     "pw:firefox": "bunx playwright test --project=firefox",
     "pw:ui": "bunx playwright test --ui",
     "pw:headed": "bunx playwright test --headed --project=chromium",
-    "ast-grep": "ast-grep scan --globs '!tools/ast-grep/tests/**'",
+    "ast-grep": "ast-grep scan --globs '!tools/ast-grep/tests/**' --globs '!node_modules/**'",
     "test:unit": "bun --env-file=.env vitest run",
     "test:watch": "bun --env-file=.env vitest --watch",
     "test:e2e": "bunx playwright test --project=chromium",

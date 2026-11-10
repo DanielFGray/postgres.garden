@@ -1,0 +1,6 @@
+#!/bin/bash
+# A fresh worktree, or the tree `ops signoff` exports, has no installed dependencies.
+# bun install is safe to run again, so a re-run also repairs stale dependencies.
+set -euo pipefail
+
+bun install --frozen-lockfile
