@@ -7,12 +7,12 @@ import { DatabaseLive } from "./db.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
 import { PageData } from "./services/pageData.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
-import { waitForDependencies } from "./ready.js";
+import { Readiness } from "./ready.js";
 import { ApiRoutesLive } from "./runtime.js";
 import { RateLimiterValkey } from "./services/rateLimiter.js";
 import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
-import { WorkerLive } from "./worker.js";
+import { Worker } from "./worker.js";
 
 const ListenerLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -43,8 +43,12 @@ const ServicesLive = Layer.mergeAll(
   TelemetryLive,
   PagesUntraced,
   RateLimitMiddlewareLive.pipe(Layer.provide(RateLimiterValkey)),
-  Layer.effectDiscard(waitForDependencies),
+  // Layer.provide builds the wait first, so the runner starts only once
+  // Postgres answers; it starts in the background, so the listener does not
+  // wait for graphile-worker's migrations.
+  Worker.layer.pipe(Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady)))),
 ).pipe(
+  Layer.provideMerge(Readiness.layer),
   Layer.provideMerge(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive))),
   // Bun's client connects on first use, so a Valkey that is down does not fail
   // this layer; the dependency wait above keeps the port closed until it answers.
@@ -63,11 +67,11 @@ const ServicesLive = Layer.mergeAll(
 );
 
 // Layer.provide builds the provided layer first and releases it last, so the
-// services come up before the listener, and the worker starts after the
-// server listens and stops before the database pools close.
+// services come up before the listener, and the worker stops before the
+// database pools close.
 const ServerLive = HttpRouter.serve(Layer.mergeAll(ApiRoutesLive, PagesRoutesLive)).pipe(
   Layer.provide(ListenerLive),
   Layer.provide(ServicesLive),
 );
 
-BunRuntime.runMain(Layer.launch(WorkerLive.pipe(Layer.provide(ServerLive))));
+BunRuntime.runMain(Layer.launch(ServerLive));

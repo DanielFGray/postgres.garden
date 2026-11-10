@@ -83,15 +83,14 @@ describe("rate limits", { timeout: 30_000 }, () => {
 
 /** The API with enforcing limits that count against `limiter`, keyed by `x-real-ip`. */
 const limitedClient = (limiter: Layer.Layer<RateLimiter> = RateLimiterMemory) =>
-  makeTestHttpClientLive(
-    Layer.empty,
-    RateLimitMiddlewareLive.pipe(
+  makeTestHttpClientLive({
+    rateLimit: RateLimitMiddlewareLive.pipe(
       Layer.provide(limiter),
       Layer.provide(
         ConfigProvider.layer(ConfigProvider.fromUnknown({ TRUSTED_PROXY_HEADER: "x-real-ip" })),
       ),
     ),
-  );
+  });
 
 /**
  * Two different addresses in TEST-NET-3, so a run never counts against a real

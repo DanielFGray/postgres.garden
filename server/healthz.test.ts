@@ -4,47 +4,17 @@
  * Run: bun vitest run server/healthz.test.ts
  */
 
-import { expect, layer } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { HttpClient } from "effect/http";
-import { vi } from "vitest";
-import { makeTestHttpClientLive, origin } from "./test/apiHarness.js";
-
-// The 503 test needs a Postgres that is down, which the suite cannot arrange.
-// The probe is swapped for a failure; the handler, its schema and the mapping
-// from dependency name to `failed` all run as in production.
-const databaseDown = vi.hoisted(() => ({ on: false }));
-
-// The worker's runner is started only by the server, so the test flips the flag
-// the probe reads. The probe itself is the real one.
-const workerStopped = vi.hoisted(() => ({ on: false }));
-
-// @effect-diagnostics asyncFunction:off
-vi.mock("./worker.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./worker.js")>();
-  return { ...actual, workerFailed: () => workerStopped.on };
-});
-
-// The factory is async because vitest's `importOriginal` is; it is a test-harness
-// API, not Effect control flow.
-// @effect-diagnostics asyncFunction:off
-vi.mock("./ready.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./ready.js")>();
-  const { Effect } = await import("effect");
-  return {
-    ...actual,
-    checkDependencies: Effect.suspend(() =>
-      databaseDown.on
-        ? Effect.fail(
-            new actual.DependencyUnavailable({
-              dependency: "postgres (owner pool)",
-              message: "connection refused",
-            }),
-          )
-        : actual.checkDependencies,
-    ),
-  };
-});
+import { DependencyUnavailable, Readiness } from "./ready.js";
+import {
+  makeTestHttpClientLive,
+  origin,
+  workerRunning,
+  type HealthDependencies,
+} from "./test/apiHarness.js";
+import { Worker } from "./worker.js";
 
 const COMMIT = "9d1e4c2";
 
@@ -62,34 +32,71 @@ const getHealthz = Effect.fnUntraced(function* () {
   return { status: response.status, body };
 });
 
-layer(makeTestHttpClientLive(commitEnv), { timeout: "30 seconds" })("GET /healthz", (it) => {
-  it.effect("answers 200 with the commit when the database answers", () =>
-    Effect.gen(function* () {
-      const { status, body } = yield* getHealthz();
-      expect(status).toBe(200);
-      expect(body).toEqual({ status: "ok", commit: COMMIT });
-    }),
+/** The API with `health` as its health dependencies. */
+const healthClient = (health?: HealthDependencies) =>
+  makeTestHttpClientLive({ overrides: commitEnv, health });
+
+/** A worker whose runner has stopped, exactly as the real one reports it. */
+const workerStopped = Layer.succeed(
+  Worker,
+  Worker.of({
+    check: Effect.fail(
+      new DependencyUnavailable({ dependency: "worker", message: "the worker has stopped" }),
+    ),
+  }),
+);
+
+// The suite cannot take Postgres down, so the owner pool's probe fails as it
+// would; the handler, its schema and the mapping from dependency name to
+// `failed` all run as in production.
+const databaseDown = Layer.succeed(
+  Readiness,
+  Readiness.of({
+    waitUntilReady: Effect.void,
+    check: Effect.fail(
+      new DependencyUnavailable({
+        dependency: "postgres (owner pool)",
+        message: "connection refused",
+      }),
+    ),
+  }),
+);
+
+describe("GET /healthz", () => {
+  it.effect(
+    "answers 200 with the commit when the database answers",
+    () =>
+      Effect.gen(function* () {
+        const { status, body } = yield* getHealthz().pipe(Effect.provide(healthClient()));
+        expect(status).toBe(200);
+        expect(body).toEqual({ status: "ok", commit: COMMIT });
+      }),
+    30_000,
   );
 
-  it.effect('answers 503 naming "worker" when the worker runner has stopped', () =>
-    Effect.gen(function* () {
-      workerStopped.on = true;
-      const { status, body } = yield* getHealthz().pipe(
-        Effect.ensuring(Effect.sync(() => (workerStopped.on = false))),
-      );
-      expect(status).toBe(503);
-      expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["worker"] });
-    }),
+  it.effect(
+    'answers 503 naming "worker" when the worker runner has stopped',
+    () =>
+      Effect.gen(function* () {
+        const { status, body } = yield* getHealthz().pipe(
+          Effect.provide(healthClient(Layer.mergeAll(Readiness.layer, workerStopped))),
+        );
+        expect(status).toBe(503);
+        expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["worker"] });
+      }),
+    30_000,
   );
 
-  it.effect("answers 503 naming the database when the database does not answer", () =>
-    Effect.gen(function* () {
-      databaseDown.on = true;
-      const { status, body } = yield* getHealthz().pipe(
-        Effect.ensuring(Effect.sync(() => (databaseDown.on = false))),
-      );
-      expect(status).toBe(503);
-      expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["database"] });
-    }),
+  it.effect(
+    "answers 503 naming the database when the database does not answer",
+    () =>
+      Effect.gen(function* () {
+        const { status, body } = yield* getHealthz().pipe(
+          Effect.provide(healthClient(Layer.mergeAll(databaseDown, workerRunning))),
+        );
+        expect(status).toBe(503);
+        expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["database"] });
+      }),
+    30_000,
   );
 });
