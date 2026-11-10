@@ -2,7 +2,9 @@ import { request } from "@playwright/test";
 import { serverCommand } from "./helpers";
 
 /**
- * Clears the users left behind by earlier runs, once, before any worker starts.
+ * Clears the users and the rate-limit counts left behind by earlier runs, once,
+ * before any worker starts. Every run calls from one address, so old counts
+ * would refuse the forgot-password and login steps of a later run.
  *
  * The reset is global: it deletes every user whose name starts with "test" and
  * every session in Valkey. Run from a `beforeAll`, which Playwright runs once
@@ -12,5 +14,6 @@ import { serverCommand } from "./helpers";
 export default async function globalSetup() {
   const context = await request.newContext();
   await serverCommand(context, "clearTestUsers");
+  await serverCommand(context, "clearRateLimits");
   await context.dispose();
 }

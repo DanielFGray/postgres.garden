@@ -5,8 +5,10 @@ import { Config, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { DatabaseLive } from "./db.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
+import { RateLimitMiddlewareLive } from "./rateLimit.js";
 import { waitForDependencies } from "./ready.js";
 import { ApiRoutesLive } from "./runtime.js";
+import { RateLimiterValkey } from "./services/rateLimiter.js";
 import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
 import { WorkerLive } from "./worker.js";
@@ -39,6 +41,7 @@ const ServicesLive = Layer.mergeAll(
   Pages.layer,
   TelemetryLive,
   PagesUntraced,
+  RateLimitMiddlewareLive.pipe(Layer.provide(RateLimiterValkey)),
   Layer.effectDiscard(waitForDependencies),
 ).pipe(
   Layer.provideMerge(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive))),

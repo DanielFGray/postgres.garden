@@ -41,7 +41,8 @@
         { "name": "DATABASE_VISITOR", "database": "postgres_garden", "role": "visitor" },
         { "name": "MAIL_PROVIDER", "value": "cloudflare" },
         { "name": "EMAIL_FROM", "value": "postgres.garden <noreply@postgres.garden>" },
-        { "name": "VALKEY_KEY_PREFIX", "valkey": "keyPrefix" }
+        { "name": "VALKEY_KEY_PREFIX", "valkey": "keyPrefix" },
+        { "name": "TRUSTED_PROXY_HEADER", "value": "x-real-ip" }
       ],
       "connections": [],
       "secrets": [

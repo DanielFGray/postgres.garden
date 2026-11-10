@@ -29,6 +29,7 @@ type LoginOptions = {
 
 type ServerCommandMap = {
   clearTestUsers: { success: true };
+  clearRateLimits: { success: true };
   clearTestOrganizations: { success: true };
   createUser: {
     user: User;

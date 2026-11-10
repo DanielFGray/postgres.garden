@@ -19,7 +19,15 @@ import {
   HttpApiSecurity,
 } from "effect/http-api";
 import { Playground, Privacy, User, UserAuthentication, UserEmail, UserRole } from "./models.js";
-import { ApiError, Conflict, Locked, NotFound, ServerError, Unauthorized } from "./errors.js";
+import {
+  ApiError,
+  Conflict,
+  Locked,
+  NotFound,
+  ServerError,
+  TooManyRequests,
+  Unauthorized,
+} from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // Session security
@@ -61,6 +69,20 @@ export class SessionMiddleware extends HttpApiMiddleware.Service<
 >()("SessionMiddleware", {
   security: { session: sessionCookie },
   error: ServerError,
+}) {}
+
+/**
+ * Per-caller limits on the endpoints that send email, check a secret or cost a
+ * password hash. The server applies a rule keyed by `group:endpoint`; an
+ * endpoint without this middleware has no limit. It requires `CurrentSession`,
+ * so the group's `SessionMiddleware` runs first and a per-user rule can key on
+ * the signed-in user.
+ */
+export class RateLimitMiddleware extends HttpApiMiddleware.Service<
+  RateLimitMiddleware,
+  { requires: CurrentSession }
+>()("RateLimitMiddleware", {
+  error: TooManyRequests,
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -230,7 +252,7 @@ const apiUsers = HttpApiGroup.make("apiUsers")
       query: S.Struct({ token: S.optional(S.String) }),
       success: SuccessResponse,
       error: [Unauthorized, ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.patch("patchMe", "/me", {
@@ -255,7 +277,7 @@ const apiUsers = HttpApiGroup.make("apiUsers")
       payload: S.Struct({ email: S.String }),
       success: UserEmailResponse,
       error: [Unauthorized, ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.delete("deleteMeEmail", "/me/emails/:id", {
@@ -288,28 +310,28 @@ const apiUsers = HttpApiGroup.make("apiUsers")
       payload: S.Struct({ email: S.String }),
       success: SuccessResponse,
       error: [ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("resetPassword", "/resetPassword", {
       payload: S.Struct({ userId: S.String, token: S.String, password: S.String }),
       success: SuccessResponse,
       error: [ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("changePassword", "/changePassword", {
       payload: S.Struct({ oldPassword: S.String, newPassword: S.String }),
       success: SuccessResponse,
       error: [Unauthorized, ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("verifyEmail", "/verifyEmail", {
       payload: S.Struct({ emailId: S.String, token: S.String }),
       success: SuccessResponse,
       error: [ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("makeEmailPrimary", "/makeEmailPrimary", {
@@ -323,7 +345,7 @@ const apiUsers = HttpApiGroup.make("apiUsers")
       payload: S.Struct({ emailId: S.String }),
       success: SuccessResponse,
       error: [Unauthorized, ApiError, ServerError],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .middleware(SessionMiddleware)
   .prefix("/api");
@@ -500,14 +522,14 @@ const authGroup = HttpApiGroup.make("auth")
       payload: S.Struct({ username: S.String, email: S.String, password: S.String }),
       success: UserProfile,
       error: [ApiError, Conflict],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("login", "/login", {
       payload: S.Struct({ id: S.String, password: S.String }),
       success: UserProfile,
       error: [Unauthorized, Locked],
-    }),
+    }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.get("authMe", "/me", {
@@ -575,12 +597,7 @@ const groupRoutes = <
  * anything this list does not match, which is what keeps the contract the only
  * way in.
  */
-export const webviewRelayRoutes = groupRoutes([
-  systemGroup,
-  authGroup,
-  apiUsers,
-  apiPlaygrounds,
-]);
+export const webviewRelayRoutes = groupRoutes([systemGroup, authGroup, apiUsers, apiPlaygrounds]);
 
 const allRoutes = groupRoutes([systemGroup, authGroup, apiUsers, apiPlaygrounds, webhookGroup]);
 

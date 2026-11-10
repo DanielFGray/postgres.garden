@@ -7,7 +7,15 @@ import { Context, Effect, Layer, Match, Option, type Schema } from "effect";
 import * as S from "effect/Schema";
 import { PgGardenApi } from "../server/apiSchema";
 import { editKeyHeaders } from "./shared/editKey";
-import { ApiError, Conflict, Locked, NotFound, ServerError, Unauthorized } from "../server/errors";
+import {
+  ApiError,
+  Conflict,
+  Locked,
+  NotFound,
+  ServerError,
+  TooManyRequests,
+  Unauthorized,
+} from "../server/errors";
 import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
 /** The generated client for `PgGardenApi`. */
@@ -108,6 +116,7 @@ export type ClientFailure =
   | NotFound
   | Schema.SchemaError
   | ServerError
+  | TooManyRequests
   | Unauthorized;
 
 /**
@@ -127,6 +136,10 @@ const toApiRequestError = Match.type<ClientFailure>().pipe(
   Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.error })),
   Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.error })),
   Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.error })),
+  Match.tag(
+    "TooManyRequests",
+    (error) => new ApiRequestError({ status: 429, message: error.error }),
+  ),
   Match.tag("ServerError", (error) => new ApiRequestError({ status: 500, message: error.error })),
   Match.tag(
     "HttpClientError",

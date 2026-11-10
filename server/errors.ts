@@ -34,3 +34,8 @@ export class ServerError extends S.TaggedError<ServerError, { readonly brand: un
   { error: S.String },
   { httpApiStatus: 500 },
 ) {}
+/** The caller went over a rate limit, or the limit store is down on an endpoint that refuses then. */
+export class TooManyRequests extends S.TaggedError<
+  TooManyRequests,
+  { readonly brand: unique symbol }
+>()("TooManyRequests", { error: S.String, retryAfterSeconds: S.Int }, { httpApiStatus: 429 }) {}

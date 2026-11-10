@@ -1,8 +1,12 @@
-import { Context, Effect, Layer } from "effect";
+import { type Config, Context, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
+import type { RateLimiter } from "effect/persistence/RateLimiter";
 
+import type { RateLimitMiddleware } from "../apiSchema.js";
 import { DatabaseLive } from "../db.js";
+import { RateLimitMiddlewarePassThrough } from "../rateLimit.js";
 import { ApiRoutesLive } from "../runtime.js";
+import { RateLimiterMemory } from "../services/rateLimiter.js";
 import { TestValkeyLive } from "./valkey.js";
 
 /** The origin the in-process client sends requests to. Nothing listens on it. */
@@ -14,13 +18,26 @@ export const origin = "http://localhost";
  *
  * `overrides` is built under the app, so a test can replace a service the app
  * reads while it builds, such as the ConfigProvider.
+ *
+ * Rate limits pass every request unless a test brings `rateLimit`: suites
+ * register and log in far more often than a limit allows. The enforcing layer
+ * counts in memory unless it brings its own `RateLimiter`.
  */
-export const makeTestHttpClientLive = (overrides: Layer.Layer<never> = Layer.empty) =>
+export const makeTestHttpClientLive = (
+  overrides: Layer.Layer<never> = Layer.empty,
+  rateLimit: Layer.Layer<
+    RateLimitMiddleware,
+    Config.ConfigError,
+    RateLimiter
+  > = RateLimitMiddlewarePassThrough,
+) =>
   Layer.unwrap(
     Effect.acquireRelease(
       Effect.sync(() =>
         HttpRouter.toWebHandler(
           ApiRoutesLive.pipe(
+            Layer.provide(rateLimit),
+            Layer.provide(RateLimiterMemory),
             Layer.provide(HttpServer.layerServices),
             Layer.provide(DatabaseLive),
             Layer.provide(TestValkeyLive),

@@ -79,6 +79,7 @@ server/             Bun + Effect HTTP backend
   runtime.ts        Routes the server and API tests share
   pages.ts          Browser app: Vite in dev, dist/ in prod, HTML shell
   apiSchema.ts      API routes (Effect HTTP API + Schema validation)
+  rateLimit.ts      Per-caller limits on the auth and email endpoints
   db.ts             Kysely connections + RLS auth context
 src/
   loader.tsx        Client entry point and boot sequence

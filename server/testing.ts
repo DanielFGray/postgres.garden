@@ -13,6 +13,7 @@ import { Redis } from "effect/persistence/Redis";
 import { isProduction, rootUrl } from "./config.js";
 import type { DB, AppPublicUsers as User } from "../generated/db.js";
 import { SessionService, sessionKeyOf } from "./services/sessionService.js";
+import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
 import { DatabaseLive, rootQuerier, runQuery } from "./db.js";
 
@@ -146,6 +147,22 @@ const clearTestUsers = Effect.gen(function* () {
   return HttpServerResponse.jsonUnsafe({ success: true });
 });
 
+/**
+ * Deletes every rate-limit count. The e2e suite runs from one address, so the
+ * counts that earlier runs leave in Valkey would refuse a later run.
+ */
+const clearRateLimits = Effect.gen(function* () {
+  const redis = yield* Redis;
+  const prefix = yield* rateLimitKeyPrefix();
+  const keys = yield* redis
+    .send("KEYS", `${prefix}*`)
+    .pipe(Effect.flatMap(S.decodeUnknownEffect(S.Array(S.String))));
+  if (keys.length > 0) {
+    yield* redis.send("DEL", ...keys);
+  }
+  return HttpServerResponse.jsonUnsafe({ success: true });
+});
+
 const login = Effect.gen(function* () {
   const query = yield* HttpServerRequest.schemaSearchParams(LoginQuery);
   const { session } = yield* reallyCreateUser({
@@ -259,6 +276,7 @@ const testingRoute = <E, R>(
 
 const TestingRoutes = HttpRouter.addAll([
   testingRoute("GET", "/clearTestUsers", clearTestUsers),
+  testingRoute("GET", "/clearRateLimits", clearRateLimits),
   testingRoute("GET", "/login", login),
   testingRoute("POST", "/register", register),
   testingRoute("POST", "/loginPost", loginPost),
@@ -282,7 +300,7 @@ export const TestingRoutesLive = TestingRoutes.pipe(
     Layer.mergeAll(
       SessionService.layer.pipe(Layer.provideMerge(DatabaseLive)),
       // The server's one client, lifted from the layer context to the request
-      // context, because clearTestUsers deletes session keys directly.
+      // context, because two routes delete keys directly.
       Layer.effect(Redis, Redis.use(Effect.succeed)),
       Cookies.layer,
       ProductionGuard,
