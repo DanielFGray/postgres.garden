@@ -2,7 +2,7 @@ import packageJson from "../../package.json" with { type: "json" };
 
 const { projectName } = packageJson;
 
-/** @typedef { import("./send_email").SendEmailPayload } SendEmailPayload */
+/** @typedef { import("../email/sendEmail").QueuedEmail } SendEmailPayload */
 /** @typedef { import("graphile-worker").Task } Task */
 
 /** @typedef {{

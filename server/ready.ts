@@ -36,10 +36,9 @@ export class Readiness extends Context.Service<Readiness>()("Readiness", {
        * that starts beside its database would otherwise answer 500 to every
        * request that arrives while Postgres is still coming up.
        */
-      waitUntilReady: Effect.all(
-        probes.map(({ waited }) => waited),
-        { concurrency: "unbounded" },
-      ).pipe(
+      waitUntilReady: Effect.forEach(probes, ({ waited }) => waited, {
+        concurrency: "unbounded",
+      }).pipe(
         Effect.asVoid,
         Effect.tap(() => Effect.log("Dependencies are ready")),
         Effect.withSpan("server.waitForDependencies"),
@@ -50,10 +49,10 @@ export class Readiness extends Context.Service<Readiness>()("Readiness", {
        * platform decide, where retrying would hold the request open past the
        * platform's own timeout and report healthy on the way out.
        */
-      check: Effect.all(
-        probes.map(({ checked }) => checked),
-        { concurrency: "unbounded" },
-      ).pipe(Effect.asVoid, Effect.withSpan("server.checkDependencies")),
+      check: Effect.forEach(probes, ({ checked }) => checked, { concurrency: "unbounded" }).pipe(
+        Effect.asVoid,
+        Effect.withSpan("server.checkDependencies"),
+      ),
     } as const;
   }),
 }) {

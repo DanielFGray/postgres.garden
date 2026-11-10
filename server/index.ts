@@ -46,7 +46,10 @@ const ServicesLive = Layer.mergeAll(
   // Layer.provide builds the wait first, so the runner starts only once
   // Postgres answers; it starts in the background, so the listener does not
   // wait for graphile-worker's migrations.
-  Worker.layer.pipe(Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady)))),
+  Worker.layer.pipe(
+    Layer.provide(RateLimiterValkey),
+    Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady))),
+  ),
 ).pipe(
   Layer.provideMerge(Readiness.layer),
   Layer.provideMerge(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive))),

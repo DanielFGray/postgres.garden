@@ -228,6 +228,7 @@
         "@solidjs/vite-plugin": "3.0.0-next.28",
         "@types/bun": "^1.4.4",
         "@types/html-to-text": "^9.0.4",
+        "@types/lodash.template": "^4.5.3",
         "@types/mjml": "^4.7.4",
         "@types/node": "^25.5.0",
         "@types/nodemailer": "^7.0.11",
@@ -1462,6 +1463,10 @@
     "@types/interpret": ["@types/interpret@1.1.3", "", { "dependencies": { "@types/node": "*" } }, "sha512-uBaBhj/BhilG58r64mtDb/BEdH51HIQLgP5bmWzc5qCtFMja8dCk/IOJmk36j0lbi9QHwI6sbtUNGuqXdKCAtQ=="],
 
     "@types/json5": ["@types/json5@2.2.0", "", { "dependencies": { "json5": "*" } }, "sha512-NrVug5woqbvNZ0WX+Gv4R+L4TGddtmFek2u8RtccAgFZWtS9QXF2xCXY22/M4nzkaKF0q9Fc6M/5rxLDhfwc/A=="],
+
+    "@types/lodash": ["@types/lodash@4.17.27", "", {}, "sha512-VenMRv/eKNrspX9v3H4dbmjsrnCOYdYBG3kxXKk3dG6X+urBGcj2Prww3xw1U5K4FV/mE4h5GbWd0szEKf+9ew=="],
+
+    "@types/lodash.template": ["@types/lodash.template@4.5.3", "", { "dependencies": { "@types/lodash": "*" } }, "sha512-Mo0UYKLu1oXgkV9TVoXZLlXXjyIXlW7ZQRxi/4gQJmzJr63dmicE8gG0OkPjYTKBrBic852q0JzqrtNUWLBIyA=="],
 
     "@types/mjml": ["@types/mjml@4.7.4", "", { "dependencies": { "@types/mjml-core": "*" } }, "sha512-vyi1vzWgMzFMwZY7GSZYX0GU0dmtC8vLHwpgk+NWmwbwRSrlieVyJ9sn5elodwUfklJM7yGl0zQeet1brKTWaQ=="],
 

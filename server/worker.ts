@@ -1,6 +1,10 @@
 import { Config, Context, Effect, Layer, Redacted, Ref, Schema } from "effect";
+import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { run, type Runner } from "graphile-worker";
+import type { RateLimiter } from "effect/persistence/RateLimiter";
+import { getTasks, run, type Runner, type Task } from "graphile-worker";
+import { Mailer } from "../worker/email/mailer.js";
+import { sendEmail } from "../worker/email/sendEmail.js";
 import { DependencyUnavailable } from "./ready.js";
 
 class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: unique symbol }>()(
@@ -53,21 +57,38 @@ export class Worker extends Context.Service<Worker>()("Worker", {
 }
 
 /**
- * Starts the runner and returns once it runs. The task directory resolves from
- * the working directory: the production server is one bundle in `dist/`, so a
- * path relative to this module would point there.
+ * Starts the runner and returns once it runs. The Mailer is built here, not in
+ * the layer, so a mail provider that cannot start stops only the worker.
+ *
+ * Paths resolve from the working directory: the production server is one
+ * bundle in `dist/`, so a path relative to this module would point there.
  */
 const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
   const connection = yield* Config.Redacted("DATABASE_URL").pipe(
     Effect.mapError((cause) => new WorkerError({ message: "Worker failed to start", cause })),
   );
   const path = yield* Path.Path;
+  const mailer = yield* Layer.build(Mailer.layer).pipe(
+    Effect.mapError((cause) => new WorkerError({ message: "The mailer did not start", cause })),
+  );
+  const services = yield* Effect.context<FileSystem | Path.Path | RateLimiter>();
+  const context = Context.merge(services, mailer);
+  const loadedTasks = yield* Effect.acquireRelease(
+    Effect.tryPromise({
+      try: () => getTasks({}, path.resolve("worker/tasks")),
+      catch: (cause) => new WorkerError({ message: "Could not load worker tasks", cause }),
+    }),
+    (loaded) => Effect.sync(() => loaded.release()),
+  );
+  // Graphile owns retry scheduling. A rejected delivery must reject this callback.
+  const deliver: Task = (payload, helpers) =>
+    Effect.runPromiseWith(context)(sendEmail(payload), { signal: helpers.abortSignal });
   const runner = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () =>
         run({
           connectionString: Redacted.value(connection),
-          taskDirectory: path.resolve("worker/tasks"),
+          taskList: { ...loadedTasks.tasks, send_email: deliver },
           crontabFile: path.resolve("worker/crontab"),
           // The Effect runtime owns SIGINT and SIGTERM, and stops the runner
           // when it closes this layer's scope.
