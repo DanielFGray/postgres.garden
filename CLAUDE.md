@@ -13,7 +13,6 @@
 - **Lint**: Run `bun lint` after making changes. Fix errors before moving on.
 - **Typecheck**: Run `bun typecheck` after making changes. Zero errors policy.
 - **Smoke test**: After significant changes, use any available browser MCP to open `http://localhost:3000` and check console messages for errors.
-- `effect-devtui` mcp should be available to capture observability data from Effect apps
 
 ### Server (`server/`)
 
