@@ -10,14 +10,11 @@ import { Effect, Layer, Random, Schema as S } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { sql, type ExpressionBuilder } from "kysely";
 import { valkey } from "./valkey.js";
-import { env } from "./assertEnv.js";
+import { isProduction, rootUrl } from "./config.js";
 import type { DB, AppPublicUsers as User } from "../generated/db.js";
 import { SessionService, sessionKey } from "./services/sessionService.js";
-import { makeSetCookie } from "./services/cookies.js";
+import { Cookies } from "./services/cookies.js";
 import { DatabaseLive, rootQuerier, runQuery } from "./db.js";
-
-const resolveRedirectLocation = (target: string) =>
-  target.startsWith("http") ? target : new URL(target, `${env.VITE_ROOT_URL}/`).toString();
 
 export class ValkeyError extends S.TaggedError<ValkeyError, { readonly brand: unique symbol }>()(
   "ValkeyError",
@@ -125,10 +122,20 @@ const getUserEmailSecrets = Effect.fnUntraced(function* (email: string) {
   );
 });
 
-const sessionRedirect = (token: string, expiresAt: Date, redirectTo: string | undefined) =>
-  HttpServerResponse.redirect(resolveRedirectLocation(redirectTo ?? "/"), {
-    headers: { "set-cookie": makeSetCookie(token, expiresAt) },
+const sessionRedirect = Effect.fnUntraced(function* (
+  token: string,
+  expiresAt: Date,
+  redirectTo: string | undefined,
+) {
+  const cookies = yield* Cookies;
+  const target = redirectTo ?? "/";
+  const location = target.startsWith("http")
+    ? target
+    : new URL(target, `${yield* rootUrl}/`).toString();
+  return HttpServerResponse.redirect(location, {
+    headers: { "set-cookie": cookies.sessionHeader(token, expiresAt) },
   });
+});
 
 const clearTestUsers = Effect.gen(function* () {
   const runRoot = yield* rootQuerier;
@@ -156,7 +163,7 @@ const login = Effect.gen(function* () {
     verified: query.verified === "true",
     password: query.password,
   });
-  return sessionRedirect(session.token, session.expiresAt, query.redirectTo);
+  return yield* sessionRedirect(session.token, session.expiresAt, query.redirectTo);
 });
 
 const register = Effect.gen(function* () {
@@ -167,7 +174,7 @@ const register = Effect.gen(function* () {
     verified: false,
     password: body.password,
   });
-  return sessionRedirect(session.token, session.expiresAt, body.redirectTo);
+  return yield* sessionRedirect(session.token, session.expiresAt, body.redirectTo);
 });
 
 const loginPost = Effect.gen(function* () {
@@ -188,7 +195,7 @@ const loginPost = Effect.gen(function* () {
     ).pipe(Effect.head),
   );
   const session = yield* sessions.createSession(user.id);
-  return sessionRedirect(session.token, session.expiresAt, body.redirectTo);
+  return yield* sessionRedirect(session.token, session.expiresAt, body.redirectTo);
 });
 
 const createUser = Effect.gen(function* () {
@@ -272,13 +279,19 @@ const TestingRoutes = HttpRouter.addAll([
 
 /** Refuses to build the routes in production, even when a caller imports this module there. */
 const ProductionGuard = Layer.effectDiscard(
-  env.NODE_ENV === "production"
-    ? Effect.die("testing routes must not run in production")
-    : Effect.void,
+  isProduction.pipe(
+    Effect.flatMap((production) =>
+      production ? Effect.die("testing routes must not run in production") : Effect.void,
+    ),
+  ),
 );
 
 export const TestingRoutesLive = TestingRoutes.pipe(
   HttpRouter.provideRequest(
-    Layer.mergeAll(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive)), ProductionGuard),
+    Layer.mergeAll(
+      SessionService.layer.pipe(Layer.provideMerge(DatabaseLive)),
+      Cookies.layer,
+      ProductionGuard,
+    ),
   ),
 );

@@ -1,14 +1,6 @@
 import { Effect, Layer, Redacted } from "effect";
-import { HttpEffect, HttpServerResponse } from "effect/http";
-import { HttpApiBuilder } from "effect/http-api";
-import {
-  CurrentSession,
-  SessionMiddleware,
-  sessionCookie,
-  type SessionData,
-} from "../apiSchema.js";
+import { CurrentSession, SessionMiddleware, type SessionData } from "../apiSchema.js";
 import { withRequestTransaction } from "../db.js";
-import { env } from "../assertEnv.js";
 import { ServerError } from "../errors.js";
 import { SessionService } from "./sessionService.js";
 
@@ -46,26 +38,4 @@ export const SessionMiddlewareLive = Layer.effect(
       }),
     });
   }),
-);
-
-const isSecure = env.NODE_ENV === "production";
-
-export const setSessionCookie = (token: string, expiresAt: Date) =>
-  HttpApiBuilder.securitySetCookie(sessionCookie, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isSecure,
-    path: "/",
-    expires: expiresAt,
-  });
-
-// The cookie name and options are fixed literals, so a failure here is a
-// programming error and dies instead of surfacing as a typed error.
-export const expireSessionCookie = HttpEffect.appendPreResponseHandler((_req, response) =>
-  HttpServerResponse.expireCookie(response, "session", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isSecure,
-    path: "/",
-  }).pipe(Effect.orDie),
 );

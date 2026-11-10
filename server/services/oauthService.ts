@@ -1,12 +1,22 @@
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import { Array as Arr, Context, Effect, Layer, Option, pipe, Schema as S } from "effect";
+import {
+  Array as Arr,
+  Config,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  pipe,
+  Redacted,
+  Schema as S,
+} from "effect";
 import * as arctic from "arctic";
 import { sql } from "kysely";
-import { env } from "../assertEnv.js";
+import { rootUrl } from "../config.js";
 import { asRoot, unwrapPgError } from "../db.js";
 import { SessionService } from "./sessionService.js";
-import { makeSetCookie } from "./cookies.js";
+import { Cookies } from "./cookies.js";
 import { AccountAlreadyLinkedError } from "./authService.js";
 
 type UserRole = "user" | "sponsor" | "admin";
@@ -112,16 +122,24 @@ const fetchGitHubJson = (url: string, token: string, errorPrefix: string) =>
   );
 
 export class OAuthService extends Context.Service<OAuthService>()("OAuthService", {
-  make: Effect.sync(() => {
+  make: Effect.gen(function* () {
+    const githubPat = Option.getOrUndefined(yield* Config.option(Config.Redacted("GITHUB_PAT")));
+    const clientId = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_CLIENT_ID")));
+    const clientSecret = Option.getOrUndefined(
+      yield* Config.option(Config.Redacted("GITHUB_CLIENT_SECRET")),
+    );
+    const callbackUrl = `${yield* rootUrl}/auth/github/callback`;
+    const cookies = yield* Cookies;
+
     const resolveRole = (login: string): Effect.Effect<Option.Option<UserRole>, never> => {
-      if (!env.GITHUB_PAT) {
+      if (!githubPat) {
         return Effect.succeedNone;
       }
 
       return Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
         const request = HttpClientRequest.post("https://api.github.com/graphql", {
-          headers: { Authorization: `Bearer ${env.GITHUB_PAT}` },
+          headers: { Authorization: `Bearer ${Redacted.value(githubPat)}` },
         }).pipe(
           HttpClientRequest.bodyJsonUnsafe({
             query: sponsorQuery,
@@ -159,14 +177,10 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     };
 
     const getProvider = () => {
-      if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)) {
+      if (!(clientId && clientSecret)) {
         return undefined;
       }
-      return new arctic.GitHub(
-        env.GITHUB_CLIENT_ID,
-        env.GITHUB_CLIENT_SECRET,
-        `${env.VITE_ROOT_URL}/auth/github/callback`,
-      );
+      return new arctic.GitHub(clientId, Redacted.value(clientSecret), callbackUrl);
     };
 
     return {
@@ -295,7 +309,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
           const setCookie = currentUserId
             ? undefined
             : yield* SessionService.use((service) => service.createSession(userId)).pipe(
-                Effect.map(({ token, expiresAt }) => makeSetCookie(token, expiresAt)),
+                Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
               );
 
           return {
@@ -307,7 +321,9 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SessionService.layer));
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer)),
+  );
 }
 
 export { OAuthNotConfiguredError, OAuthCallbackError };

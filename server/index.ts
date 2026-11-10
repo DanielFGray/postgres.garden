@@ -7,7 +7,7 @@ import * as Path from "effect/Path";
 import { HttpRouter, HttpServer } from "effect/http";
 import * as S from "effect/Schema";
 import { createServer as createViteServer, type Connect, type ViteDevServer } from "vite";
-import { env } from "./assertEnv.js";
+import { isProduction } from "./config.js";
 import { DatabaseLive } from "./db.js";
 import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
@@ -30,7 +30,8 @@ type NonApiResponder = {
   readonly close: () => Promise<void>;
 };
 
-const PORT = Number(env.PORT);
+const PORT = Effect.runSync(Config.Port("PORT"));
+const production = Effect.runSync(isProduction);
 const HOST = Effect.runSync(Config.String("HOST").pipe(Effect.orElseSucceed(() => "0.0.0.0")));
 
 const applySecurityHeaders = (response: Response): Response => {
@@ -313,15 +314,13 @@ const runWebServer = () => {
   );
 
   // Wire testing endpoints in dev only
-  const testingHandler =
-    env.NODE_ENV !== "production"
-      ? import("./testing.js").then(({ TestingRoutesLive }) =>
-          HttpRouter.toWebHandler(Layer.mergeAll(TestingRoutesLive, TelemetryLive)),
-        )
-      : null;
+  const testingHandler = !production
+    ? import("./testing.js").then(({ TestingRoutesLive }) =>
+        HttpRouter.toWebHandler(Layer.mergeAll(TestingRoutesLive, TelemetryLive)),
+      )
+    : null;
 
-  const responderPromise =
-    env.NODE_ENV === "production" ? createProdResponder(runtime) : createDevResponder(runtime);
+  const responderPromise = production ? createProdResponder(runtime) : createDevResponder(runtime);
 
   // Nothing is served until Postgres and Valkey answer. A container that comes
   // up beside its database would otherwise spend its first seconds answering

@@ -1,17 +1,54 @@
-import { env } from "../assertEnv.js";
+import { Context, DateTime, Effect, Layer } from "effect";
+import { HttpEffect, HttpServerResponse } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
+import { sessionCookie } from "../apiSchema.js";
+import { isProduction } from "../config.js";
 import { sessionCookieName } from "./sessionService.js";
-import { DateTime } from "effect";
 
-const secureAttr = env.NODE_ENV === "production" ? "; Secure" : "";
+/**
+ * Every cookie the server sets. The policy is read once, when the layer is
+ * built, so all cookies agree on `Secure` and a bad NODE_ENV fails at startup.
+ *
+ * The session cookie is written two ways: through the API's security
+ * definition for HttpApi endpoints, and as a raw `Set-Cookie` header for
+ * responses built by hand (the OAuth popup, the testing routes).
+ *
+ * The session methods act on the response of the request in progress, so
+ * they need that request.
+ *
+ * @effect-expect-leaking HttpServerRequest
+ */
+export class Cookies extends Context.Service<Cookies>()("Cookies", {
+  make: Effect.gen(function* () {
+    const secure = yield* isProduction;
+    const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+    const sessionOptions = { httpOnly: true, sameSite: "lax", secure, path: "/" } as const;
+    const expired = DateTime.toDate(DateTime.makeUnsafe(0)).toUTCString();
 
-export const makeSetCookie = (value: string, expires: Date): string =>
-  `${sessionCookieName}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax${secureAttr}; Expires=${expires.toUTCString()}`;
+    return {
+      setSession: (token: string, expiresAt: Date) =>
+        HttpApiBuilder.securitySetCookie(sessionCookie, token, {
+          ...sessionOptions,
+          expires: expiresAt,
+        }),
 
-export const makeExpiredCookie = (): string =>
-  `${sessionCookieName}=; Path=/; HttpOnly; SameSite=Lax${secureAttr}; Expires=${DateTime.toDate(DateTime.makeUnsafe(0)).toUTCString()}`;
+      // The cookie name and options are fixed literals, so a failure here is a
+      // programming error and dies instead of surfacing as a typed error.
+      expireSession: HttpEffect.appendPreResponseHandler((_req, response) =>
+        HttpServerResponse.expireCookie(response, sessionCookieName, sessionOptions).pipe(
+          Effect.orDie,
+        ),
+      ),
 
-export const makeOAuthCookie = (name: string, value: string, maxAgeSeconds = 600): string =>
-  `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax${secureAttr}; Max-Age=${maxAgeSeconds}`;
+      sessionHeader: (value: string, expires: Date): string =>
+        `${sessionCookieName}=${encodeURIComponent(value)}; ${attributes}; Expires=${expires.toUTCString()}`,
 
-export const makeExpiredNamedCookie = (name: string): string =>
-  `${name}=; Path=/; HttpOnly; SameSite=Lax${secureAttr}; Expires=${DateTime.toDate(DateTime.makeUnsafe(0)).toUTCString()}`;
+      shortLivedHeader: (name: string, value: string, maxAgeSeconds = 600): string =>
+        `${name}=${encodeURIComponent(value)}; ${attributes}; Max-Age=${maxAgeSeconds}`,
+
+      expiredHeader: (name: string): string => `${name}=; ${attributes}; Expires=${expired}`,
+    } as const;
+  }),
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

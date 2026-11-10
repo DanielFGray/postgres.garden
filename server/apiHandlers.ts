@@ -12,18 +12,14 @@ import {
 } from "./metrics.js";
 import { checkDependencies } from "./ready.js";
 import { AuthService } from "./services/authService.js";
-import { makeExpiredNamedCookie, makeOAuthCookie } from "./services/cookies.js";
+import { Cookies } from "./services/cookies.js";
 import {
   OAuthCallbackError,
   OAuthNotConfiguredError,
   OAuthService,
 } from "./services/oauthService.js";
 import { PlaygroundService } from "./services/playgroundService.js";
-import {
-  expireSessionCookie,
-  SessionMiddlewareLive,
-  setSessionCookie,
-} from "./services/sessionMiddleware.js";
+import { SessionMiddlewareLive } from "./services/sessionMiddleware.js";
 import { SessionService } from "./services/sessionService.js";
 import { UserService } from "./services/userService.js";
 import {
@@ -338,12 +334,12 @@ const STATE_COOKIE = "github_oauth_state";
  * flow is over, so the state cookie goes with it.
  */
 const oauthPopupFailure = (message: string, status = 400) =>
-  buildOAuthPopupHtml({ type: "github-auth-failure", message }).pipe(
-    Effect.map((html) =>
+  Effect.all([buildOAuthPopupHtml({ type: "github-auth-failure", message }), Cookies]).pipe(
+    Effect.map(([html, cookies]) =>
       HttpServerResponse.text(html, {
         status,
         contentType: "text/html",
-        headers: { "Set-Cookie": makeExpiredNamedCookie(STATE_COOKIE) },
+        headers: { "Set-Cookie": cookies.expiredHeader(STATE_COOKIE) },
       }),
     ),
   );
@@ -364,7 +360,7 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
               result: "success",
             }).pipe(
               Effect.andThen(recordActiveSessions(1)),
-              Effect.andThen(setSessionCookie(token, expiresAt)),
+              Effect.andThen(Cookies.use((cookies) => cookies.setSession(token, expiresAt))),
             ),
           ),
           Effect.map((result) => ({
@@ -401,7 +397,7 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
               result: "success",
             }).pipe(
               Effect.andThen(recordActiveSessions(1)),
-              Effect.andThen(setSessionCookie(token, expiresAt)),
+              Effect.andThen(Cookies.use((cookies) => cookies.setSession(token, expiresAt))),
             ),
           ),
           Effect.map((result) => ({
@@ -429,7 +425,7 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
           const { session } = yield* CurrentSession;
           yield* AuthService.use((service) => service.logout(session?.cookie_id));
           yield* recordActiveSessions(-1);
-          yield* expireSessionCookie;
+          yield* Cookies.use((cookies) => cookies.expireSession);
           return { success: true as const };
         }).pipe(
           Effect.catch((e) =>
@@ -453,11 +449,12 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
         const result = yield* OAuthService.use((service) =>
           service.createAuthorizationUrl(["user:email"]),
         );
+        const cookies = yield* Cookies;
         return HttpServerResponse.empty({
           status: 302,
           headers: {
             Location: result.url.toString(),
-            "Set-Cookie": makeOAuthCookie(STATE_COOKIE, result.state),
+            "Set-Cookie": cookies.shortLivedHeader(STATE_COOKIE, result.state),
           },
         });
       }).pipe(
@@ -523,13 +520,14 @@ const authLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
         }
 
         const html = yield* buildOAuthPopupHtml({ type: "github-auth-success" });
+        const cookies = yield* Cookies;
 
         return HttpServerResponse.text(html, {
           status: 200,
           contentType: "text/html",
           // The session cookie is what the opener reads its identity from, so
           // the page and the cookie arrive in the same response.
-          headers: { "Set-Cookie": result.setCookie ?? makeExpiredNamedCookie(STATE_COOKIE) },
+          headers: { "Set-Cookie": result.setCookie ?? cookies.expiredHeader(STATE_COOKIE) },
         });
       }).pipe(
         Effect.catch((e) => {
@@ -1029,6 +1027,7 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
 // request-scoped `Requires` markers, which `Layer.provide` leaves unsatisfied.
 // Layer memoization builds each service and pool once.
 const RequestServices = Layer.mergeAll(
+  Cookies.layer,
   AuthService.layer,
   UserService.layer,
   PlaygroundService.layer,

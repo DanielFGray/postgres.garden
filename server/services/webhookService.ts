@@ -1,6 +1,5 @@
-import { Context, Effect, Layer, Schema as S } from "effect";
+import { Config, Context, Effect, Layer, Option, Redacted, Schema as S } from "effect";
 import { sql } from "kysely";
-import { env } from "../assertEnv.js";
 import { asRoot } from "../db.js";
 
 class WebhookNotConfiguredError extends S.TaggedError<
@@ -18,11 +17,12 @@ class WebhookVerificationError extends S.TaggedError<
 }) {}
 
 export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
-  make: Effect.sync(() => {
+  make: Effect.gen(function* () {
+    const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
     return {
       handleGitHubSponsor: (signature: string | null, body: string, event: string | null) =>
         Effect.gen(function* () {
-          const secret = env.GITHUB_WEBHOOK_SECRET;
+          const secret = Option.getOrUndefined(webhookSecret);
           if (!secret) {
             return yield* new WebhookNotConfiguredError({
               message: "Webhook not configured",
@@ -37,7 +37,7 @@ export class WebhookService extends Context.Service<WebhookService>()("WebhookSe
               }),
           });
 
-          const webhooks = new Webhooks({ secret });
+          const webhooks = new Webhooks({ secret: Redacted.value(secret) });
 
           const verified = yield* Effect.tryPromise({
             try: () => (signature ? webhooks.verify(body, signature) : Promise.resolve(false)),

@@ -38,9 +38,9 @@ Add a **parallel execution path** — a new `REAL_PG_EXECUTE` command that sends
 
 ## Files to Modify
 
-### `server/envSchema.ts`
+### `SANDBOX_DATABASE_URL`
 
-- Add `SANDBOX_DATABASE_URL: S.UndefinedOr(S.String)` — optional so dev envs without it still work
+- Read it in `server/sandbox.ts` with `Config.option(Config.Redacted("SANDBOX_DATABASE_URL"))` where the sandbox pool is built — optional so dev envs without it still work
 
 ### `server/app.ts`
 
@@ -73,7 +73,7 @@ Add a **parallel execution path** — a new `REAL_PG_EXECUTE` command that sends
 
 ## Implementation Order
 
-1. `server/envSchema.ts` — add env var
+1. `server/sandbox.ts` — read `SANDBOX_DATABASE_URL` through Effect Config
 2. `server/sandbox.ts` — new file (testable independently)
 3. `server/app.ts` — add routes
 4. `scripts/setup-sandbox-db.sql` — setup script

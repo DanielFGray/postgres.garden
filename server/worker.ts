@@ -1,8 +1,7 @@
 import { NodePath } from "@effect/platform-node";
-import { Effect } from "effect";
+import { Config, Effect, Redacted } from "effect";
 import * as Path from "effect/Path";
 import { run, type Runner } from "graphile-worker";
-import { env } from "./assertEnv.js";
 
 const path = Effect.runSync(Path.Path.pipe(Effect.provide(NodePath.layer)));
 
@@ -27,29 +26,33 @@ export const workerFailed = () => failed;
  * `/healthz` and logged, and the HTTP server keeps serving.
  */
 export const startWorker = (): Promise<void> =>
-  run({
-    connectionString: env.DATABASE_URL,
-    taskDirectory: path.resolve(process.cwd(), "worker/tasks"),
-    crontabFile: path.resolve(process.cwd(), "worker/crontab"),
-  }).then(
-    (started) => {
-      runner = started;
-      started.promise.then(
-        () => {
-          failed = true;
-          Effect.runSync(Effect.log("Worker stopped"));
-        },
-        (cause) => {
-          failed = true;
-          Effect.runSync(Effect.logError("Worker failed", cause));
-        },
-      );
-    },
-    (cause) => {
-      failed = true;
-      Effect.runSync(Effect.logError("Worker failed to start", cause));
-    },
-  );
+  Effect.runPromise(Config.Redacted("DATABASE_URL"))
+    .then((url) =>
+      run({
+        connectionString: Redacted.value(url),
+        taskDirectory: path.resolve(process.cwd(), "worker/tasks"),
+        crontabFile: path.resolve(process.cwd(), "worker/crontab"),
+      }),
+    )
+    .then(
+      (started) => {
+        runner = started;
+        started.promise.then(
+          () => {
+            failed = true;
+            Effect.runSync(Effect.log("Worker stopped"));
+          },
+          (cause) => {
+            failed = true;
+            Effect.runSync(Effect.logError("Worker failed", cause));
+          },
+        );
+      },
+      (cause) => {
+        failed = true;
+        Effect.runSync(Effect.logError("Worker failed to start", cause));
+      },
+    );
 
 /**
  * Stops the runner and waits for its running jobs to finish. `runner.stop()`

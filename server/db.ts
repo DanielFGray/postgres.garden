@@ -14,7 +14,6 @@ import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely
 import * as pg from "pg";
 
 import { CurrentSession } from "./apiSchema.js";
-import { env } from "./assertEnv.js";
 import type {
   DB,
   AppPublicUsers as User,
@@ -93,10 +92,10 @@ const transact = <A, E, R>(db: KyselyDB, use: (trx: KyselyDB) => Effect.Effect<A
  * A session-local role would outlive the request on a pooled connection and
  * leak one visitor's identity into the next request that reuses it.
  */
-const bindVisitor = (trx: KyselyDB, sessionId: string | undefined) =>
+const bindVisitor = (trx: KyselyDB, role: string, sessionId: string | undefined) =>
   Effect.tryPromise({
     try: () =>
-      sql`select set_config('role', ${env.DATABASE_VISITOR}, true),
+      sql`select set_config('role', ${role}, true),
                  set_config('my.session_id', ${sessionId ?? ""}, true)`.execute(trx),
     catch: toDatabaseError,
   });
@@ -105,10 +104,10 @@ const bindVisitor = (trx: KyselyDB, sessionId: string | undefined) =>
  * Starts a visitor transaction. If binding fails, the transaction rolls back
  * here, so no open transaction is left without an owner.
  */
-const openVisitor = (db: KyselyDB, sessionId: string | undefined) =>
-  startTransaction(db).pipe(
+const openVisitor = (pool: VisitorPool, sessionId: string | undefined) =>
+  startTransaction(pool.db).pipe(
     Effect.tap((trx) =>
-      bindVisitor(trx, sessionId).pipe(
+      bindVisitor(trx, pool.role, sessionId).pipe(
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : settle(trx, exit))),
       ),
     ),
@@ -121,7 +120,7 @@ const openVisitor = (db: KyselyDB, sessionId: string | undefined) =>
  */
 const joinRequest = <A, E, R>(
   slot: RequestSlot,
-  db: KyselyDB,
+  pool: VisitorPool,
   sessionId: string | undefined,
   use: (db: KyselyDB) => Step<A, E, R>,
 ) =>
@@ -133,7 +132,7 @@ const joinRequest = <A, E, R>(
         Option.match({
           onSome: (trx) => Effect.succeed(trx),
           onNone: () =>
-            openVisitor(db, sessionId).pipe(
+            openVisitor(pool, sessionId).pipe(
               Effect.tap((trx) => Ref.set(slot.opened, Option.some(trx))),
             ),
         }),
@@ -156,7 +155,7 @@ const joinRequest = <A, E, R>(
  * than have every method re-`yield*` `AuthPool` (see `leakingRequirements`).
  */
 export const visitorQuerier = Effect.gen(function* () {
-  const db = yield* AuthPool;
+  const pool = yield* AuthPool;
   return <A, E, R>(sessionId: string | undefined, use: (db: KyselyDB) => Step<A, E, R>) =>
     // Read the slot per call, not here: this closure is built once per service,
     // and each call must join the request it runs in.
@@ -164,8 +163,10 @@ export const visitorQuerier = Effect.gen(function* () {
       Effect.flatMap(
         Option.match({
           onNone: () =>
-            transact(db, (trx) => Effect.andThen(bindVisitor(trx, sessionId), toEffect(use(trx)))),
-          onSome: (slot) => joinRequest(slot, db, sessionId, use),
+            transact(pool.db, (trx) =>
+              Effect.andThen(bindVisitor(trx, pool.role, sessionId), toEffect(use(trx))),
+            ),
+          onSome: (slot) => joinRequest(slot, pool, sessionId, use),
         }),
       ),
     );
@@ -236,7 +237,13 @@ export const withRequestTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) 
       ),
   );
 
-class AuthPool extends Context.Service<AuthPool, KyselyDB>()("AuthPool") {}
+/** The authenticator login, and the role each of its transactions switches to. */
+interface VisitorPool {
+  readonly db: KyselyDB;
+  readonly role: string;
+}
+
+class AuthPool extends Context.Service<AuthPool, VisitorPool>()("AuthPool") {}
 class RootPool extends Context.Service<RootPool, KyselyDB>()("RootPool") {}
 
 /** The authenticator transaction a request shares. `opened` is empty until the first `asVisitor` opens it. */
@@ -256,19 +263,22 @@ class RequestTransaction extends Context.Service<RequestTransaction, RequestSlot
 export type VisitorContext = AuthPool | CurrentSession;
 export type RootContext = RootPool;
 
-const poolLayer = <I>(tag: Context.Service<I, KyselyDB>, urlKey: string) =>
-  Layer.effect(
-    tag,
-    Effect.gen(function* () {
-      const url = yield* Config.Redacted(urlKey);
-      const db = connect(Redacted.value(url));
-      yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
-      return db;
-    }),
-  );
+const openPool = Effect.fnUntraced(function* (urlKey: string) {
+  const url = yield* Config.Redacted(urlKey);
+  const db = connect(Redacted.value(url));
+  yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
+  return db;
+});
 
-export const AuthPoolLive = poolLayer(AuthPool, "AUTH_DATABASE_URL");
-export const RootPoolLive = poolLayer(RootPool, "DATABASE_URL");
+export const AuthPoolLive = Layer.effect(
+  AuthPool,
+  Effect.gen(function* () {
+    const db = yield* openPool("AUTH_DATABASE_URL");
+    const role = yield* Config.String("DATABASE_VISITOR");
+    return { db, role };
+  }),
+);
+export const RootPoolLive = Layer.effect(RootPool, openPool("DATABASE_URL"));
 export const DatabaseLive = Layer.mergeAll(AuthPoolLive, RootPoolLive);
 
 const CUSTOM_ERROR_CODES: readonly string[] = [
