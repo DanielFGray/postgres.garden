@@ -3,6 +3,9 @@ import pg from "pg";
 import { sql } from "kysely";
 import { rootQuerier, runQuery, unwrapPgError } from "../db.js";
 import type { AppPublicUsers } from "../../generated/db.js";
+import { CurrentSession } from "../../shared/session.js";
+import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
+import { Cookies } from "./cookies.js";
 import { SessionService } from "./sessionService.js";
 
 export class AccountLockedError extends S.TaggedError<
@@ -78,10 +81,27 @@ const mapRegisterPgError = (
     Match.orElse(() => undefined),
   );
 
+/**
+ * Password sign-up, sign-in and sign-out. Each one writes or expires the
+ * session cookie on the response in progress and records the attempt.
+ *
+ * @effect-expect-leaking HttpServerRequest
+ */
 export class AuthService extends Context.Service<AuthService>()("AuthService", {
   make: Effect.gen(function* () {
     const runRoot = yield* rootQuerier;
     const sessionService = yield* SessionService;
+    const cookies = yield* Cookies;
+
+    /** Records the attempt, counts the new session and hands the caller its cookie. */
+    const signedIn = (
+      action: "register" | "login",
+      { token, expiresAt }: { readonly token: string; readonly expiresAt: Date },
+    ) =>
+      recordAuthAttempt({ method: "password", action, result: "success" }).pipe(
+        Effect.andThen(recordActiveSessions(1)),
+        Effect.andThen(cookies.setSession(token, expiresAt)),
+      );
 
     return {
       register: Effect.fnUntraced(
@@ -142,6 +162,14 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
             }),
           ),
         ),
+        Effect.tap((result) => signedIn("register", result)),
+        Effect.map(({ user }) => user),
+        Effect.tapErrorTag("DuplicateAccount", () =>
+          recordAuthAttempt({ method: "password", action: "register", result: "duplicate" }),
+        ),
+        Effect.tapErrorTag(["MissingData", "WeakPassword"], () =>
+          recordAuthAttempt({ method: "password", action: "register", result: "error" }),
+        ),
       ),
 
       login: Effect.fnUntraced(
@@ -191,17 +219,29 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
               ),
             ),
         ),
+        Effect.tap((result) => signedIn("login", result)),
+        Effect.map(({ user }) => user),
+        Effect.tapErrorTag("InvalidCredentials", () =>
+          recordAuthAttempt({ method: "password", action: "login", result: "invalid" }),
+        ),
+        Effect.tapErrorTag("AccountLocked", () =>
+          recordAuthAttempt({ method: "password", action: "login", result: "locked" }),
+        ),
       ),
 
-      logout: (cookieId: string | undefined) =>
-        Effect.gen(function* () {
-          if (cookieId) {
-            yield* sessionService.deleteSession(cookieId);
-          }
-          return { success: true as const };
-        }),
+      logout: Effect.gen(function* () {
+        const { session } = yield* CurrentSession;
+        if (session) {
+          yield* sessionService.deleteSession(session.cookie_id);
+        }
+        yield* recordActiveSessions(-1);
+        yield* cookies.expireSession;
+        return { success: true as const };
+      }),
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SessionService.layer));
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer)),
+  );
 }

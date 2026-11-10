@@ -5,9 +5,8 @@ import { requestObservabilityContext, reportHttpError, datesToUtc } from "./http
 import { CurrentSession } from "../../shared/session.js";
 import { handleDbError } from "../db.js";
 import { ApiError, Conflict, Locked, ServerError, Unauthorized } from "../../shared/errors.js";
-import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
+import { recordAuthAttempt } from "../metrics.js";
 import { AuthService } from "../services/authService.js";
-import { Cookies } from "../services/cookies.js";
 import { OAuthPopup } from "../services/oauthPopup.js";
 import { OAuthCallbackError, OAuthNotConfiguredError } from "../services/oauthService.js";
 
@@ -16,81 +15,24 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
     .handleAll({
       register: ({ payload }) =>
         AuthService.use((service) => service.register(payload)).pipe(
-          Effect.tap(({ token, expiresAt }) =>
-            recordAuthAttempt({
-              method: "password",
-              action: "register",
-              result: "success",
-            }).pipe(
-              Effect.andThen(recordActiveSessions(1)),
-              Effect.andThen(Cookies.use((cookies) => cookies.setSession(token, expiresAt))),
-            ),
-          ),
-          Effect.map((result) => ({
-            ...datesToUtc(result.user),
-            bio: result.user.bio ?? "",
-          })),
+          Effect.map((user) => ({ ...datesToUtc(user), bio: user.bio ?? "" })),
           Effect.catchTags({
-            DuplicateAccount: (e) =>
-              recordAuthAttempt({
-                method: "password",
-                action: "register",
-                result: "duplicate",
-              }).pipe(Effect.andThen(Effect.fail(new Conflict({ error: e.message })))),
-            MissingData: (e) =>
-              recordAuthAttempt({
-                method: "password",
-                action: "register",
-                result: "error",
-              }).pipe(Effect.andThen(Effect.fail(new ApiError({ error: e.message })))),
-            WeakPassword: (e) =>
-              recordAuthAttempt({
-                method: "password",
-                action: "register",
-                result: "error",
-              }).pipe(Effect.andThen(Effect.fail(new ApiError({ error: e.message })))),
+            DuplicateAccount: (e) => Effect.fail(new Conflict({ error: e.message })),
+            MissingData: (e) => Effect.fail(new ApiError({ error: e.message })),
+            WeakPassword: (e) => Effect.fail(new ApiError({ error: e.message })),
           }),
         ),
       login: ({ payload }) =>
         AuthService.use((service) => service.login(payload)).pipe(
-          Effect.tap(({ token, expiresAt }) =>
-            recordAuthAttempt({
-              method: "password",
-              action: "login",
-              result: "success",
-            }).pipe(
-              Effect.andThen(recordActiveSessions(1)),
-              Effect.andThen(Cookies.use((cookies) => cookies.setSession(token, expiresAt))),
-            ),
-          ),
-          Effect.map((result) => ({
-            ...datesToUtc(result.user),
-            bio: result.user.bio ?? "",
-          })),
+          Effect.map((user) => ({ ...datesToUtc(user), bio: user.bio ?? "" })),
           Effect.catchTags({
-            InvalidCredentials: (e) =>
-              recordAuthAttempt({
-                method: "password",
-                action: "login",
-                result: "invalid",
-              }).pipe(Effect.andThen(Effect.fail(new Unauthorized({ error: e.message })))),
-            AccountLocked: (e) =>
-              recordAuthAttempt({
-                method: "password",
-                action: "login",
-                result: "locked",
-              }).pipe(Effect.andThen(Effect.fail(new Locked({ error: e.message })))),
+            InvalidCredentials: (e) => Effect.fail(new Unauthorized({ error: e.message })),
+            AccountLocked: (e) => Effect.fail(new Locked({ error: e.message })),
           }),
         ),
       authMe: () => CurrentSession.pipe(Effect.map(({ user }) => user)),
       logout: () =>
-        Effect.gen(function* () {
-          const { session } = yield* CurrentSession;
-          yield* AuthService.use((service) => service.logout(session?.cookie_id));
-          yield* recordActiveSessions(-1);
-          yield* Cookies.use((cookies) => cookies.expireSession);
-          return { success: true as const };
-        }).pipe(
+        AuthService.use((service) => service.logout).pipe(
           Effect.catch((e) =>
             handleDbError(e, "Logout failed").pipe(
               Effect.flatMap(({ code, error }) => {
