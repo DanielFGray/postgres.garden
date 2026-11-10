@@ -1,9 +1,10 @@
 import { Config, Duration, Effect, Layer, Match, Option } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { RateLimiter, type RateLimiterError } from "effect/persistence/RateLimiter";
-import { CurrentSession, RateLimitMiddleware } from "./apiSchema.js";
+import { RateLimitMiddleware } from "../shared/api/rateLimit.js";
+import { CurrentSession } from "../shared/session.js";
 import { networkOf } from "./clientIp.js";
-import { TooManyRequests } from "./errors.js";
+import { TooManyRequests } from "../shared/errors.js";
 import { storeTimeout } from "./services/rateLimiter.js";
 
 /**

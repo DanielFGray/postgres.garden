@@ -9,7 +9,7 @@ import {
   HttpStaticServer,
 } from "effect/http";
 import type { Connect } from "vite";
-import { isApiPath } from "./apiSchema.js";
+import { isApiPath } from "../shared/httpApi.js";
 import { isProduction } from "./config.js";
 import { injectInitialData } from "./initialData.js";
 import { getPageData } from "./layers/getPageData.js";

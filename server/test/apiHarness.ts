@@ -2,7 +2,7 @@ import { type Config, Context, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
 
-import type { RateLimitMiddleware } from "../apiSchema.js";
+import type { RateLimitMiddleware } from "../../shared/api/rateLimit.js";
 import { DatabaseLive } from "../db.js";
 import { RateLimitMiddlewarePassThrough } from "../rateLimit.js";
 import { ApiRoutesLive } from "../runtime.js";

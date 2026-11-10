@@ -66,5 +66,5 @@
     ]
   },
   "exclude": ["node_modules", "dist", "src/features/notebook/renderer/pev2", "src/sw.ts"],
-  "include": ["src", "server", "lib", "scripts"]
+  "include": ["src", "server", "shared", "lib", "scripts"]
 }

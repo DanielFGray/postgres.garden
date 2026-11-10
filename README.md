@@ -78,9 +78,10 @@ server/             Bun + Effect HTTP backend
   index.ts          Entry point: BunHttpServer, startup order, worker
   runtime.ts        Routes the server and API tests share
   pages.ts          Browser app: Vite in dev, dist/ in prod, HTML shell
-  apiSchema.ts      API routes (Effect HTTP API + Schema validation)
   rateLimit.ts      Per-caller limits on the auth and email endpoints
   db.ts             Kysely connections + RLS auth context
+shared/             Code the browser and the server share
+  httpApi.ts        The API contract; one group per feature in api/
 src/
   loader.tsx        Client entry point and boot sequence
   setup.*.ts        VSCode service overrides

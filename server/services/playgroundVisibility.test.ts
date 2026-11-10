@@ -2,7 +2,7 @@ import { expect, layer } from "@effect/vitest";
 import { Effect, Layer, Random } from "effect";
 import { sql } from "kysely";
 import { asRoot, DatabaseLive, runQuery, unwrapPgError, type KyselyDB } from "../db.js";
-import { CurrentSession, type SessionData } from "../apiSchema.js";
+import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { PlaygroundService } from "./playgroundService.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { SessionService } from "./sessionService.js";

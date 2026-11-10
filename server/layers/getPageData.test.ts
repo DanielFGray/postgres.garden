@@ -1,7 +1,7 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer } from "effect";
-import { CurrentSession } from "../apiSchema.js";
+import { CurrentSession } from "../../shared/session.js";
 import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { SessionService } from "../services/sessionService.js";

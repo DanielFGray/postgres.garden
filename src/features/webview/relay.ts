@@ -3,7 +3,7 @@ import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { Cause, Context, Effect, Layer, Option } from "effect";
-import { webviewRelayRoutes } from "../../../server/apiSchema";
+import { webviewRelayRoutes } from "../../../shared/httpApi";
 import { RelayFailure, RelayReply, type RelayRequest } from "./relayProtocol";
 
 /**

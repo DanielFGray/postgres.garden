@@ -3,8 +3,8 @@ import { Config, Context, DateTime, Effect, Layer, Option, Record, Schema as S }
 import { SecureRandom } from "effect/crypto";
 import { Redis } from "effect/persistence/Redis";
 import { rootQuerier, runQuery } from "../db.js";
-import type { SessionData } from "../apiSchema.js";
-import { UserRole } from "../models.js";
+import type { SessionData } from "../../shared/session.js";
+import { UserRole } from "../../shared/schemas.js";
 import { Secrets } from "../secrets.js";
 
 export const sessionCookieName = "session";

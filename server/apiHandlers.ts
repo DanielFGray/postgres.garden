@@ -2,9 +2,18 @@ import { Cause, Config, DateTime, Effect, Layer, Match, Schema as S } from "effe
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Redis } from "effect/persistence/Redis";
 import { HttpApiBuilder } from "effect/http-api";
-import { CurrentSession, EDIT_KEY_HEADER, PgGardenApi } from "./apiSchema.js";
+import { EDIT_KEY_HEADER } from "../shared/api/playgrounds.js";
+import { PgGardenApi } from "../shared/httpApi.js";
+import { CurrentSession } from "../shared/session.js";
 import { DatabaseLive, handleDbError } from "./db.js";
-import { ApiError, Conflict, Locked, NotFound, ServerError, Unauthorized } from "./errors.js";
+import {
+  ApiError,
+  Conflict,
+  Locked,
+  NotFound,
+  ServerError,
+  Unauthorized,
+} from "../shared/errors.js";
 import {
   recordActiveSessions,
   recordAuthAttempt,

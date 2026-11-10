@@ -8,7 +8,7 @@ import { Array as Arr, Cause, Effect, Option, pipe } from "effect";
 import { parseRoute, type RouteInfo } from "../../src/shared/routes.js";
 import { User } from "../../src/shared/schemas.js";
 import type { PageState } from "../../src/shared/dehydrate.js";
-import { CurrentSession } from "../apiSchema.js";
+import { CurrentSession } from "../../shared/session.js";
 import { getCommit, getHeadCommit } from "./playgroundRepo.js";
 import { SessionService, sessionCookieName } from "../services/sessionService.js";
 import { withRequestTransaction } from "../db.js";

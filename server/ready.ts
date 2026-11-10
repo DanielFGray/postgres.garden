@@ -1,6 +1,6 @@
 import { Duration, Effect, Schedule, Schema as S } from "effect";
 import { sql } from "kysely";
-import { CurrentSession } from "./apiSchema.js";
+import { CurrentSession } from "../shared/session.js";
 import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
 import { Redis } from "effect/persistence/Redis";
 import { workerFailed } from "./worker.js";

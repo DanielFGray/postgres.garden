@@ -13,7 +13,7 @@ import {
 import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
 import * as pg from "pg";
 
-import { CurrentSession } from "./apiSchema.js";
+import { CurrentSession } from "../shared/session.js";
 import type {
   DB,
   AppPublicUsers as User,

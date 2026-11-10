@@ -59,3 +59,6 @@ export const Playground = S.Struct({
   data_size: S.BigIntFromString,
   expires_at: S.NullOr(S.DateTimeUtcFromString),
 });
+
+/** The answer of an endpoint that reports only that it worked. */
+export const SuccessResponse = S.Struct({ success: S.Boolean });

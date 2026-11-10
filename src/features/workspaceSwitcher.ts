@@ -10,7 +10,7 @@ import * as S from "effect/Schema";
 import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import { toError } from "../shared/errors.js";
-import { CommitDetail } from "../../server/apiSchema.js";
+import { CommitDetail } from "../../shared/api/playgrounds.js";
 import { navigateTo } from "../shared/navigation";
 import { getSmallExampleWorkspace } from "../templates";
 import {

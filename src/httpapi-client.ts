@@ -5,7 +5,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { HttpApiClient, type HttpApiError } from "effect/http-api";
 import { Context, Effect, Layer, Match, Option, type Schema } from "effect";
 import * as S from "effect/Schema";
-import { PgGardenApi } from "../server/apiSchema";
+import { PgGardenApi } from "../shared/httpApi";
 import { editKeyHeaders } from "./shared/editKey";
 import {
   ApiError,
@@ -15,7 +15,7 @@ import {
   ServerError,
   TooManyRequests,
   Unauthorized,
-} from "../server/errors";
+} from "../shared/errors";
 import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
 /** The generated client for `PgGardenApi`. */

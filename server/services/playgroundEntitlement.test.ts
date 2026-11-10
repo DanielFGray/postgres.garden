@@ -13,7 +13,7 @@ import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
-import { CurrentSession, type SessionData } from "../apiSchema.js";
+import { CurrentSession, type SessionData } from "../../shared/session.js";
 import {
   asRoot,
   asVisitor,

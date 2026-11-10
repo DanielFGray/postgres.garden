@@ -1,7 +1,7 @@
 import { Context, DateTime, Effect, Layer } from "effect";
 import { HttpEffect, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { sessionCookie } from "../apiSchema.js";
+import { sessionCookie } from "../../shared/session.js";
 import { isProduction } from "../config.js";
 import { sessionCookieName } from "./sessionService.js";
 

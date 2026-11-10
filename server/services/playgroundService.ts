@@ -3,12 +3,12 @@ import * as S from "effect/Schema";
 import { sql, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
-import { CurrentSession } from "../apiSchema.js";
+import { CurrentSession } from "../../shared/session.js";
 import type { AppPublicPlaygrounds } from "../../generated/db.js";
 import { Secrets } from "../secrets.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
-import type { Privacy } from "../models.js";
+import type { Privacy } from "../../shared/schemas.js";
 
 export interface ListPlaygroundsQuery {
   readonly offset?: number | null;

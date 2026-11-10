@@ -1,7 +1,7 @@
 import { Effect, Layer, Redacted } from "effect";
-import { CurrentSession, SessionMiddleware, type SessionData } from "../apiSchema.js";
+import { CurrentSession, SessionMiddleware, type SessionData } from "../../shared/session.js";
 import { withRequestTransaction } from "../db.js";
-import { ServerError } from "../errors.js";
+import { ServerError } from "../../shared/errors.js";
 import { SessionService } from "./sessionService.js";
 
 const noSession: SessionData = { user: null, session: null };

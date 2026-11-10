@@ -16,7 +16,7 @@
  * and no endpoint declares it.
  */
 
-import { EDIT_KEY_HEADER } from "../../server/apiSchema";
+import { EDIT_KEY_HEADER } from "../../shared/api/playgrounds";
 import { getCurrentPlaygroundId } from "./routes";
 
 /** The link that is the only way back into an unclaimed playground. */
