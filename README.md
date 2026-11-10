@@ -60,23 +60,23 @@ bun run dev               # Start dev server
 
 ## Scripts
 
-| Command            | Description                                                                       |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `bun run dev`      | Start all dev processes (server, db watch, workers, typechecker, tests, renderer) |
-| `bun run build`    | Production build (server + client + renderer + webviews)                          |
-| `bun run start`    | Start production server                                                           |
-| `bun lint`         | Run ESLint                                                                        |
-| `bun typecheck`    | Run TypeScript type checking                                                      |
-| `bun test`         | Run unit + e2e tests                                                              |
-| `bun run db:reset` | Reset database and re-run all migrations                                          |
-| `bun run db:types` | Regenerate TypeScript types from database schema                                  |
+| Command            | Description                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `bun run dev`      | Start all dev processes (server, db watch, typechecker, tests, renderer, webviews) |
+| `bun run build`    | Production build (server + client + renderer + webviews)                           |
+| `bun run start`    | Start production server                                                            |
+| `bun lint`         | Run ESLint                                                                         |
+| `bun typecheck`    | Run TypeScript type checking                                                       |
+| `bun test`         | Run unit + e2e tests                                                               |
+| `bun run db:reset` | Reset database and re-run all migrations                                           |
+| `bun run db:types` | Regenerate TypeScript types from database schema                                   |
 
 ## Project Structure
 
 ```
 server/             Bun + Effect HTTP backend
-  index.ts          Entry point: BunHttpServer, startup order, worker
-  runtime.ts        Routes the server and API tests share
+  index.ts          Entry point: Valkey client and platform, then launch
+  runtime.ts        The layer graph: routes, services, worker, listener
   pages.ts          Browser app: Vite in dev, dist/ in prod, HTML shell
   rateLimit.ts      Per-caller limits on the auth and email endpoints
   db.ts             Kysely connections + RLS auth context
@@ -88,7 +88,7 @@ src/
   features/         Feature modules (auth, notebooks, playground, etc.)
     notebook/
       renderer/     Solid notebook renderer (Shadow DOM)
-worker/             Graphile Worker background jobs
+worker/             Graphile Worker tasks, crontab, mail; the server runs them
 migrations/         Graphile Migrate SQL migrations
 scripts/            Setup and build scripts
 ```

@@ -43,16 +43,6 @@ services:
       - "traefik.http.routers.postgres-garden-api.service=postgres-garden"
       - "traefik.http.routers.postgres-garden-api.middlewares=postgres-garden-ratelimit,postgres-garden-headers"
 
-  worker:
-    build: .
-    <<: [*restart, *internal]
-    command: ["sh", "-c", "cd worker && bun graphile-worker"]
-    env_file:
-      - .env
-    depends_on:
-      valkey:
-        condition: service_healthy
-
   valkey:
     image: valkey/valkey:8-alpine
     <<: [*restart, *internal]

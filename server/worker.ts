@@ -17,8 +17,8 @@ class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: uniq
 
 /**
  * Background jobs run in the server process as a graphile-worker library. The
- * task files, crontab and templates stay in `worker/`, which the CLI in
- * `package.json` also reads.
+ * task files, crontab and templates stay in `worker/`. No other process runs
+ * jobs: the graphile-worker CLI only installs the job schema (`worker:schema`).
  *
  * Building the layer starts the runner in the background, so the server keeps
  * answering while graphile-worker runs its migrations, and keeps serving when
