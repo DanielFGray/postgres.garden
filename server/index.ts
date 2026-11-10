@@ -3,14 +3,11 @@
 import { BunHttpServer, BunRedis, BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
-import { DatabaseLive } from "./db.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
-import { PageData } from "./services/pageData.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
 import { Readiness } from "./ready.js";
-import { ApiRoutesLive } from "./runtime.js";
+import { ApiRoutesLive, AppLayer } from "./runtime.js";
 import { RateLimiterValkey } from "./services/rateLimiter.js";
-import { SessionService } from "./services/sessionService.js";
 import { TelemetryLive } from "./telemetry.js";
 import { Worker } from "./worker.js";
 
@@ -39,7 +36,7 @@ const ListenerLive = Layer.unwrap(
  * traffic, and the platform's health check would pass throughout.
  */
 const ServicesLive = Layer.mergeAll(
-  Pages.layer.pipe(Layer.provide(PageData.layer)),
+  Pages.layer,
   TelemetryLive,
   PagesUntraced,
   RateLimitMiddlewareLive.pipe(Layer.provide(RateLimiterValkey)),
@@ -52,7 +49,7 @@ const ServicesLive = Layer.mergeAll(
   ),
 ).pipe(
   Layer.provideMerge(Readiness.layer),
-  Layer.provideMerge(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive))),
+  Layer.provideMerge(AppLayer),
   // Bun's client connects on first use, so a Valkey that is down does not fail
   // this layer; the dependency wait above keeps the port closed until it answers.
   // By default the client stops after a few reconnect attempts and stays closed

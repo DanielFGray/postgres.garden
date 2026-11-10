@@ -2,7 +2,7 @@ import { Context, Effect, Layer, pipe } from "effect";
 import * as S from "effect/Schema";
 import { sql, type ExpressionBuilder, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
-import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
+import { runQuery, sessionQuerier, visitorQuerier, type KyselyDB } from "../db.js";
 import { CurrentSession } from "../../shared/session.js";
 import type { AppPublicPlaygrounds, DB } from "../../generated/db.js";
 import { Secrets } from "../secrets.js";
@@ -150,8 +150,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
   make: Effect.gen(function* () {
     const run = yield* visitorQuerier;
     const secrets = yield* Secrets;
-    const asVisitor = <A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
-      Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use));
+    const asVisitor = yield* sessionQuerier;
 
     return {
       listForUser: (username: string, query: ListPlaygroundsQuery) =>

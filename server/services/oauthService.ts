@@ -14,7 +14,7 @@ import {
 import * as arctic from "arctic";
 import { sql } from "kysely";
 import { rootUrl } from "../config.js";
-import { asRoot, unwrapPgError } from "../db.js";
+import { rootQuerier, unwrapPgError } from "../db.js";
 import { SessionService } from "./sessionService.js";
 import { Cookies } from "./cookies.js";
 import { AccountAlreadyLinkedError } from "./authService.js";
@@ -130,6 +130,8 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     );
     const callbackUrl = `${yield* rootUrl}/auth/github/callback`;
     const cookies = yield* Cookies;
+    const asRoot = yield* rootQuerier;
+    const sessions = yield* SessionService;
 
     const resolveRole = (login: string): Effect.Effect<Option.Option<UserRole>, never> => {
       if (!githubPat) {
@@ -308,9 +310,11 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
           // 6. Create session if no existing session
           const setCookie = currentUserId
             ? undefined
-            : yield* SessionService.use((service) => service.createSession(userId)).pipe(
-                Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
-              );
+            : yield* sessions
+                .createSession(userId)
+                .pipe(
+                  Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
+                );
 
           return {
             user: { id: userId, username, role: userRole },

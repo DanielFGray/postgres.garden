@@ -118,7 +118,7 @@ export class PageData extends Context.Service<PageData>()("PageData", {
     return { render, initialState, headCommit } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SessionService.layer));
 }
 
 export const pathnameOf = (request: HttpServerRequest.HttpServerRequest) =>

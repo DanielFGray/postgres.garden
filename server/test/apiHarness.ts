@@ -6,7 +6,7 @@ import type { Redis } from "effect/persistence/Redis";
 import type { RateLimitMiddleware } from "../../shared/api/rateLimit.js";
 import { DatabaseLive } from "../db.js";
 import { RateLimitMiddlewarePassThrough } from "../rateLimit.js";
-import { ApiRoutesLive } from "../runtime.js";
+import { ApiRoutesLive, AppLayer } from "../runtime.js";
 import { Readiness } from "../ready.js";
 import { RateLimiterMemory } from "../services/rateLimiter.js";
 import { Worker } from "../worker.js";
@@ -57,7 +57,7 @@ export const makeTestHttpClientLive = ({
             Layer.provide(rateLimit),
             Layer.provide(RateLimiterMemory),
             Layer.provide(HttpServer.layerServices),
-            Layer.provide(DatabaseLive),
+            Layer.provide(AppLayer),
             Layer.provide(TestValkeyLive),
             Layer.provideMerge(overrides),
           ),

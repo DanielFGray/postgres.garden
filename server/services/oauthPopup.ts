@@ -105,7 +105,9 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
     return { start, finish, failure } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer)),
+  );
 }
 
 /**

@@ -1,7 +1,6 @@
 import { Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { Redis } from "effect/persistence/Redis";
 import { PgGardenApi } from "../shared/httpApi.js";
 import { AuthApiGroupLive } from "./api/auth.js";
 import { PlaygroundsApiGroupLive } from "./api/playgrounds.js";
@@ -11,9 +10,8 @@ import { WebhooksApiGroupLive } from "./api/webhooks.js";
 import { isProduction } from "./config.js";
 import { DatabaseLive } from "./db.js";
 import { AuthService } from "./services/authService.js";
-import { Cookies } from "./services/cookies.js";
 import { OAuthPopup } from "./services/oauthPopup.js";
-import { OAuthService } from "./services/oauthService.js";
+import { PageData } from "./services/pageData.js";
 import { PlaygroundService } from "./services/playgroundService.js";
 import { SessionMiddlewareLive } from "./services/sessionMiddleware.js";
 import { SessionService } from "./services/sessionService.js";
@@ -43,29 +41,23 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
   Layer.provide(SystemApiGroupLive),
 );
 
-// One layer value, used twice: `Layer.provide` satisfies the plain requirements of
-// the middleware and handlers, and `HttpRouter.provideRequest` satisfies the
-// request-scoped `Requires` markers, which `Layer.provide` leaves unsatisfied.
-// Layer memoization builds each service and pool once.
-const RequestServices = Layer.mergeAll(
-  Cookies.layer,
+/**
+ * The services the routes and pages use, with the database pools they share.
+ * The entry point and the API tests provide it once. Each service layer
+ * provides its own dependencies, and Layer memoizes by reference, so a service
+ * that several layers name (SessionService, Cookies) is built once.
+ */
+export const AppLayer = Layer.mergeAll(
   AuthService.layer,
   UserService.layer,
   PlaygroundService.layer,
-  SessionService.layer,
-  OAuthService.layer,
-  OAuthPopup.layer.pipe(Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer))),
+  OAuthPopup.layer,
   WebhookService.layer,
-  // The health check pings Valkey inside a handler, so the server's one client
-  // is lifted from the layer context into the request context.
-  Layer.effect(Redis, Redis.use(Effect.succeed)),
+  PageData.layer,
+  SessionService.layer,
 ).pipe(Layer.provideMerge(DatabaseLive));
 
-const HttpApiLive = HttpApiHandlers.pipe(
-  Layer.provide(SessionMiddlewareLive),
-  Layer.provide(RequestServices),
-  HttpRouter.provideRequest(RequestServices),
-);
+const HttpApiLive = HttpApiHandlers.pipe(Layer.provide(SessionMiddlewareLive));
 
 /**
  * The workbench runs cross-origin isolated, so every response carries COOP and

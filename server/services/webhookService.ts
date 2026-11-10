@@ -1,7 +1,7 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Schema as S } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { sql } from "kysely";
-import { asRoot } from "../db.js";
+import { rootQuerier } from "../db.js";
 import { recordWebhook } from "../metrics.js";
 
 class WebhookNotConfiguredError extends S.TaggedError<
@@ -28,6 +28,7 @@ class WebhookVerificationError extends S.TaggedError<
 export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
   make: Effect.gen(function* () {
     const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
+    const asRoot = yield* rootQuerier;
     return {
       handleGitHubSponsor: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;

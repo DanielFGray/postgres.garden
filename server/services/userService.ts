@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { type Selectable, sql } from "kysely";
-import { asRoot, asVisitor } from "../db.js";
+import { rootQuerier, sessionQuerier } from "../db.js";
 import type { AppPublicUserEmails as UserEmail } from "../../generated/db.js";
 
 export interface UpdateProfileInput {
@@ -11,7 +11,9 @@ export interface UpdateProfileInput {
 }
 
 export class UserService extends Context.Service<UserService>()("UserService", {
-  make: Effect.sync(() => {
+  make: Effect.gen(function* () {
+    const asVisitor = yield* sessionQuerier;
+    const asRoot = yield* rootQuerier;
     return {
       requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
         if (!token) {

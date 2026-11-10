@@ -197,11 +197,19 @@ export const visitorQuerier = Effect.gen(function* () {
  * wait forever on a lock the outer transaction holds. Do not nest there.
  */
 export const asVisitor = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
-  Effect.gen(function* () {
-    const run = yield* visitorQuerier;
-    const { session } = yield* CurrentSession;
-    return yield* run(session?.id, use);
-  });
+  Effect.flatMap(sessionQuerier, (run) => run(use));
+
+/**
+ * Resolves the visitor pool once and hands back `asVisitor`: each call runs as
+ * the session of the request it is in. A `Context.Service` takes this in its
+ * constructor, so the pool is a requirement of its layer, not of each call.
+ */
+export const sessionQuerier = Effect.map(
+  visitorQuerier,
+  (run) =>
+    <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
+      Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use)),
+);
 
 /**
  * Resolves the root pool once and hands back a function that runs a query as
