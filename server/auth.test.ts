@@ -2,68 +2,22 @@
  * Authentication integration tests.
  *
  * Uses @effect/vitest to run each test as an Effect, with a shared layer
- * providing an in-process web handler (no TCP listener) and direct DB access
+ * providing the in-process HttpClient (no TCP listener) and direct DB access
  * for setup/cleanup.
  *
  * Run: bun vitest run server/auth.test.ts
  */
 
 import { describe, expect, layer } from "@effect/vitest";
-import { Context, Effect, Layer, Random, pipe } from "effect";
-import * as S from "effect/Schema";
-import { HttpRouter, HttpServer } from "effect/http";
+import { Effect, Layer, Random, pipe } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { asRoot, DatabaseLive } from "./db.js";
-import { HttpApiLive } from "./apiHandlers.js";
 import { valkey } from "./valkey.js";
 import { sessionKey } from "./services/sessionService.js";
-import { TestingRoutesLive } from "./testing.js";
-
-// ---------------------------------------------------------------------------
-// Test infrastructure
-// ---------------------------------------------------------------------------
-
-/** In-process web handler backed by our Effect HttpApi. */
-class WebHandler extends Context.Service<
-  WebHandler,
-  { readonly fetch: (request: Request) => Promise<Response> }
->()("test/WebHandler") {
-  static layer = Layer.effect(
-    WebHandler,
-    Effect.acquireRelease(
-      Effect.sync(() =>
-        HttpRouter.toWebHandler(
-          HttpApiLive.pipe(Layer.provide(HttpServer.layerServices), Layer.provide(DatabaseLive)),
-        ),
-      ),
-      ({ dispose }) => Effect.promise(() => dispose()),
-    ).pipe(
-      Effect.map(({ handler }) => ({
-        fetch: handler,
-      })),
-    ),
-  );
-}
-
-/** In-process web handler for testing helper endpoints. */
-class TestingWebHandler extends Context.Service<
-  TestingWebHandler,
-  { readonly fetch: (request: Request) => Promise<Response> }
->()("test/TestingWebHandler") {
-  static layer = Layer.effect(
-    TestingWebHandler,
-    Effect.acquireRelease(
-      Effect.sync(() => HttpRouter.toWebHandler(TestingRoutesLive)),
-      ({ dispose }) => Effect.promise(() => dispose()),
-    ).pipe(
-      Effect.map(({ handler }) => ({
-        fetch: handler,
-      })),
-    ),
-  );
-}
+import { origin, TestHttpClientLive } from "./test/apiHarness.js";
 
 /** Shared layer: in-process HTTP + direct DB for cleanup. */
-const TestLayer = Layer.mergeAll(WebHandler.layer, TestingWebHandler.layer, DatabaseLive);
+const TestLayer = Layer.mergeAll(TestHttpClientLive, DatabaseLive);
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -74,7 +28,8 @@ const randomSuffix = Random.nextIntBetween(0, 0xffffffff).pipe(
   Effect.map((n) => n.toString(16).padStart(8, "0")),
 );
 
-const parseCookie = (headers: Headers): string => headers.get("set-cookie")?.split(";")[0] ?? "";
+const parseCookie = (res: { readonly setCookie: string | undefined }): string =>
+  res.setCookie?.split(";")[0] ?? "";
 
 const sessionIdFromCookie = (cookie: string): string =>
   decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
@@ -83,38 +38,39 @@ const sessionIdFromCookie = (cookie: string): string =>
 // Effectful helpers (all yieldable — no floating promises)
 // ---------------------------------------------------------------------------
 
-/** Send an HTTP request through the in-process handler. */
-const http = Effect.fnUntraced(function* (
-  method: string,
+/** Send a request through the in-process client. */
+const send = Effect.fnUntraced(function* (
+  method: "GET" | "POST",
   path: string,
-  opts?: { body?: unknown; cookie?: string },
+  opts?: { query?: Record<string, string>; body?: unknown; cookie?: string },
 ) {
-  const { fetch } = yield* WebHandler;
-  const headers: Record<string, string> = {};
-  if (opts?.body) headers["Content-Type"] = "application/json";
-  if (opts?.cookie) headers["Cookie"] = opts.cookie;
-
-  const body = opts?.body
-    ? yield* S.encodeEffect(S.fromJsonString(S.Unknown))(opts.body)
-    : undefined;
-
-  const response = yield* Effect.tryPromise(() =>
-    fetch(
-      new Request(`http://localhost${path}`, {
-        method,
-        headers,
-        body,
-      }),
-    ),
+  const client = yield* HttpClient.HttpClient;
+  const request = HttpClientRequest.make(method)(`${origin}${path}`, {
+    urlParams: opts?.query,
+    headers: opts?.cookie ? { Cookie: opts.cookie } : undefined,
+  });
+  const response = yield* client.execute(
+    opts?.body === undefined ? request : yield* HttpClientRequest.bodyJson(request, opts.body),
   );
 
   return {
     status: response.status,
-    headers: response.headers,
-    json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
-    text: () => Effect.tryPromise(() => response.text()),
+    setCookie: response.headers["set-cookie"],
+    json: <T = unknown>() => response.json.pipe(Effect.map((body) => body as T)),
+    text: () => response.text,
   } as const;
 });
+
+/** Send a request to the public API. */
+const http = (method: "GET" | "POST", path: string, opts?: { body?: unknown; cookie?: string }) =>
+  send(method, path, opts);
+
+/** Send a request to the `/api/testing` routes. */
+const testingHttp = (
+  method: "GET" | "POST",
+  path: string,
+  opts?: { query?: Record<string, string>; body?: unknown; cookie?: string },
+) => send(method, `/api/testing${path}`, opts);
 
 /** Delete a user by username. Errors are swallowed (cleanup must not fail tests). */
 const deleteUser = (username: string) =>
@@ -139,48 +95,7 @@ const register = (username: string) =>
 
 /** Register, then return the session cookie string. */
 const registerAndGetCookie = (username: string) =>
-  pipe(
-    register(username),
-    Effect.map((res) => parseCookie(res.headers)),
-  );
-
-/** Send request to /api/testing endpoints through in-process testing server. */
-const testingHttp = Effect.fnUntraced(function* (
-  method: string,
-  path: string,
-  opts?: {
-    query?: Record<string, string>;
-    body?: unknown;
-    cookie?: string;
-    redirect?: RequestRedirect;
-  },
-) {
-  const { fetch } = yield* TestingWebHandler;
-  const headers: Record<string, string> = {};
-  if (opts?.body) headers["Content-Type"] = "application/json";
-  if (opts?.cookie) headers["Cookie"] = opts.cookie;
-  const query = opts?.query ? `?${new URLSearchParams(opts.query).toString()}` : "";
-  const body = opts?.body
-    ? yield* S.encodeEffect(S.fromJsonString(S.Unknown))(opts.body)
-    : undefined;
-  const response = yield* Effect.tryPromise(() =>
-    fetch(
-      new Request(`http://localhost/api/testing${path}${query}`, {
-        method,
-        headers,
-        redirect: opts?.redirect,
-        body,
-      }),
-    ),
-  );
-
-  return {
-    status: response.status,
-    headers: response.headers,
-    json: <T = unknown>() => Effect.tryPromise(() => response.json() as Promise<T>),
-    text: () => Effect.tryPromise(() => response.text()),
-  } as const;
-});
+  pipe(register(username), Effect.map(parseCookie));
 
 const createTestUser = (
   username: string,
@@ -216,7 +131,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             expect(body.id).toBeDefined();
             expect(body.username).toBe(username);
 
-            const setCookie = res.headers.get("set-cookie");
+            const setCookie = res.setCookie;
             expect(setCookie).toBeTruthy();
             expect(setCookie).toContain("session=");
           }),
@@ -316,7 +231,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
 
             expect(res.status).toBe(200);
             expect(body.username).toBe(username);
-            expect(res.headers.get("set-cookie")).toContain("session=");
+            expect(res.setCookie).toContain("session=");
           }),
         );
       }),
@@ -335,7 +250,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             });
 
             expect(res.status).toBe(200);
-            expect(res.headers.get("set-cookie")).toContain("session=");
+            expect(res.setCookie).toContain("session=");
           }),
         );
       }),
@@ -379,7 +294,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             const loginRes = yield* http("POST", "/login", {
               body: { id: username, password: "TestPassword123!" },
             });
-            const cookie = parseCookie(loginRes.headers);
+            const cookie = parseCookie(loginRes);
 
             // Logout
             const logoutRes = yield* http("POST", "/logout", { cookie });
@@ -550,9 +465,8 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
           Effect.gen(function* () {
             const login = yield* testingHttp("GET", "/login", {
               query: { username, verified: "true", redirectTo: "/" },
-              redirect: "manual",
             });
-            const cookie = parseCookie(login.headers);
+            const cookie = parseCookie(login);
             const me = yield* http("GET", "/me", { cookie });
             const meBody = yield* me.json<{ username: string }>();
 
@@ -573,9 +487,8 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
           Effect.gen(function* () {
             const login = yield* testingHttp("GET", "/login", {
               query: { username, verified: "true", redirectTo: "/" },
-              redirect: "manual",
             });
-            const cookie = parseCookie(login.headers);
+            const cookie = parseCookie(login);
 
             const logout = yield* http("POST", "/logout", { cookie });
             const meAfter = yield* http("GET", "/me", { cookie });
@@ -601,14 +514,12 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
                 email: `${username}@example.com`,
                 password: "TestPassword123!",
               },
-              redirect: "manual",
             });
 
             const login = yield* testingHttp("POST", "/loginPost", {
               body: { id: username, password: "TestPassword123!" },
-              redirect: "manual",
             });
-            const cookie = parseCookie(login.headers);
+            const cookie = parseCookie(login);
 
             const me = yield* http("GET", "/me", { cookie });
             const meBody = yield* me.json<{ username: string }>();
@@ -633,14 +544,12 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
                 email: `${username}@example.com`,
                 password: "TestPassword123!",
               },
-              redirect: "manual",
             });
 
             const login = yield* testingHttp("POST", "/loginPost", {
               body: { id: username, password: "TestPassword123!" },
-              redirect: "manual",
             });
-            const cookie = parseCookie(login.headers);
+            const cookie = parseCookie(login);
 
             const logout = yield* http("POST", "/logout", { cookie });
             const meAfter = yield* http("GET", "/me", { cookie });
