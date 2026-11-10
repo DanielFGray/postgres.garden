@@ -79,7 +79,7 @@ export const sendEmail = Effect.fn("sendEmail")(function* (input: unknown) {
   // From the working directory: the production server is one bundle in
   // `dist/`, so a path relative to this module would point there.
   const source = yield* fs.readFileString(path.resolve("worker/templates", job.template));
-  const rendered = yield* Effect.try({
+  const rendered = yield* Effect.tryPromise({
     try: () =>
       mjml(
         template(source, { escape: /\[\[([\s\S]+?)\]\]/g })({

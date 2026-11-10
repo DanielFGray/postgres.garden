@@ -239,9 +239,7 @@ const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings, from: stri
       });
       if (result.rejected.length > 0) {
         return yield* new MailDeliveryError({
-          message: `SMTP rejected: ${result.rejected
-            .map((address) => (typeof address === "string" ? address : address.address))
-            .join(", ")}`,
+          message: `SMTP rejected: ${result.rejected.join(", ")}`,
           cause: result.response,
         });
       }
