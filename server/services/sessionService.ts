@@ -1,11 +1,11 @@
 import { NodeCrypto } from "@effect/platform-node";
-import { Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
+import { Config, Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
 import { SecureRandom } from "effect/crypto";
+import { Redis } from "effect/persistence/Redis";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../apiSchema.js";
 import { UserRole } from "../models.js";
 import { Secrets } from "../secrets.js";
-import { valkey } from "../valkey.js";
 
 export const sessionCookieName = "session";
 
@@ -14,10 +14,17 @@ const anonymous: SessionData = { user: null, session: null };
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
-// The platform's Valkey user may touch only keys under the app's name.
-export function sessionKey(id: string) {
-  return `postgres-garden:session:${id}`;
-}
+/**
+ * The Valkey key of a session hash, by cookie id. The platform's Valkey user may
+ * touch only keys under `VALKEY_KEY_PREFIX`, the app's name and a colon.
+ */
+export const sessionKeyOf = Config.String("VALKEY_KEY_PREFIX").pipe(
+  Config.map((prefix) => (id: string) => `${prefix}session:${id}`),
+);
+
+/** Valkey answers HGETALL with a flat string map; a missing key is `{}`. */
+const decodeHash = S.decodeUnknownEffect(S.Record(S.String, S.String));
+const decodeField = S.decodeUnknownEffect(S.NullOr(S.String));
 
 /**
  * The fields `createSession` writes into the session's Valkey hash.
@@ -56,6 +63,8 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
     const runRoot = yield* rootQuerier;
     const secureRandom = yield* SecureRandom.SecureRandom;
     const secrets = yield* Secrets;
+    const redis = yield* Redis;
+    const sessionKey = yield* sessionKeyOf;
 
     return {
       createSession: Effect.fnUntraced(function* (userId: string) {
@@ -98,17 +107,23 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         // The cache is written only once the session row exists, so a failed
         // insert leaves no hash behind for a cookie that was never issued.
         const key = sessionKey(id);
-        yield* Effect.tryPromise(() =>
-          valkey.hset(key, {
-            secret_hash: secretHash,
-            session_uuid: sessionUuid,
-            user_id: user.id,
-            username: user.username,
-            role: user.role,
-            is_verified: user.is_verified ? "1" : "0",
-          }),
+        yield* redis.send(
+          "HSET",
+          key,
+          "secret_hash",
+          secretHash,
+          "session_uuid",
+          sessionUuid,
+          "user_id",
+          user.id,
+          "username",
+          user.username,
+          "role",
+          user.role,
+          "is_verified",
+          user.is_verified ? "1" : "0",
         );
-        yield* Effect.tryPromise(() => valkey.expire(key, SESSION_TTL_SECONDS));
+        yield* redis.send("EXPIRE", key, String(SESSION_TTL_SECONDS));
 
         return { token: `${id}.${secret}`, id, expiresAt };
       }),
@@ -123,7 +138,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         const [id, secret] = token.split(".");
         if (!(id && secret)) return anonymous;
 
-        const data = yield* Effect.tryPromise(() => valkey.hgetall(sessionKey(id)));
+        const data = yield* redis.send("HGETALL", sessionKey(id)).pipe(Effect.flatMap(decodeHash));
         // Valkey answers a key it does not hold with an empty hash, which is
         // every expired, revoked and invented cookie. That is absence, not a
         // session written in the wrong shape, so it must not reach the decode
@@ -164,7 +179,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
           dbSession.value.expires_at == null ||
           dbSession.value.expires_at < DateTime.toDate(DateTime.nowUnsafe())
         ) {
-          yield* Effect.tryPromise(() => valkey.del(sessionKey(id)));
+          yield* redis.send("DEL", sessionKey(id));
           return anonymous;
         }
 
@@ -185,8 +200,10 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
 
       deleteSession: Effect.fnUntraced(function* (cookieId: string) {
         const key = sessionKey(cookieId);
-        const sessionUuid = yield* Effect.tryPromise(() => valkey.hget(key, "session_uuid"));
-        yield* Effect.tryPromise(() => valkey.del(key));
+        const sessionUuid = yield* redis
+          .send("HGET", key, "session_uuid")
+          .pipe(Effect.flatMap(decodeField));
+        yield* redis.send("DEL", key);
         if (sessionUuid) {
           yield* runRoot((rootDb) =>
             runQuery(rootDb.deleteFrom("app_private.sessions").where("id", "=", sessionUuid)),

@@ -9,19 +9,12 @@
 import { Effect, Layer, Random, Schema as S } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { sql, type ExpressionBuilder } from "kysely";
-import { valkey } from "./valkey.js";
+import { Redis } from "effect/persistence/Redis";
 import { isProduction, rootUrl } from "./config.js";
 import type { DB, AppPublicUsers as User } from "../generated/db.js";
-import { SessionService, sessionKey } from "./services/sessionService.js";
+import { SessionService, sessionKeyOf } from "./services/sessionService.js";
 import { Cookies } from "./services/cookies.js";
 import { DatabaseLive, rootQuerier, runQuery } from "./db.js";
-
-export class ValkeyError extends S.TaggedError<ValkeyError, { readonly brand: unique symbol }>()(
-  "ValkeyError",
-  {
-    cause: S.Unknown,
-  },
-) {}
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),
@@ -142,15 +135,13 @@ const clearTestUsers = Effect.gen(function* () {
   yield* runRoot((db) =>
     runQuery(db.deleteFrom("app_public.users").where("username", "like", "test%")),
   );
-  const keys = yield* Effect.tryPromise({
-    try: () => valkey.keys(sessionKey("*")),
-    catch: (cause) => new ValkeyError({ cause }),
-  });
+  const redis = yield* Redis;
+  const sessionKey = yield* sessionKeyOf;
+  const keys = yield* redis
+    .send("KEYS", sessionKey("*"))
+    .pipe(Effect.flatMap(S.decodeUnknownEffect(S.Array(S.String))));
   if (keys.length > 0) {
-    yield* Effect.tryPromise({
-      try: () => valkey.del(...keys),
-      catch: (cause) => new ValkeyError({ cause }),
-    });
+    yield* redis.send("DEL", ...keys);
   }
   return HttpServerResponse.jsonUnsafe({ success: true });
 });
@@ -290,6 +281,9 @@ export const TestingRoutesLive = TestingRoutes.pipe(
   HttpRouter.provideRequest(
     Layer.mergeAll(
       SessionService.layer.pipe(Layer.provideMerge(DatabaseLive)),
+      // The server's one client, lifted from the layer context to the request
+      // context, because clearTestUsers deletes session keys directly.
+      Layer.effect(Redis, Redis.use(Effect.succeed)),
       Cookies.layer,
       ProductionGuard,
     ),

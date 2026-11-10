@@ -2,7 +2,7 @@ import { Duration, Effect, Schedule, Schema as S } from "effect";
 import { sql } from "kysely";
 import { CurrentSession } from "./apiSchema.js";
 import { asRoot, asVisitor, runQuery, type KyselyDB } from "./db.js";
-import { valkey } from "./valkey.js";
+import { Redis } from "effect/persistence/Redis";
 import { workerFailed } from "./worker.js";
 
 /** A service the server cannot work without did not answer. */
@@ -106,8 +106,5 @@ const ownerPool = probe("postgres (owner pool)", asRoot(ping));
 const visitorPool = probe("postgres (visitor pool)", asVisitor(ping));
 const cache = probe(
   "valkey",
-  Effect.tryPromise({
-    try: () => valkey.ping(),
-    catch: (cause) => new DependencyUnavailable({ dependency: "valkey", message: String(cause) }),
-  }),
+  Redis.use((redis) => redis.send("PING")),
 );

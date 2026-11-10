@@ -1,5 +1,6 @@
 import { Cause, Config, DateTime, Effect, Layer, Match, Schema as S } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Redis } from "effect/persistence/Redis";
 import { HttpApiBuilder } from "effect/http-api";
 import { CurrentSession, EDIT_KEY_HEADER, PgGardenApi } from "./apiSchema.js";
 import { DatabaseLive, handleDbError } from "./db.js";
@@ -1034,6 +1035,9 @@ const RequestServices = Layer.mergeAll(
   SessionService.layer,
   OAuthService.layer,
   WebhookService.layer,
+  // The health check pings Valkey inside a handler, so the server's one client
+  // is lifted from the layer context into the request context.
+  Layer.effect(Redis, Redis.use(Effect.succeed)),
 ).pipe(Layer.provideMerge(DatabaseLive));
 
 export const HttpApiLive = HttpApiHandlers.pipe(

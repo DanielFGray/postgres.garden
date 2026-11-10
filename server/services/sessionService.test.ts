@@ -1,12 +1,12 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema as S } from "effect";
 import { SecureRandom } from "effect/crypto";
-import { afterAll } from "vitest";
+import { Redis } from "effect/persistence/Redis";
 import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
 import { createUser, deleteUser, randomSuffix, withCapturedLogs } from "../testSupport.js";
-import { SessionService, sessionKey } from "./sessionService.js";
-import { valkey } from "../valkey.js";
+import { TestValkeyLive } from "../test/valkey.js";
+import { SessionService, sessionKeyOf } from "./sessionService.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
@@ -16,12 +16,30 @@ const sessionRows = (db: KyselyDB, userId: string) =>
 const deleteSessionRow = (db: KyselyDB, sessionUuid: string) =>
   runQuery(db.deleteFrom("app_private.sessions").where("id", "=", sessionUuid));
 
-const readHash = (cookieId: string) => Effect.promise(() => valkey.hgetall(sessionKey(cookieId)));
+const Hash = S.Record(S.String, S.String);
 
-const writeHash = (cookieId: string, fields: Record<string, string>) =>
-  Effect.promise(() => valkey.hset(sessionKey(cookieId), fields));
+const readKey = (key: string) =>
+  Redis.use((redis) => redis.send("HGETALL", key)).pipe(
+    Effect.flatMap(S.decodeUnknownEffect(Hash)),
+    Effect.orDie,
+  );
 
-const dropHash = (cookieId: string) => Effect.promise(() => valkey.del(sessionKey(cookieId)));
+const readHash = Effect.fnUntraced(function* (cookieId: string) {
+  const sessionKey = yield* sessionKeyOf;
+  return yield* readKey(sessionKey(cookieId));
+});
+
+const writeHash = Effect.fnUntraced(function* (cookieId: string, fields: Record<string, string>) {
+  const sessionKey = yield* sessionKeyOf;
+  const redis = yield* Redis;
+  yield* redis.send("HSET", sessionKey(cookieId), ...Object.entries(fields).flat());
+}, Effect.orDie);
+
+const dropHash = Effect.fnUntraced(function* (cookieId: string) {
+  const sessionKey = yield* sessionKeyOf;
+  const redis = yield* Redis;
+  yield* redis.send("DEL", sessionKey(cookieId));
+}, Effect.orDie);
 
 /**
  * Every cached session that names `userId`. `createSession` chooses the cookie
@@ -29,18 +47,19 @@ const dropHash = (cookieId: string) => Effect.promise(() => valkey.del(sessionKe
  * whether a failed call left a hash behind is to look at all of them.
  */
 const cachedSessionsFor = Effect.fnUntraced(function* (userId: string) {
-  const keys = yield* Effect.promise(() => valkey.keys(`${sessionKey("")}*`));
-  const hashes = yield* Effect.forEach(keys, (key) => Effect.promise(() => valkey.hgetall(key)));
+  const sessionKey = yield* sessionKeyOf;
+  const keys = yield* Redis.use((redis) => redis.send("KEYS", sessionKey("*"))).pipe(
+    Effect.flatMap(S.decodeUnknownEffect(S.Array(S.String))),
+    Effect.orDie,
+  );
+  const hashes = yield* Effect.forEach(keys, readKey);
   return hashes.filter((hash) => hash["user_id"] === userId);
 });
 
-// server/valkey.ts holds one client for the process, which this suite shares
-// with the code under test, so the suite has to close it or vitest waits on an
-// open handle.
-afterAll(() => valkey.quit());
-
 layer(
-  SessionService.layer.pipe(Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer))),
+  SessionService.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
+  ),
   { timeout: "30 seconds" },
 )("SessionService", (it) => {
   it.effect("mints a session the database and the cache agree on", () =>

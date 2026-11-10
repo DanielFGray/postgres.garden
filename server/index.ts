@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
+import { BunHttpServer, BunRedis, BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { DatabaseLive } from "./db.js";
@@ -42,6 +42,19 @@ const ServicesLive = Layer.mergeAll(
   Layer.effectDiscard(waitForDependencies),
 ).pipe(
   Layer.provideMerge(SessionService.layer.pipe(Layer.provideMerge(DatabaseLive))),
+  // Bun's client connects on first use, so a Valkey that is down does not fail
+  // this layer; the dependency wait above keeps the port closed until it answers.
+  // By default the client stops after a few reconnect attempts and stays closed
+  // when Valkey returns, and it holds commands while it reconnects. With these
+  // options it keeps reconnecting, and a command fails at once while Valkey is
+  // down, so a page or a session read does not wait on the outage.
+  Layer.provideMerge(
+    BunRedis.layerConfig({
+      url: Config.String("VALKEY_URL"),
+      maxRetries: Config.succeed(1_000_000),
+      enableOfflineQueue: Config.succeed(false),
+    }),
+  ),
   Layer.provideMerge(BunServices.layer),
 );
 

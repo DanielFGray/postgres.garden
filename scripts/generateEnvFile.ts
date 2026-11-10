@@ -71,6 +71,10 @@ const fieldDefs: FieldDefs = {
     derive: (ctx) => `http://localhost:${ctx.PORT || "3000"}`,
   },
   SECRET: { generate: () => generatePassword(32) },
+  // The dev Valkey from docker-compose.dev.yml. In production the platform sets
+  // both, and its Valkey user may touch only keys under the prefix.
+  VALKEY_URL: { derive: () => "redis://localhost:6379" },
+  VALKEY_KEY_PREFIX: { derive: () => `${packageJson.name}:` },
 };
 
 const fieldOrder = Object.keys(fieldDefs);

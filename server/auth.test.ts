@@ -12,12 +12,13 @@ import { describe, expect, layer } from "@effect/vitest";
 import { Effect, Layer, Random, pipe } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { asRoot, DatabaseLive } from "./db.js";
-import { valkey } from "./valkey.js";
-import { sessionKey } from "./services/sessionService.js";
+import { Redis } from "effect/persistence/Redis";
+import { sessionKeyOf } from "./services/sessionService.js";
 import { origin, TestHttpClientLive } from "./test/apiHarness.js";
+import { TestValkeyLive } from "./test/valkey.js";
 
 /** Shared layer: in-process HTTP + direct DB for cleanup. */
-const TestLayer = Layer.mergeAll(TestHttpClientLive, DatabaseLive);
+const TestLayer = Layer.mergeAll(TestHttpClientLive, DatabaseLive, TestValkeyLive);
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -197,7 +198,8 @@ layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
             const id = sessionIdFromCookie(cookie);
 
             // Simulate expiration by deleting the Valkey key
-            yield* Effect.tryPromise(() => valkey.del(sessionKey(id)));
+            const sessionKey = yield* sessionKeyOf;
+            yield* Redis.use((redis) => redis.send("DEL", sessionKey(id)));
 
             const res = yield* http("GET", "/me", { cookie });
             const body = yield* res.json();

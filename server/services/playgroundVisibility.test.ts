@@ -4,10 +4,11 @@ import { sql } from "kysely";
 import { asRoot, DatabaseLive, runQuery, unwrapPgError, type KyselyDB } from "../db.js";
 import { CurrentSession, type SessionData } from "../apiSchema.js";
 import { PlaygroundService } from "./playgroundService.js";
+import { TestValkeyLive } from "../test/valkey.js";
 import { SessionService } from "./sessionService.js";
 
 const TestLayer = Layer.mergeAll(SessionService.layer, PlaygroundService.layer).pipe(
-  Layer.provideMerge(DatabaseLive),
+  Layer.provideMerge(Layer.mergeAll(DatabaseLive, TestValkeyLive)),
 );
 
 /** No session at all: the anonymous visitor. */

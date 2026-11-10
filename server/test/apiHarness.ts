@@ -3,6 +3,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 
 import { DatabaseLive } from "../db.js";
 import { ApiRoutesLive } from "../runtime.js";
+import { TestValkeyLive } from "./valkey.js";
 
 /** The origin the in-process client sends requests to. Nothing listens on it. */
 export const origin = "http://localhost";
@@ -22,6 +23,7 @@ export const makeTestHttpClientLive = (overrides: Layer.Layer<never> = Layer.emp
           ApiRoutesLive.pipe(
             Layer.provide(HttpServer.layerServices),
             Layer.provide(DatabaseLive),
+            Layer.provide(TestValkeyLive),
             Layer.provideMerge(overrides),
           ),
           { disableLogger: true },

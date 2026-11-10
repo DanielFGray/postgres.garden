@@ -1,12 +1,11 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer } from "effect";
-import { afterAll } from "vitest";
 import { CurrentSession } from "../apiSchema.js";
 import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { SessionService } from "../services/sessionService.js";
-import { valkey } from "../valkey.js";
+import { TestValkeyLive } from "../test/valkey.js";
 import { getHeadCommit } from "./playgroundRepo.js";
 import { getPageData } from "./getPageData.js";
 
@@ -89,13 +88,10 @@ const withPlayground = <A, E, R>(use: (hash: string) => Effect.Effect<A, E, R>) 
     );
   });
 
-// server/valkey.ts holds one client for the process, which the session service
-// under test shares, so the suite has to close it or vitest waits on an open
-// handle.
-afterAll(() => valkey.quit());
-
 layer(
-  SessionService.layer.pipe(Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer))),
+  SessionService.layer.pipe(
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
+  ),
   { timeout: "30 seconds" },
 )("the commit a server-rendered page starts from", (it) => {
   it.effect("reads the commit the playground names as head, not the newest by clock", () =>
