@@ -22,9 +22,6 @@ import type {
   AppPublicPlaygroundCommits as Commit,
 } from "../generated/db.js";
 
-// Configure pg to return bigint for int8 columns (OID 20) instead of string
-pg.types.setTypeParser(20, BigInt);
-
 export type { DB, User, Organization, Playground, Commit };
 
 export type KyselyDB = Kysely<DB>;
@@ -57,9 +54,23 @@ export const runQuery = <A>(query: Query<A>) =>
 const toEffect = <A, E, R>(step: Step<A, E, R>): Effect.Effect<A, E | DatabaseError, R> =>
   Effect.isEffect(step) ? step : runQuery(step);
 
-/** A Kysely instance over a `pg` pool. The pool connects lazily, on the first query. */
-export const connect = (connectionString: string): KyselyDB =>
-  new Kysely<DB>({ dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString }) }) });
+/**
+ * A Kysely instance over a `pg` pool. The pool connects lazily, on the first
+ * query. int8 columns arrive as `bigint` rather than strings; the parser is
+ * the pool's own, so other pg clients in the process keep their defaults.
+ */
+const connect = (connectionString: string): KyselyDB =>
+  new Kysely<DB>({
+    dialect: new PostgresDialect({
+      pool: new pg.Pool({
+        connectionString,
+        types: {
+          getTypeParser: (oid, format) =>
+            oid === pg.types.builtins.INT8 ? BigInt : pg.types.getTypeParser(oid, format),
+        },
+      }),
+    }),
+  });
 
 /**
  * Runs `use` in one transaction on one pooled connection. The transaction
@@ -152,10 +163,10 @@ const joinRequest = <A, E, R>(
  *
  * A `Context.Service` whose methods all run as the visitor role should
  * resolve this once in its constructor and close over the result, rather
- * than have every method re-`yield*` `AuthPool` (see `leakingRequirements`).
+ * than have every method re-`yield*` `PgAuthDB` (see `leakingRequirements`).
  */
 export const visitorQuerier = Effect.gen(function* () {
-  const pool = yield* AuthPool;
+  const pool = yield* PgAuthDB;
   return <A, E, R>(sessionId: string | undefined, use: (db: KyselyDB) => Step<A, E, R>) =>
     // Read the slot per call, not here: this closure is built once per service,
     // and each call must join the request it runs in.
@@ -195,7 +206,7 @@ export const asVisitor = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A
  * for why a `Context.Service` should prefer this over `asRoot`.
  */
 export const rootQuerier = Effect.gen(function* () {
-  const db = yield* RootPool;
+  const db = yield* PgRootDB;
   return <A, E, R>(use: (db: KyselyDB) => Step<A, E, R>) =>
     transact(db, (trx) => toEffect(use(trx)));
 });
@@ -243,8 +254,27 @@ interface VisitorPool {
   readonly role: string;
 }
 
-class AuthPool extends Context.Service<AuthPool, VisitorPool>()("AuthPool") {}
-class RootPool extends Context.Service<RootPool, KyselyDB>()("RootPool") {}
+const openPool = Effect.fnUntraced(function* (urlKey: string) {
+  const url = yield* Config.Redacted(urlKey);
+  const db = connect(Redacted.value(url));
+  yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
+  return db;
+});
+
+class PgAuthDB extends Context.Service<PgAuthDB, VisitorPool>()("PgAuthDB") {
+  static readonly layer = Layer.effect(
+    this,
+    Effect.gen(function* () {
+      const db = yield* openPool("AUTH_DATABASE_URL");
+      const role = yield* Config.String("DATABASE_VISITOR");
+      return { db, role };
+    }),
+  );
+}
+
+class PgRootDB extends Context.Service<PgRootDB, KyselyDB>()("PgRootDB") {
+  static readonly layer = Layer.effect(this, openPool("DATABASE_URL"));
+}
 
 /** The authenticator transaction a request shares. `opened` is empty until the first `asVisitor` opens it. */
 interface RequestSlot {
@@ -260,26 +290,10 @@ class RequestTransaction extends Context.Service<RequestTransaction, RequestSlot
  * What `asVisitor`/`asRoot` need in context. Exported as types only: the tags
  * themselves stay private, so a pool cannot be provided or read from outside.
  */
-export type VisitorContext = AuthPool | CurrentSession;
-export type RootContext = RootPool;
+export type VisitorContext = PgAuthDB | CurrentSession;
+export type RootContext = PgRootDB;
 
-const openPool = Effect.fnUntraced(function* (urlKey: string) {
-  const url = yield* Config.Redacted(urlKey);
-  const db = connect(Redacted.value(url));
-  yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
-  return db;
-});
-
-export const AuthPoolLive = Layer.effect(
-  AuthPool,
-  Effect.gen(function* () {
-    const db = yield* openPool("AUTH_DATABASE_URL");
-    const role = yield* Config.String("DATABASE_VISITOR");
-    return { db, role };
-  }),
-);
-export const RootPoolLive = Layer.effect(RootPool, openPool("DATABASE_URL"));
-export const DatabaseLive = Layer.mergeAll(AuthPoolLive, RootPoolLive);
+export const DatabaseLive = Layer.mergeAll(PgAuthDB.layer, PgRootDB.layer);
 
 const CUSTOM_ERROR_CODES: readonly string[] = [
   "LOCKD", // Account/process locked
