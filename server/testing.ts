@@ -3,7 +3,7 @@
  * call them to create users and sessions and to read secrets, without going
  * through the public API.
  *
- * `index.ts` serves these routes outside production only. A failed route
+ * `ApiRoutesLive` (runtime.ts) mounts these routes outside production only. A failed route
  * answers 500 with a fixed body, so internal error text never reaches a test.
  */
 import { Effect, Layer, Random, Schema as S } from "effect";

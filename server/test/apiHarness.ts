@@ -1,9 +1,8 @@
 import { Context, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 
-import { HttpApiLive } from "../apiHandlers.js";
 import { DatabaseLive } from "../db.js";
-import { TestingRoutesLive } from "../testing.js";
+import { ApiRoutesLive } from "../runtime.js";
 
 /** The origin the in-process client sends requests to. Nothing listens on it. */
 export const origin = "http://localhost";
@@ -20,7 +19,7 @@ export const makeTestHttpClientLive = (overrides: Layer.Layer<never> = Layer.emp
     Effect.acquireRelease(
       Effect.sync(() =>
         HttpRouter.toWebHandler(
-          Layer.mergeAll(HttpApiLive, TestingRoutesLive).pipe(
+          ApiRoutesLive.pipe(
             Layer.provide(HttpServer.layerServices),
             Layer.provide(DatabaseLive),
             Layer.provideMerge(overrides),

@@ -211,6 +211,7 @@
     "@effect/ai-openrouter": "4.1.0",
     "@effect/opentelemetry": "4.1.0",
     "@effect/platform-browser": "4.1.0",
+    "@effect/platform-bun": "4.1.0",
     "@effect/platform-node": "4.1.0",
     "@electric-sql/pglite": "^0.5.11",
     "@electric-sql/pglite-pg_ivm": "0.0.12",

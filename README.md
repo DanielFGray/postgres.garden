@@ -75,7 +75,9 @@ bun run dev               # Start dev server
 
 ```
 server/             Bun + Effect HTTP backend
-  index.ts          Entry point, routes dev/prod
+  index.ts          Entry point: BunHttpServer, startup order, worker
+  runtime.ts        Routes the server and API tests share
+  pages.ts          Browser app: Vite in dev, dist/ in prod, HTML shell
   apiSchema.ts      API routes (Effect HTTP API + Schema validation)
   db.ts             Kysely connections + RLS auth context
 src/
