@@ -5,7 +5,6 @@ import { requestObservabilityContext, reportHttpError, datesToUtc } from "./http
 import { CurrentSession } from "../../shared/session.js";
 import { handleDbError } from "../db.js";
 import { ApiError, Conflict, Locked, ServerError, Unauthorized } from "../../shared/errors.js";
-import { recordAuthAttempt } from "../metrics.js";
 import { AuthService } from "../services/authService.js";
 import { OAuthPopup } from "../services/oauthPopup.js";
 import { OAuthCallbackError, OAuthNotConfiguredError } from "../services/oauthService.js";
@@ -80,16 +79,8 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
       OAuthPopup.use((popup) => popup.finish(query)).pipe(
         Effect.catch((e) => {
           if (S.is(OAuthCallbackError)(e)) {
-            return recordAuthAttempt({
-              method: "github",
-              action: "oauth",
-              result: e.isBadCode ? "bad_verification_code" : "error",
-            }).pipe(
-              Effect.andThen(
-                OAuthPopup.use((popup) =>
-                  popup.failure(e.isBadCode ? "GitHub rejected this sign-in attempt." : e.message),
-                ),
-              ),
+            return OAuthPopup.use((popup) =>
+              popup.failure(e.isBadCode ? "GitHub rejected this sign-in attempt." : e.message),
             );
           }
           if (S.is(OAuthNotConfiguredError)(e)) {
@@ -97,12 +88,7 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
               popup.failure("GitHub sign-in is not configured on this server.", 503),
             );
           }
-          return recordAuthAttempt({
-            method: "github",
-            action: "oauth",
-            result: "error",
-          }).pipe(
-            Effect.andThen(handleDbError(e, "OAuth error")),
+          return handleDbError(e, "OAuth error").pipe(
             Effect.flatMap(({ code, error }) =>
               (code >= 400
                 ? reportHttpError({

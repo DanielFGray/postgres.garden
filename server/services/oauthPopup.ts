@@ -4,7 +4,7 @@ import type { GithubCallbackQuery } from "../../shared/api/auth.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
 import { Cookies } from "./cookies.js";
-import { OAuthService } from "./oauthService.js";
+import { OAuthCallbackError, OAuthNotConfiguredError, OAuthService } from "./oauthService.js";
 
 /**
  * GitHub sign-in in a popup window. `start` sends the popup to GitHub with a
@@ -47,47 +47,60 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
       ),
     );
 
-    const finish = Effect.fnUntraced(function* (query: typeof GithubCallbackQuery.Type) {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const storedState = Option.fromNullishOr(request.cookies[STATE_COOKIE]);
-      if (Option.isNone(storedState) || query.state !== storedState.value) {
-        yield* recordAuthAttempt({ method: "github", action: "oauth", result: "invalid_state" });
-        return yield* failure("This sign-in could not be verified. Please try again.");
-      }
+    const finish = Effect.fnUntraced(
+      function* (query: typeof GithubCallbackQuery.Type) {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const storedState = Option.fromNullishOr(request.cookies[STATE_COOKIE]);
+        if (Option.isNone(storedState) || query.state !== storedState.value) {
+          yield* recordAuthAttempt({ method: "github", action: "oauth", result: "invalid_state" });
+          return yield* failure("This sign-in could not be verified. Please try again.");
+        }
 
-      // GitHub sends `error` instead of `code` when consent is declined.
-      if (query.error !== undefined) {
-        yield* recordAuthAttempt({ method: "github", action: "oauth", result: query.error });
-        return yield* failure(
-          query.error === "access_denied"
-            ? "Sign-in was declined on GitHub."
-            : (query.error_description ?? `GitHub refused the sign-in: ${query.error}`),
-        );
-      }
+        // GitHub sends `error` instead of `code` when consent is declined.
+        if (query.error !== undefined) {
+          yield* recordAuthAttempt({ method: "github", action: "oauth", result: query.error });
+          return yield* failure(
+            query.error === "access_denied"
+              ? "Sign-in was declined on GitHub."
+              : (query.error_description ?? `GitHub refused the sign-in: ${query.error}`),
+          );
+        }
 
-      const code = query.code;
-      if (code === undefined) {
-        yield* recordAuthAttempt({ method: "github", action: "oauth", result: "missing_code" });
-        return yield* failure("GitHub's answer carried no authorization code.");
-      }
+        const code = query.code;
+        if (code === undefined) {
+          yield* recordAuthAttempt({ method: "github", action: "oauth", result: "missing_code" });
+          return yield* failure("GitHub's answer carried no authorization code.");
+        }
 
-      const { session: currentSession } = yield* CurrentSession;
-      const result = yield* oauth.handleCallback(code, currentSession?.user_id);
+        const { session: currentSession } = yield* CurrentSession;
+        const result = yield* oauth.handleCallback(code, currentSession?.user_id);
 
-      yield* recordAuthAttempt({ method: "github", action: "oauth", result: "success" });
-      if (result.isNewSession) {
-        yield* recordActiveSessions(1);
-      }
+        yield* recordAuthAttempt({ method: "github", action: "oauth", result: "success" });
+        if (result.isNewSession) {
+          yield* recordActiveSessions(1);
+        }
 
-      const html = yield* buildOAuthPopupHtml({ type: "github-auth-success" });
-      return HttpServerResponse.text(html, {
-        status: 200,
-        contentType: "text/html",
-        // The session cookie is what the opener reads its identity from, so
-        // the page and the cookie arrive in the same response.
-        headers: { "Set-Cookie": result.setCookie ?? cookies.expiredHeader(STATE_COOKIE) },
-      });
-    });
+        const html = yield* buildOAuthPopupHtml({ type: "github-auth-success" });
+        return HttpServerResponse.text(html, {
+          status: 200,
+          contentType: "text/html",
+          // The session cookie is what the opener reads its identity from, so
+          // the page and the cookie arrive in the same response.
+          headers: { "Set-Cookie": result.setCookie ?? cookies.expiredHeader(STATE_COOKIE) },
+        });
+      },
+      // A server that is not set up for GitHub sign-in saw no attempt to count.
+      Effect.tapError((e) =>
+        S.is(OAuthNotConfiguredError)(e)
+          ? Effect.void
+          : recordAuthAttempt({
+              method: "github",
+              action: "oauth",
+              result:
+                S.is(OAuthCallbackError)(e) && e.isBadCode ? "bad_verification_code" : "error",
+            }),
+      ),
+    );
 
     return { start, finish, failure } as const;
   }),
