@@ -3,15 +3,7 @@ import { HttpRouter, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { CurrentSession, EDIT_KEY_HEADER, PgGardenApi } from "./apiSchema.js";
 import { DatabaseLive, handleDbError } from "./db.js";
-import {
-  ApiError,
-  Conflict,
-  Locked,
-  NotFound,
-  ServerError,
-  ServiceUnavailable,
-  Unauthorized,
-} from "./errors.js";
+import { ApiError, Conflict, Locked, NotFound, ServerError, Unauthorized } from "./errors.js";
 import {
   recordActiveSessions,
   recordAuthAttempt,
@@ -988,26 +980,36 @@ const webhookLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
 
 const systemLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
   handlers.handleRaw("healthz", () =>
-    checkDependencies.pipe(
-      Effect.andThen(deployedCommit),
-      Effect.map((commit) =>
-        HttpServerResponse.jsonUnsafe(
-          { ok: true },
-          { headers: { "x-commit": commit, "cache-control": "no-store" } },
+    Effect.flatMap(deployedCommit, (commit) => {
+      const respond = (status: 200 | 503, body: HealthBody) =>
+        HttpServerResponse.jsonUnsafe(body, {
+          status,
+          headers: { "x-commit": commit, "cache-control": "no-store" },
+        });
+      return checkDependencies.pipe(
+        Effect.as(respond(200, { status: "ok", commit })),
+        Effect.catchTag("DependencyUnavailable", (e) =>
+          // The error text stays in the logs: this route is unauthenticated.
+          Effect.logWarning(`healthz: ${e.dependency} unavailable: ${e.message}`).pipe(
+            Effect.as(
+              respond(503, { status: "error", commit, failed: [healthName(e.dependency)] }),
+            ),
+          ),
         ),
-      ),
-      Effect.catchTag("DependencyUnavailable", (e) =>
-        // The dependency's name reaches the client; its error text only the
-        // logs, since a health endpoint is unauthenticated.
-        Effect.logWarning(`healthz: ${e.dependency} unavailable: ${e.message}`).pipe(
-          Effect.andThen(Effect.fail(new ServiceUnavailable({ error: e.dependency }))),
-        ),
-      ),
-    ),
+      );
+    }),
   ),
 );
 
-/** The commit the deploy runs, for the x-commit header; the platform sets GIT_COMMIT. */
+type HealthBody =
+  | { readonly status: "ok"; readonly commit: string }
+  | { readonly status: "error"; readonly commit: string; readonly failed: ReadonlyArray<string> };
+
+/** The health contract names both Postgres pools "database"; other probes keep their name. */
+const healthName = (dependency: string) =>
+  dependency.startsWith("postgres") ? "database" : dependency;
+
+/** The commit the deploy runs, for the health body; the platform sets GIT_COMMIT. */
 const deployedCommit = Config.String("GIT_COMMIT").pipe(Effect.orElseSucceed(() => "unknown"));
 
 // ---------------------------------------------------------------------------
