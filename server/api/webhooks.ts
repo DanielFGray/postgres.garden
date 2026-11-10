@@ -11,40 +11,43 @@ import {
 } from "../services/webhookService.js";
 
 export const WebhooksApiGroupLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
-  handlers.handleRaw("githubSponsorWebhook", ({ request }) =>
-    WebhookService.use((service) => service.handleGitHubSponsor).pipe(
-      Effect.map((result) => HttpServerResponse.jsonUnsafe(result)),
-      Effect.catch((e) => {
-        const report = (status: number) =>
-          reportHttpError({
-            route: "webhooks.githubSponsorWebhook",
-            status,
-            kind: "webhook",
-            error: e,
-            context: requestObservabilityContext(request.headers),
-          });
-        if (S.is(WebhookNotConfiguredError)(e)) {
-          return report(503).pipe(
-            Effect.as(
-              HttpServerResponse.jsonUnsafe({ error: "Webhook not configured" }, { status: 503 }),
+  Effect.gen(function* () {
+    const webhooks = yield* WebhookService;
+    return handlers.handleRaw("githubSponsorWebhook", ({ request }) =>
+      webhooks.handleGitHubSponsor.pipe(
+        Effect.map((result) => HttpServerResponse.jsonUnsafe(result)),
+        Effect.catch((e) => {
+          const report = (status: number) =>
+            reportHttpError({
+              route: "webhooks.githubSponsorWebhook",
+              status,
+              kind: "webhook",
+              error: e,
+              context: requestObservabilityContext(request.headers),
+            });
+          if (S.is(WebhookNotConfiguredError)(e)) {
+            return report(503).pipe(
+              Effect.as(
+                HttpServerResponse.jsonUnsafe({ error: "Webhook not configured" }, { status: 503 }),
+              ),
+            );
+          }
+          if (S.is(WebhookVerificationError)(e)) {
+            return report(401).pipe(
+              Effect.as(
+                HttpServerResponse.jsonUnsafe({ error: "Invalid signature" }, { status: 401 }),
+              ),
+            );
+          }
+          return handleDbError(e, "Webhook processing failed").pipe(
+            Effect.flatMap(({ code, error }) =>
+              report(code).pipe(
+                Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code })),
+              ),
             ),
           );
-        }
-        if (S.is(WebhookVerificationError)(e)) {
-          return report(401).pipe(
-            Effect.as(
-              HttpServerResponse.jsonUnsafe({ error: "Invalid signature" }, { status: 401 }),
-            ),
-          );
-        }
-        return handleDbError(e, "Webhook processing failed").pipe(
-          Effect.flatMap(({ code, error }) =>
-            report(code).pipe(
-              Effect.as(HttpServerResponse.jsonUnsafe({ error }, { status: code })),
-            ),
-          ),
-        );
-      }),
-    ),
-  ),
+        }),
+      ),
+    );
+  }),
 );
