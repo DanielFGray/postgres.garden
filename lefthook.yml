@@ -5,8 +5,9 @@ output:
 
 pre-push:
   commands:
-    # Verifies each pushed main or develop tree that has no signoff, then refuses a push to the
-    # control host whose tree still has none. {1} and {2} are git's remote name and URL.
+    # For each pushed main or develop tree that has no signoff, `ops signoff pre-push` runs
+    # scripts/verify and records a signoff on the control host, for every remote. A failing
+    # verify refuses the push. {1} and {2} are git's remote name and URL.
     signoff:
-      run: scripts/pre-push {1} {2}
+      run: ops signoff pre-push {1} {2}
       use_stdin: true
