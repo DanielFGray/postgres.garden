@@ -284,7 +284,7 @@
     "@types/html-to-text": "^9.0.4",
     "@types/lodash.template": "^4.5.3",
     "@types/mjml": "^5.4.2",
-    "@types/node": "^25.5.0",
+    "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/wicg-file-system-access": "^2023.10.7",
