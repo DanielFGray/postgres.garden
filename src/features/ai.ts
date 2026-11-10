@@ -1,6 +1,7 @@
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { LanguageModel, type Prompt } from "effect/ai";
 import { Effect, Layer, Match, Option, Stream } from "effect";
+import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { languageModelLayer, type ProviderId } from "../../lib/ai/providers";
 import { VSCodeService } from "../vscode/service";
@@ -121,9 +122,22 @@ export const AiFeatureLive: Layer.Layer<never, never, VSCodeService | PGlite | L
                   progress.report(new vscodeApi.LanguageModelThinkingPart(p.delta, p.id)),
                 ),
               ),
+              // VS Code takes a tool input as an object; the model may send any JSON.
               Match.when({ type: "tool-call" }, (p) =>
-                Effect.sync(() =>
-                  progress.report(new vscodeApi.LanguageModelToolCallPart(p.id, p.name, p.params)),
+                S.decodeUnknownEffect(S.JsonObject)(p.params).pipe(
+                  Effect.mapError(
+                    () =>
+                      new ModelRequestError({
+                        cause: `The model called ${p.name} with parameters that are not an object`,
+                      }),
+                  ),
+                  Effect.flatMap((params) =>
+                    Effect.sync(() =>
+                      progress.report(
+                        new vscodeApi.LanguageModelToolCallPart(p.id, p.name, params),
+                      ),
+                    ),
+                  ),
                 ),
               ),
               Match.when({ type: "error" }, (p) =>
