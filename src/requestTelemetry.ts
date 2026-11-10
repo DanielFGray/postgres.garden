@@ -3,7 +3,7 @@ import { Effect } from "effect";
 /**
  * Observability for one server call started by a UI action.
  *
- * `server/apiHandlers.ts` reads these back off the request headers, so the span
+ * `server/api/http.ts` reads these back off the request headers, so the span
  * the server records stays joined to the action that caused it. The trace
  * context itself is not here: `HttpClient` writes `traceparent` from the live
  * span when it sends the request, which would overwrite anything set earlier.
