@@ -1,13 +1,12 @@
 import { Context, Effect, Layer, pipe } from "effect";
 import * as S from "effect/Schema";
-import { sql, type Selectable } from "kysely";
+import { sql, type ExpressionBuilder, type Selectable } from "kysely";
 import { jsonBuildObject } from "kysely/helpers/postgres";
 import { runQuery, visitorQuerier, type KyselyDB, type Step } from "../db.js";
 import { CurrentSession } from "../../shared/session.js";
-import type { AppPublicPlaygrounds } from "../../generated/db.js";
+import type { AppPublicPlaygrounds, DB } from "../../generated/db.js";
 import { Secrets } from "../secrets.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
-import { publicOnly, publicOrOwn } from "./playgroundVisibility.js";
 import type { Privacy } from "../../shared/schemas.js";
 
 export interface ListPlaygroundsQuery {
@@ -151,7 +150,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
   make: Effect.gen(function* () {
     const run = yield* visitorQuerier;
     const secrets = yield* Secrets;
-    const asVisitor =<A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
+    const asVisitor = <A, E = never, R = never>(use: (authDb: KyselyDB) => Step<A, E, R>) =>
       Effect.flatMap(CurrentSession, ({ session }) => run(session?.id, use));
 
     return {
@@ -711,3 +710,26 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Secrets.layer));
 }
+
+type PlaygroundQueryDB = DB & { p: AppPublicPlaygrounds };
+
+/** Playgrounds anyone may read. The query must alias the playgrounds table `p`. */
+const publicOnly = <T extends PlaygroundQueryDB, TB extends keyof T & string>(
+  eb: ExpressionBuilder<T, TB>,
+) => eb(sql.ref("p.privacy"), "=", "public");
+
+/**
+ * Playgrounds the caller may read: the public ones, their own, and every one
+ * for an admin. The query must alias the playgrounds table `p`.
+ */
+const publicOrOwn = <T extends PlaygroundQueryDB, TB extends keyof T & string>(
+  eb: ExpressionBuilder<T, TB>,
+) =>
+  eb.or([
+    eb(sql.ref("p.privacy"), "=", "public"),
+    eb(sql.ref("p.user_id"), "=", sql<string>`app_public.current_user_id()`),
+    sql<boolean>`exists (
+      select 1 from app_public.users
+      where id = app_public.current_user_id() and role = 'admin'
+    )`,
+  ]);
