@@ -5,6 +5,7 @@ import { Config, Effect, Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { DatabaseLive } from "./db.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
+import { PageData } from "./services/pageData.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
 import { waitForDependencies } from "./ready.js";
 import { ApiRoutesLive } from "./runtime.js";
@@ -38,7 +39,7 @@ const ListenerLive = Layer.unwrap(
  * traffic, and the platform's health check would pass throughout.
  */
 const ServicesLive = Layer.mergeAll(
-  Pages.layer,
+  Pages.layer.pipe(Layer.provide(PageData.layer)),
   TelemetryLive,
   PagesUntraced,
   RateLimitMiddlewareLive.pipe(Layer.provide(RateLimiterValkey)),

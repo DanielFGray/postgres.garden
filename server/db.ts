@@ -167,7 +167,10 @@ const joinRequest = <A, E, R>(
  */
 export const visitorQuerier = Effect.gen(function* () {
   const pool = yield* PgAuthDB;
-  return <A, E, R>(sessionId: string | undefined, use: (db: KyselyDB) => Step<A, E, R>) =>
+  return <A, E = never, R = never>(
+    sessionId: string | undefined,
+    use: (db: KyselyDB) => Step<A, E, R>,
+  ) =>
     // Read the slot per call, not here: this closure is built once per service,
     // and each call must join the request it runs in.
     Effect.serviceOption(RequestTransaction).pipe(
@@ -207,7 +210,7 @@ export const asVisitor = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A
  */
 export const rootQuerier = Effect.gen(function* () {
   const db = yield* PgRootDB;
-  return <A, E, R>(use: (db: KyselyDB) => Step<A, E, R>) =>
+  return <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
     transact(db, (trx) => toEffect(use(trx)));
 });
 

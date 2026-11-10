@@ -1,13 +1,11 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
-import { DateTime, Effect, Layer } from "effect";
-import { CurrentSession } from "../../shared/session.js";
+import { DateTime, Effect, Layer, Option } from "effect";
 import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
-import { SessionService } from "../services/sessionService.js";
+import { SessionService } from "./sessionService.js";
 import { TestValkeyLive } from "../test/valkey.js";
-import { getHeadCommit } from "./playgroundRepo.js";
-import { getPageData } from "./getPageData.js";
+import { PageData } from "./pageData.js";
 
 /**
  * One fixed instant for every seeded commit, so a test that needs two commits
@@ -72,7 +70,7 @@ const dropPlayground = (db: KyselyDB, hash: string) =>
   );
 
 /** Nobody is signed in: these playgrounds are public, so RLS lets them through. */
-const anonymous = { user: null, session: null };
+const headCommit = (hash: string) => PageData.use((pages) => pages.headCommit(hash, undefined));
 
 /**
  * Seeds a public playground, runs `use` with its hash, and removes it again.
@@ -89,7 +87,8 @@ const withPlayground = <A, E, R>(use: (hash: string) => Effect.Effect<A, E, R>) 
   });
 
 layer(
-  SessionService.layer.pipe(
+  PageData.layer.pipe(
+    Layer.provideMerge(SessionService.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
   ),
   { timeout: "30 seconds" },
@@ -119,9 +118,7 @@ layer(
         );
         yield* asRoot((db) => setHead(db, hash, first.id));
 
-        const commit = yield* getHeadCommit(hash).pipe(
-          Effect.provideService(CurrentSession, anonymous),
-        );
+        const commit = yield* headCommit(hash);
 
         expect(commit?.id).toBe(first.id);
         expect(commit?.id).not.toBe(second.id);
@@ -136,9 +133,7 @@ layer(
       Effect.gen(function* () {
         yield* asRoot((db) => insertCommit(db, hash, "orphan", { files: [] }, fixedInstant));
 
-        const commit = yield* getHeadCommit(hash).pipe(
-          Effect.provideService(CurrentSession, anonymous),
-        );
+        const commit = yield* headCommit(hash);
 
         // The playground has a commit, but names none as its head, so there is
         // nothing for the page to start from.
@@ -150,9 +145,7 @@ layer(
   it.effect("answers null for a hash no playground has", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const commit = yield* getHeadCommit(`absent${suffix}`).pipe(
-        Effect.provideService(CurrentSession, anonymous),
-      );
+      const commit = yield* headCommit(`absent${suffix}`);
       expect(commit).toBeNull();
     }),
   );
@@ -165,9 +158,7 @@ layer(
         );
         yield* asRoot((db) => setHead(db, hash, head.id));
 
-        const error = yield* Effect.flip(
-          getHeadCommit(hash).pipe(Effect.provideService(CurrentSession, anonymous)),
-        );
+        const error = yield* Effect.flip(headCommit(hash));
         // A commit whose jsonb does not describe a file list is a broken
         // commit, not an empty one, so the read fails and the caller decides.
         expect(error._tag).toBe("SchemaError");
@@ -184,7 +175,7 @@ layer(
         yield* asRoot((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
-          getPageData(`/playgrounds/${hash}`, null),
+          PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),
         );
 
         // The workbench boots either way and asks for the playground itself, so
@@ -214,7 +205,7 @@ layer(
         yield* asRoot((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
-          getPageData(`/playgrounds/${hash}`, null),
+          PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),
         );
 
         expect(result.commit?.id).toBe(head.id);

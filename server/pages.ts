@@ -11,8 +11,8 @@ import {
 import type { Connect } from "vite";
 import { isApiPath } from "../shared/httpApi.js";
 import { isProduction } from "./config.js";
-import { injectInitialData } from "./initialData.js";
-import { getPageData } from "./layers/getPageData.js";
+import type { DatabaseError } from "./db.js";
+import { PageData, pathnameOf } from "./services/pageData.js";
 
 /**
  * The browser app: every path the API does not claim. In development Vite
@@ -28,7 +28,7 @@ export class Pages extends Context.Service<
   {
     readonly respond: Effect.Effect<
       HttpServerResponse.HttpServerResponse,
-      PageError | PageDataError,
+      PageError | DatabaseError,
       HttpServerRequest.HttpServerRequest
     >;
   }
@@ -81,27 +81,12 @@ class PageError extends S.TaggedError<PageError, { readonly brand: unique symbol
   message: S.String,
 }) {}
 
-type PageData = ReturnType<typeof getPageData>;
-type PageDataServices = Effect.Services<PageData>;
-type PageDataError = Effect.Error<PageData>;
-
-const pathnameOf = (request: HttpServerRequest.HttpServerRequest) =>
-  new URL(request.url, "http://localhost").pathname;
-
-/** Renders the HTML shell with the initial data for the requested page. */
-const shellResponse = (html: string) =>
-  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-    getPageData(pathnameOf(request), request.headers.cookie ?? null).pipe(
-      Effect.map((state) => HttpServerResponse.html(injectInitialData(html, state))),
-    ),
-  );
-
 const builtPages = Layer.effect(
   Pages,
   Effect.gen(function* () {
     const fs = yield* FS.FileSystem;
     const path = yield* Path.Path;
-    const pageDataServices = yield* Effect.context<PageDataServices>();
+    const pageData = yield* PageData;
     // Vite's built index.html, not one rebuilt from the manifest, so production
     // serves the same shell development reads through transformIndexHtml.
     const html = yield* fs
@@ -111,7 +96,7 @@ const builtPages = Layer.effect(
           () => new PageError({ message: "dist/index.html not found. Run `bun run build` first." }),
         ),
       );
-    return { respond: shellResponse(html).pipe(Effect.provide(pageDataServices)) };
+    return { respond: pageData.render(html) };
   }),
 );
 
@@ -139,7 +124,7 @@ const vitePages = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FS.FileSystem;
     const path = yield* Path.Path;
-    const pageDataServices = yield* Effect.context<PageDataServices>();
+    const pageData = yield* PageData;
     const port = yield* Config.Port("PORT");
     // Loaded here so production never loads Vite.
     const { createServer } = yield* Effect.promise(() => import("vite"));
@@ -171,7 +156,7 @@ const vitePages = Layer.effect(
           return new PageError({ message: String(cause) });
         },
       });
-      return yield* shellResponse(html);
+      return yield* pageData.render(html);
     });
 
     return {
@@ -179,7 +164,7 @@ const vitePages = Layer.effect(
         const request = yield* HttpServerRequest.HttpServerRequest;
         const served = yield* runViteMiddleware(node, vite.middlewares, request);
         return served ?? (yield* renderShell);
-      }).pipe(Effect.provide(pageDataServices)),
+      }),
     };
   }),
 );
