@@ -1,6 +1,8 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Schema as S } from "effect";
+import { HttpServerRequest } from "effect/http";
 import { sql } from "kysely";
 import { asRoot } from "../db.js";
+import { recordWebhook } from "../metrics.js";
 
 class WebhookNotConfiguredError extends S.TaggedError<
   WebhookNotConfiguredError,
@@ -16,12 +18,26 @@ class WebhookVerificationError extends S.TaggedError<
   message: S.String,
 }) {}
 
+/**
+ * Receives GitHub's sponsorship webhook: verifies its signature against
+ * GITHUB_WEBHOOK_SECRET and queues a `sponsor_webhook` job for each sponsorship
+ * event. It reads the request in progress.
+ *
+ * @effect-expect-leaking HttpServerRequest
+ */
 export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
   make: Effect.gen(function* () {
     const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
     return {
-      handleGitHubSponsor: (signature: string | null, body: string, event: string | null) =>
-        Effect.gen(function* () {
+      handleGitHubSponsor: Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const event = request.headers["x-github-event"] ?? null;
+        const signature = request.headers["x-hub-signature-256"] ?? null;
+        const body = yield* request.text;
+        const record = (verified: "true" | "false") =>
+          recordWebhook({ provider: "github", event: event ?? "unknown", verified });
+
+        return yield* Effect.gen(function* () {
           const secret = Option.getOrUndefined(webhookSecret);
           if (!secret) {
             return yield* new WebhookNotConfiguredError({
@@ -66,7 +82,13 @@ export class WebhookService extends Context.Service<WebhookService>()("WebhookSe
           );
 
           return { ok: true as const };
-        }),
+        }).pipe(
+          Effect.tap(() => record("true")),
+          Effect.tapErrorTag(["WebhookNotConfigured", "WebhookVerificationError"], () =>
+            record("false"),
+          ),
+        );
+      }),
     } as const;
   }),
 }) {
