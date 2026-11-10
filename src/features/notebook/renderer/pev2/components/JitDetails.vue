@@ -18,9 +18,7 @@ const props = defineProps<Props>();
       </tr>
       <tr v-for="(option, index) in props.jit.Options" :key="index">
         <td>&nbsp;&nbsp;{{ index }}</td>
-        <td class="text-end">
-          {{ option ? "✓" : "✗" }} <small>({{ option }})</small>
-        </td>
+        <td class="text-end">{{ option ? "✓" : "✗" }} <small>({{ option }})</small></td>
       </tr>
       <tr>
         <th colspan="2">Timing</th>

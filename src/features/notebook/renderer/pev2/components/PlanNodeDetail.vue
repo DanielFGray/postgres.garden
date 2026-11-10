@@ -192,8 +192,7 @@ watch(activeTab, () => {
         ></span>
         <template v-if="executionTimePercent && executionTimePercent !== Infinity">
           |
-          <strong>{{ executionTimePercent }}</strong
-          ><span class="text-body-tertiary">%</span>
+          <strong>{{ executionTimePercent }}</strong><span class="text-body-tertiary">%</span>
         </template>
       </div>
       <div>
@@ -232,8 +231,7 @@ watch(activeTab, () => {
         <FontAwesomeIcon fixed-width :icon="faFilter" class="text-body-tertiary"></FontAwesomeIcon>
         <b> {{ NodeProp[rowsRemovedProp] }}: </b>
         <span>
-          <span class="px-1">{{ tilde + formattedProp(rowsRemovedProp) }}</span
-          >|
+          <span class="px-1">{{ tilde + formattedProp(rowsRemovedProp) }}</span>|
           <span class="p-0 px-1 alert" :class="rowsRemovedClass"
             >{{ rowsRemovedPercentString }}%</span
           >
