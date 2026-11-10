@@ -55,7 +55,9 @@
     "db:setup": "run-s db:up db:latest",
     "init": "NOCONFIRM=1 run-s env:init db:setup worker:schema",
     "devtui": "effect-devtui",
-    "prepare": "effect-tsgo patch --typescript --oxlint"
+    "prepare": "bun run prepare:patch && bun run prepare:hooks",
+    "prepare:patch": "effect-tsgo patch --typescript --oxlint",
+    "prepare:hooks": "git rev-parse --git-dir >/dev/null 2>&1 || exit 0; lefthook install --reset-hooks-path"
   },
   "dependencies": {
     "@codingame/monaco-vscode-accessibility-service-override": "36.0.0",
@@ -288,6 +290,7 @@
     "@vitejs/plugin-vue": "^6.0.4",
     "effect-devtui": "^0.4.6",
     "esbuild": "^0.24.0",
+    "lefthook": "^2.2.2",
     "oxfmt": "^0.74.0",
     "oxlint": "1.89.0",
     "oxlint-tsgolint": "7.0.2004",

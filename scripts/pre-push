@@ -1,0 +1,26 @@
+#!/bin/bash
+# The pre-push hook (lefthook.yml). git passes the remote's name and URL as arguments, and one
+# line per pushed ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
+#
+# The control host deploys main and develop only when their tree has a signoff. So each pushed
+# main or develop tree without one is checked here first: `ops signoff` runs scripts/verify on
+# the commit's exported tree and records that it passed. Then `ops signoff pre-push` refuses a
+# push to the control host whose tree still has no signoff. `git push --no-verify` skips both.
+set -euo pipefail
+
+refs=$(cat)
+signed=
+while read -r _ sha remote_ref _; do
+  case $remote_ref in refs/heads/main | refs/heads/develop) ;; *) continue ;; esac
+  # A deleted branch arrives as all zeros.
+  [[ $sha =~ ^0+$ ]] && continue
+  [[ -n $signed ]] || signed=$(ops signoff list "$(jq -r .name cartridge.json)")
+  tree=$(git rev-parse "$sha^{tree}")
+  # `ops signoff list` prints: <time> <tree, 12 characters> <commit> <summary>.
+  if ! grep -q " ${tree:0:12} " <<<"$signed"; then
+    ops signoff . "$sha"
+    signed+=$'\n'" ${tree:0:12} "
+  fi
+done <<<"$refs"
+
+exec ops signoff pre-push "$1" "$2" <<<"$refs"

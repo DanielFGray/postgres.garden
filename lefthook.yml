@@ -1,0 +1,12 @@
+output:
+  - summary
+  - failure
+  - execution
+
+pre-push:
+  commands:
+    # Verifies each pushed main or develop tree that has no signoff, then refuses a push to the
+    # control host whose tree still has none. {1} and {2} are git's remote name and URL.
+    signoff:
+      run: scripts/pre-push {1} {2}
+      use_stdin: true
