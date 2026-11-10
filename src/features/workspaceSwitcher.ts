@@ -101,7 +101,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
                         );
                       }),
                     ),
-                    Effect.map(() => null),
+                    Effect.as(null),
                   );
                 }
                 return Effect.fail(
@@ -129,7 +129,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
                         vscode.window.showWarningMessage(`Playground not found: ${playgroundHash}`);
                       }),
                     ),
-                    Effect.map(() => null),
+                    Effect.as(null),
                   );
                 }
                 if (error.status === 401) {
@@ -141,7 +141,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
                         );
                       }),
                     ),
-                    Effect.map(() => null),
+                    Effect.as(null),
                   );
                 }
                 return Effect.fail(

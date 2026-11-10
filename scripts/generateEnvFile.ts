@@ -95,7 +95,7 @@ const resolveField = (
   // @effect-diagnostics effectSucceedWithVoid:off
   // `Effect.void` is `Effect<void, ...>`, not assignable to this function's
   // declared `Effect<string | undefined, ...>` return type.
-  if (!def) return Effect.succeed(undefined);
+  if (!def) return Effect.undefined;
 
   // Generated fields (passwords) - always auto-generate
   if (def.generate) return def.generate();
@@ -143,7 +143,7 @@ const readDotenv = Effect.gen(function* () {
 const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const interactive = yield* Config.String("NOCONFIRM").pipe(
-    Effect.map(() => false),
+    Effect.as(false),
     Effect.orElseSucceed(() => true),
   );
 

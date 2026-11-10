@@ -54,7 +54,7 @@
           "instanceOfSchema": "warning",
           "newPromise": "warning",
           "nodeBuiltinImport": "warning",
-          "preferSchemaOverJson": "warning",
+          "globalJsonInEffect": "warning",
           "processEnv": "warning",
           "processEnvInEffect": "warning",
           "unsafeEffectTypeAssertion": "warning",
