@@ -1,4 +1,4 @@
-import { DateTime, Effect, Match, Option } from "effect";
+import { Effect, Match, Option } from "effect";
 import * as S from "effect/Schema";
 import { createSignal, onCleanup, Show } from "solid-js";
 import { runAction } from "../api";
@@ -238,9 +238,7 @@ export const PlaygroundEditorPanel = () => {
             </div>
 
             <div class="form-group">
-              <span class="meta-text">
-                Created {DateTime.toDate(pg().created_at).toLocaleDateString()}
-              </span>
+              <span class="meta-text">Created {pg().created_at.toLocaleDateString()}</span>
             </div>
 
             <Show when={isDirty()}>

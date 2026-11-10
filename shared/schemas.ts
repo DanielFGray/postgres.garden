@@ -21,8 +21,8 @@ export const User = S.Struct({
   bio: S.String,
   role: UserRole,
   is_verified: S.Boolean,
-  created_at: S.DateTimeUtcFromString,
-  updated_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
+  updated_at: S.DateFromString,
 });
 
 export const UserEmail = S.Struct({
@@ -31,8 +31,8 @@ export const UserEmail = S.Struct({
   email: S.String,
   is_verified: S.Boolean,
   is_primary: S.Boolean,
-  created_at: S.DateTimeUtcFromString,
-  updated_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
+  updated_at: S.DateFromString,
 });
 
 // `details` (jsonb) is never sent to a client, so it has no field here.
@@ -41,8 +41,8 @@ export const UserAuthentication = S.Struct({
   user_id: Uuid,
   service: S.String,
   identifier: S.String,
-  created_at: S.DateTimeUtcFromString,
-  updated_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
+  updated_at: S.DateFromString,
 });
 
 export const Playground = S.Struct({
@@ -52,12 +52,12 @@ export const Playground = S.Struct({
   user_id: S.NullOr(Uuid),
   fork_hash: S.NullOr(S.String),
   privacy: Privacy,
-  created_at: S.DateTimeUtcFromString,
-  updated_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
+  updated_at: S.DateFromString,
   name: S.NullOr(S.String),
   description: S.NullOr(S.String),
   data_size: S.BigIntFromString,
-  expires_at: S.NullOr(S.DateTimeUtcFromString),
+  expires_at: S.NullOr(S.DateFromString),
 });
 
 /** The answer of an endpoint that reports only that it worked. */

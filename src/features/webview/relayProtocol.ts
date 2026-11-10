@@ -11,9 +11,8 @@ import * as S from "effect/Schema";
  * stays a relay rather than a second, hand-written client.
  *
  * Both sides decode what arrives with these schemas, which is the one place
- * each hop is checked. That matters because `postMessage` structured-clone
- * strips class prototypes: a `DateTime.Utc` sent across it arrives as a plain
- * object, so a decoded value cannot be forwarded, only its encoded form.
+ * each hop is checked. `postMessage` structured-clone strips class
+ * prototypes, so a decoded value cannot be forwarded, only its encoded form.
  */
 const HeaderMap = S.Record(S.String, S.String);
 

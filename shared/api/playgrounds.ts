@@ -23,7 +23,7 @@ const PlaygroundListItemWithUser = S.Struct({
 
 const PlaygroundDetail = S.Struct({
   ...Playground.mapFields(Struct.omit(["expires_at"])).fields,
-  expires_at: S.NullOr(S.DateTimeUtcFromString),
+  expires_at: S.NullOr(S.DateFromString),
   user: S.NullOr(S.Struct({ username: S.String })),
   stars: S.BigIntFromString,
   is_starred: S.Boolean,
@@ -54,7 +54,7 @@ export const CreatePlaygroundResult = S.Struct({
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
   /**
    * The key that holds a playground created without an account, answered once
    * and never stored in a form that could be read back. Null when an account
@@ -62,7 +62,7 @@ export const CreatePlaygroundResult = S.Struct({
    */
   edit_key: S.NullOr(S.String),
   /** When an unclaimed playground is pruned. Null once an account owns it. */
-  expires_at: S.NullOr(S.DateTimeUtcFromString),
+  expires_at: S.NullOr(S.DateFromString),
 });
 
 const ForkPlaygroundResult = S.Struct({
@@ -71,7 +71,7 @@ const ForkPlaygroundResult = S.Struct({
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
 });
 
 export const CreateCommitResult = S.Struct({
@@ -79,7 +79,7 @@ export const CreateCommitResult = S.Struct({
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   message: S.String,
-  created_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
   forked: S.Boolean,
 });
 
@@ -95,7 +95,7 @@ const CommitListItem = S.Struct({
 export const CommitDetail = S.Struct({
   id: S.String,
   message: S.String,
-  created_at: S.DateTimeUtcFromString,
+  created_at: S.DateFromString,
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
   files: S.Array(PlaygroundFile),

@@ -2,7 +2,7 @@
  * Helpers every handler group shares: reading the request headers, requiring a
  * session, and turning a failed query into the HTTP error it deserves.
  */
-import { Cause, DateTime, Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { EDIT_KEY_HEADER } from "../../shared/api/playgrounds.js";
 import { CurrentSession } from "../../shared/session.js";
 import { handleDbError } from "../db.js";
@@ -72,27 +72,6 @@ export const reportHttpError = (args: {
 const errorChain = (error: Error): string =>
   error.cause instanceof Error ? `${error.message}: ${errorChain(error.cause)}` : error.message;
 
-/** Recursively convert JS Date values to Effect DateTime.Utc. */
-type DatesToUtc<T> = T extends Date
-  ? DateTime.Utc
-  : T extends ReadonlyArray<infer U>
-    ? DatesToUtc<U>[]
-    : T extends object
-      ? { [K in keyof T]: DatesToUtc<T[K]> }
-      : T;
-
-export function datesToUtc<T>(obj: T): DatesToUtc<T> {
-  if (obj === null || obj === undefined) return obj as DatesToUtc<T>;
-  if (obj instanceof Date) return DateTime.fromDateUnsafe(obj) as DatesToUtc<T>;
-  if (Array.isArray(obj)) return obj.map(datesToUtc) as DatesToUtc<T>;
-  if (typeof obj === "object") {
-    return Object.fromEntries(
-      Object.entries(obj).map(([key, value]) => [key, datesToUtc(value)]),
-    ) as DatesToUtc<T>;
-  }
-  return obj as DatesToUtc<T>;
-}
-
 /**
  * Turn a failed query into the answer for `route`: a known constraint becomes a
  * client error carrying the database's message, anything else a 500.
@@ -105,11 +84,8 @@ export const withDbError = <A, E, R>(
   route: string,
   effect: Effect.Effect<A, E, R>,
   headers?: RequestHeaders,
-): Effect.Effect<DatesToUtc<A>, ApiError | ServerError, R> =>
-  effect.pipe(
-    Effect.map(datesToUtc),
-    Effect.catch((e) => dbFailure(route, e, headers)),
-  );
+): Effect.Effect<A, ApiError | ServerError, R> =>
+  effect.pipe(Effect.catch((e) => dbFailure(route, e, headers)));
 
 /** One failed query as the client error or 500 it deserves, reported on the way. */
 const dbFailure = (
@@ -154,9 +130,8 @@ export const withDbErrorOrMissing = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   missing: string,
   headers?: RequestHeaders,
-): Effect.Effect<DatesToUtc<A>, ApiError | NotFound | ServerError, R> =>
+): Effect.Effect<A, ApiError | NotFound | ServerError, R> =>
   effect.pipe(
-    Effect.map(datesToUtc),
     Effect.catch((e): Effect.Effect<never, ApiError | NotFound | ServerError> =>
       Cause.isNoSuchElementError(e)
         ? Effect.fail(new NotFound({ error: missing }))

@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
-import { Array, DateTime, Effect, Option, Ref } from "effect";
+import { Array, Effect, Option, Ref } from "effect";
 import * as S from "effect/Schema";
 import { RelayOrigin, relayReply } from "./relay";
 import {
@@ -32,9 +32,9 @@ const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
 
 /**
- * One user, as the server really sends it. `created_at` matters: the webview's
- * own client is what turns it into a `DateTime`, and a value decoded on the
- * host could not survive the structured clone that follows.
+ * One user, as the server really sends it. `created_at` matters: it crosses
+ * the relay as a string, and only the webview's own client turns it into a
+ * `Date`, so a `Date` on arrival shows the webview decoded the reply.
  */
 const user = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -115,10 +115,9 @@ it.effect("a GET crosses the relay and comes back decoded against the contract",
     expect(Option.map(yield* request, (seen) => [seen.method, seen.url])).toStrictEqual(
       Option.some(["GET", `${origin}/api/me`]),
     );
-    // Decoding happens here, in the webview, which is the whole point: a
-    // DateTime decoded on the host would arrive as a plain object.
+    // Decoding happens here, in the webview, against the contract.
     expect(
-      Option.map(Option.fromNullishOr(result.user), (user) => DateTime.isDateTime(user.created_at)),
+      Option.map(Option.fromNullishOr(result.user), (user) => user.created_at instanceof Date),
     ).toStrictEqual(Option.some(true));
   }),
 );

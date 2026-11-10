@@ -1,7 +1,7 @@
 import { Effect, Schema as S } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { requestObservabilityContext, reportHttpError, datesToUtc } from "./http.js";
+import { requestObservabilityContext, reportHttpError } from "./http.js";
 import { CurrentSession } from "../../shared/session.js";
 import { handleDbError } from "../db.js";
 import { ApiError, Conflict, Locked, ServerError, Unauthorized } from "../../shared/errors.js";
@@ -14,7 +14,7 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
     .handleAll({
       register: ({ payload }) =>
         AuthService.use((service) => service.register(payload)).pipe(
-          Effect.map((user) => ({ ...datesToUtc(user), bio: user.bio ?? "" })),
+          Effect.map((user) => ({ ...user, bio: user.bio ?? "" })),
           Effect.catchTags({
             DuplicateAccount: (e) => Effect.fail(new Conflict({ error: e.message })),
             MissingData: (e) => Effect.fail(new ApiError({ error: e.message })),
@@ -23,7 +23,7 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
         ),
       login: ({ payload }) =>
         AuthService.use((service) => service.login(payload)).pipe(
-          Effect.map((user) => ({ ...datesToUtc(user), bio: user.bio ?? "" })),
+          Effect.map((user) => ({ ...user, bio: user.bio ?? "" })),
           Effect.catchTags({
             InvalidCredentials: (e) => Effect.fail(new Unauthorized({ error: e.message })),
             AccountLocked: (e) => Effect.fail(new Locked({ error: e.message })),

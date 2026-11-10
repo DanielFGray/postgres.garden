@@ -19,14 +19,16 @@ type PlaygroundListItem = Effect.Success<ReturnType<typeof searchPlaygrounds>>[n
 // Components
 // ---------------------------------------------------------------------------
 
-function formatDate(date: DateTime.Utc) {
-  const diffDays = Math.floor(Duration.toDays(DateTime.distance(date, DateTime.nowUnsafe())));
+function formatDate(date: Date) {
+  const diffDays = Math.floor(
+    Duration.toDays(DateTime.distance(DateTime.fromDateUnsafe(date), DateTime.nowUnsafe())),
+  );
 
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
 
-  return DateTime.toDate(date).toLocaleDateString();
+  return date.toLocaleDateString();
 }
 
 function PlaygroundItem(props: {

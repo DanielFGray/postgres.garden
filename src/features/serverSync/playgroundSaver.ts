@@ -173,7 +173,10 @@ export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/Pla
               fileCount: request.files.length,
               forked: false,
               editKey: Option.fromNullishOr(result.edit_key),
-              expiresAt: Option.fromNullishOr(result.expires_at),
+              expiresAt: Option.map(
+                Option.fromNullishOr(result.expires_at),
+                DateTime.fromDateUnsafe,
+              ),
             })),
           ),
       });

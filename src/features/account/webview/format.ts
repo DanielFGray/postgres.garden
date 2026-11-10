@@ -1,7 +1,7 @@
 import { DateTime } from "effect";
 
-export function formatDate(date: DateTime.Utc) {
-  return DateTime.formatLocal(date, {
+export function formatDate(date: Date) {
+  return DateTime.formatLocal(DateTime.fromDateUnsafe(date), {
     year: "numeric",
     month: "long",
     day: "numeric",
