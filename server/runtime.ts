@@ -27,8 +27,8 @@ import { Worker } from "./worker.js";
 
 /**
  * The routes the server and the API tests share: the HttpApi, the testing
- * routes outside production, and the headers on every response. The server
- * entry adds the browser app and the listener.
+ * routes outside production, and the headers on every response. ServerLive
+ * adds the browser app and the listener.
  */
 export const ApiRoutesLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -50,7 +50,7 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
 
 /**
  * The services the routes and pages use, with the database pools they share.
- * The entry point and the API tests provide it once. Each service layer
+ * ServerLive and the API tests provide it once. Each service layer
  * provides its own dependencies, and Layer memoizes by reference, so a service
  * that several layers name (SessionService, Cookies) is built once.
  */
@@ -111,15 +111,17 @@ const ServicesLive = Layer.mergeAll(
   Pages.layer,
   TelemetryLive,
   PagesUntraced,
-  RateLimitMiddlewareLive.pipe(Layer.provide(RateLimiterValkey)),
+  RateLimitMiddlewareLive,
   // Layer.provide builds the wait first, so the runner starts only once
   // Postgres answers; it starts in the background, so the listener does not
   // wait for graphile-worker's migrations.
-  Worker.layer.pipe(
-    Layer.provide(RateLimiterValkey),
-    Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady))),
-  ),
-).pipe(Layer.provideMerge(Readiness.layer), Layer.provideMerge(AppLayer));
+  Worker.layer.pipe(Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady)))),
+).pipe(
+  // The API middleware and the worker count against one limiter.
+  Layer.provide(RateLimiterValkey),
+  Layer.provideMerge(Readiness.layer),
+  Layer.provideMerge(AppLayer),
+);
 
 /**
  * The server process: the API, the testing routes outside production, the
