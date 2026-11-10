@@ -7,6 +7,14 @@ import { RateLimitMiddleware } from "./rateLimit.js";
 
 const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
 
+/** What GitHub sends the callback: `code` on consent, `error` when the user declines. */
+export const GithubCallbackQuery = S.Struct({
+  code: S.optional(S.String),
+  state: S.String,
+  error: S.optional(S.String),
+  error_description: S.optional(S.String),
+});
+
 export const AuthGroup = HttpApiGroup.make("auth")
   .add(
     HttpApiEndpoint.post("register", "/register", {
@@ -44,12 +52,7 @@ export const AuthGroup = HttpApiGroup.make("auth")
     // `code` would turn pressing Cancel into a schema error in the popup, with
     // nothing to tell the tab that opened it.
     HttpApiEndpoint.get("authGithubCallback", "/auth/github/callback", {
-      query: S.Struct({
-        code: S.optional(S.String),
-        state: S.String,
-        error: S.optional(S.String),
-        error_description: S.optional(S.String),
-      }),
+      query: GithubCallbackQuery,
       success: S.Unknown,
     }),
   )

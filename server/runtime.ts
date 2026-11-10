@@ -12,6 +12,7 @@ import { isProduction } from "./config.js";
 import { DatabaseLive } from "./db.js";
 import { AuthService } from "./services/authService.js";
 import { Cookies } from "./services/cookies.js";
+import { OAuthPopup } from "./services/oauthPopup.js";
 import { OAuthService } from "./services/oauthService.js";
 import { PlaygroundService } from "./services/playgroundService.js";
 import { SessionMiddlewareLive } from "./services/sessionMiddleware.js";
@@ -53,6 +54,7 @@ const RequestServices = Layer.mergeAll(
   PlaygroundService.layer,
   SessionService.layer,
   OAuthService.layer,
+  OAuthPopup.layer.pipe(Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer))),
   WebhookService.layer,
   // The health check pings Valkey inside a handler, so the server's one client
   // is lifted from the layer context into the request context.

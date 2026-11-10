@@ -190,13 +190,3 @@ export const requireSession = (route: string, headers?: RequestHeaders) =>
       return Effect.succeed({ session, user });
     }),
   );
-
-export const parseCookie = (cookieHeader: string | undefined, name: string): string | undefined => {
-  if (!cookieHeader) return undefined;
-  const parts = cookieHeader.split(";");
-  for (const part of parts) {
-    const [n, ...rest] = part.trim().split("=");
-    if (n === name) return decodeURIComponent(rest.join("="));
-  }
-  return undefined;
-};
