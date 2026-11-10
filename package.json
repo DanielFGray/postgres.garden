@@ -243,7 +243,7 @@
     "graphile-worker": "^0.16.6",
     "highlight.js": "^11.12.0",
     "html-to-text": "^10.0.1",
-    "kysely": "^0.28.19",
+    "kysely": "^0.29.8",
     "kysely-codegen": "^0.20.0",
     "lodash": "^4.18.1",
     "lodash.template": "^4.18.1",
