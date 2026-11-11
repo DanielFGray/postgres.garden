@@ -9,7 +9,7 @@ import { RateLimitMiddlewarePassThrough } from "../rateLimit.js";
 import { ApiRoutesLive, AppLayer } from "../runtime.js";
 import { Readiness } from "../ready.js";
 import { RateLimiterMemory } from "../services/rateLimiter.js";
-import { Worker } from "../worker.js";
+import { Worker } from "../../worker/worker.js";
 import { TestValkeyLive } from "./valkey.js";
 
 /** A worker whose runner is up, for the health check. */

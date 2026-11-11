@@ -24,7 +24,7 @@ import { SessionService } from "./services/sessionService.js";
 import { UserService } from "./services/userService.js";
 import { WebhookService } from "./services/webhookService.js";
 import { TracingLayer } from "./tracing.js";
-import { Worker } from "./worker.js";
+import { Worker } from "../worker/worker.js";
 
 /**
  * The routes the server and the API tests share: the HttpApi, the testing

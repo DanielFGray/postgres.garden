@@ -3,7 +3,7 @@ import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
 import { Readiness } from "../ready.js";
-import { Worker } from "../worker.js";
+import { Worker } from "../../worker/worker.js";
 
 export const SystemApiGroupLive = HttpApiBuilder.group(PgGardenApi, "system", (handlers) =>
   Effect.gen(function* () {

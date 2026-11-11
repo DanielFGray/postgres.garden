@@ -3,9 +3,9 @@ import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
 import { getTasks, type JobHelpers, run, type Runner, type Task } from "graphile-worker";
-import { Mailer } from "../worker/email/mailer.js";
-import { sendEmail } from "../worker/email/sendEmail.js";
-import { DependencyUnavailable } from "./ready.js";
+import { Mailer } from "./email/mailer.js";
+import { sendEmail } from "./email/sendEmail.js";
+import { DependencyUnavailable } from "../server/ready.js";
 
 class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: unique symbol }>()(
   "WorkerError",

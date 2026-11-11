@@ -14,7 +14,7 @@ import {
   workerRunning,
   type HealthDependencies,
 } from "./test/apiHarness.js";
-import { Worker } from "./worker.js";
+import { Worker } from "../worker/worker.js";
 
 const COMMIT = "9d1e4c2";
 
