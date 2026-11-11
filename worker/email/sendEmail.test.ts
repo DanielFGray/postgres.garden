@@ -1,6 +1,6 @@
 import { BunServices } from "@effect/platform-bun";
 import { describe, expect, it } from "@effect/vitest";
-import { ConfigProvider, Effect, Layer, Ref } from "effect";
+import { ConfigProvider, DateTime, Effect, Layer, Ref, Schema } from "effect";
 import { vi } from "vitest";
 
 import { RateLimiterMemory } from "../../server/services/rateLimiter.js";
@@ -9,7 +9,8 @@ import {
   RateLimiterStoreSilent,
 } from "../../server/test/rateLimiterStores.js";
 import { Mailer, mailProvider } from "./mailer.js";
-import { sendEmail } from "./sendEmail.js";
+import { type JobRun, taskIn } from "../worker.js";
+import { QueuedEmail, sendEmail } from "./sendEmail.js";
 
 // nodemailer is replaced, so no test here opens a connection to Cloudflare.
 const nodemailer = vi.hoisted(() => {
@@ -155,6 +156,31 @@ describe("queued email delivery", () => {
       expect(delivered[0]?.html).toContain("https://example.invalid/verify-email");
       expect(delivered[4]?.to).toEqual(["one@example.invalid", "two@example.invalid"]);
     }),
+  );
+
+  it.live("fails a queued payload that does not decode, before delivery", () =>
+    Effect.gen(function* () {
+      const { layer, sent } = yield* Mailer.makeCapture;
+      const context = yield* Layer.build(
+        Layer.mergeAll(layer, RateLimiterMemory, BunServices.layer),
+      );
+      const send = taskIn(context)(QueuedEmail, sendEmail);
+      const helpers: JobRun = {
+        abortSignal: yield* Effect.abortSignal,
+        job: {
+          id: "1",
+          task_identifier: "send_email",
+          attempts: 1,
+          created_at: DateTime.toDateUtc(yield* DateTime.now),
+        },
+      };
+      yield* Effect.promise(() =>
+        expect(
+          send({ ...verification, variables: { token: "missing-link" } }, helpers),
+        ).rejects.toSatisfy(Schema.isSchemaError),
+      );
+      expect(yield* Ref.get(sent)).toHaveLength(0);
+    }).pipe(Effect.scoped),
   );
 });
 

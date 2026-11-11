@@ -13,7 +13,7 @@ import {
 import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
-import { type JobHelpers, Logger, run, type Runner, type Task } from "graphile-worker";
+import { type JobHelpers, Logger, run, type Runner } from "graphile-worker";
 import {
   AccountMail,
   AuditEvent,
@@ -106,27 +106,7 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
         onSome: (log) => Effect.runSyncWith(context)(log(message).pipe(Effect.annotateLogs(scope))),
       }),
   );
-  // Graphile owns retry scheduling: a failed job rejects its callback, and a
-  // job stops when graphile aborts it.
-  //
-  // The payload is decoded with `schema` first. The code that queues a job is
-  // its payload's only producer, so a payload that does not decode is a bug
-  // there, and the job fails.
-  const task =
-    <S extends Schema.Decoder<unknown>, E>(
-      schema: S,
-      job: (payload: S["Type"], helpers: JobHelpers) => Effect.Effect<void, E, JobServices>,
-    ): Task =>
-    (payload, helpers) =>
-      Effect.runPromiseWith(context)(
-        traced(
-          Effect.flatMap(Schema.decodeUnknownEffect(schema)(payload), (decodedPayload) =>
-            job(decodedPayload, helpers),
-          ),
-          helpers,
-        ),
-        { signal: helpers.abortSignal },
-      );
+  const task = taskIn(context);
   const taskList = {
     send_email: task(QueuedEmail, sendEmail),
     user__audit: task(AuditEvent, (event, helpers) => mail.audit(event, helpers.job.created_at)),
@@ -193,14 +173,43 @@ const stop = Effect.fnUntraced(function* (runner: Runner, stopped: Ref.Ref<boole
   yield* Ref.set(stopped, true);
 });
 
-type JobServices = FileSystem | Path.Path | RateLimiter | Mailer;
+/** The parts of graphile's `JobHelpers` that a job and its span read. */
+export type JobRun = Pick<JobHelpers, "abortSignal"> & {
+  readonly job: Pick<JobHelpers["job"], "id" | "task_identifier" | "attempts" | "created_at">;
+};
+
+/**
+ * Makes graphile tasks that run their job in `context`, inside its Worker.job
+ * span. Graphile owns retry scheduling: a failed job rejects its callback,
+ * and a job stops when graphile aborts it.
+ *
+ * The payload is decoded with `schema` first. The code that queues a job is
+ * its payload's only producer, so a payload that does not decode is a bug
+ * there, and the job fails.
+ */
+export const taskIn =
+  <R>(context: Context.Context<R>) =>
+  <S extends Schema.Decoder<unknown>, E>(
+    schema: S,
+    job: (payload: S["Type"], helpers: JobRun) => Effect.Effect<void, E, R>,
+  ) =>
+  (payload: unknown, helpers: JobRun): Promise<void> =>
+    Effect.runPromiseWith(context)(
+      traced(
+        Effect.flatMap(Schema.decodeUnknownEffect(schema)(payload), (decodedPayload) =>
+          job(decodedPayload, helpers),
+        ),
+        helpers,
+      ),
+      { signal: helpers.abortSignal },
+    );
 
 /**
  * Runs one job in its Worker.job span. This is the worker's failure boundary:
  * a failure is logged here, once, inside the span, so the line carries the
  * trace id. A stop is not a failure, so an interrupt alone is not logged.
  */
-const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobHelpers) =>
+const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobRun) =>
   job.pipe(
     Effect.tapCauseIf(
       (cause) => !Cause.hasInterruptsOnly(cause),
