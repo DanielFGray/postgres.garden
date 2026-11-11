@@ -8,7 +8,7 @@ import * as S from "effect/Schema";
 import { Effect, Layer, Match, Option } from "effect";
 import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
-import type { SessionUser } from "../../shared/api/auth";
+import type { SessionUser } from "../../shared/session";
 import {
   GITHUB_SIGNIN,
   GITHUB_ACCOUNT_MENU,

@@ -41,8 +41,8 @@ export class Pages extends Context.Service<
 /**
  * Routes for the browser app. The static file routes are more specific than
  * the catch-all, so the router picks them first. A path the API declares
- * answers 404 rather than the page shell, whatever the method: `/login` and
- * `/me` sit beside the page routes with no prefix. Page responses are not
+ * answers 404 rather than the page shell, whatever the method: the GitHub
+ * OAuth routes, `/webhooks` and `/healthz` sit beside the page routes. Page responses are not
  * logged, for the same reason they are not traced (see `PagesUntraced`).
  */
 export const PagesRoutesLive = Layer.unwrap(

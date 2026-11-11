@@ -1,7 +1,6 @@
 import { Cause, Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { CurrentSession } from "../../shared/session.js";
 import { Unauthorized } from "../../shared/errors.js";
 import { toHttpError } from "../databaseErrors.js";
 import { reportUnexpected } from "../failureBoundary.js";
@@ -46,7 +45,6 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
               DatabaseError: toHttpError,
             }),
           ),
-        authMe: () => CurrentSession.pipe(Effect.map(({ user }) => user)),
         logout: () => auth.logout().pipe(Effect.catchTag("DatabaseError", toHttpError)),
       })
       .handleRaw("authGithubStart", () =>

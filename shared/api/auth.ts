@@ -1,12 +1,9 @@
-import { Schema as S, Struct } from "effect";
+import { Schema as S } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { Unauthorized } from "../errors.js";
 import { SuccessResponse, User } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";
-
-/** The signed-in user as `/me` answers it and the page's initial state carries it. */
-export const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
 
 /** What GitHub sends the callback: `code` on consent, `error` when the user declines. */
 export const GithubCallbackQuery = S.Struct({
@@ -18,28 +15,25 @@ export const GithubCallbackQuery = S.Struct({
 
 export const AuthGroup = HttpApiGroup.make("auth")
   .add(
-    HttpApiEndpoint.post("register", "/register", {
+    HttpApiEndpoint.post("register", "/api/auth/register", {
       payload: S.Struct({ username: S.String, email: S.String, password: S.String }),
       success: User,
     }).middleware(RateLimitMiddleware),
   )
   .add(
-    HttpApiEndpoint.post("login", "/login", {
+    HttpApiEndpoint.post("login", "/api/auth/login", {
       payload: S.Struct({ id: S.String, password: S.String }),
       success: User,
       error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .add(
-    HttpApiEndpoint.get("authMe", "/me", {
-      success: S.NullOr(SessionUser),
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("logout", "/logout", {
+    HttpApiEndpoint.post("logout", "/api/auth/logout", {
       success: SuccessResponse,
     }),
   )
+  // The GitHub routes stay at the site root: the callback URL is registered on
+  // the GitHub OAuth app, and the start route sits beside it.
   .add(
     HttpApiEndpoint.get("authGithubStart", "/auth/github", {
       success: S.Unknown,

@@ -84,7 +84,7 @@ const withCleanup = <A, E, R>(username: string, effect: Effect.Effect<A, E, R>) 
 
 /** Register a user via the HTTP API. */
 const register = (username: string) =>
-  http("POST", "/register", {
+  http("POST", "/api/auth/register", {
     body: {
       username,
       email: `${username}@test.com`,
@@ -156,7 +156,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
   // -- Session validation -------------------------------------------------
 
   describe("Session Validation", () => {
-    it.effect("/me returns user for valid session", () =>
+    it.effect("/api/me returns user for valid session", () =>
       Effect.flatMap(randomSuffix, (suffix) => {
         const username = `test_me_${suffix}`;
         return withCleanup(
@@ -164,29 +164,29 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             const cookie = yield* registerAndGetCookie(username);
 
-            const res = yield* http("GET", "/me", { cookie });
-            const body = yield* res.json<{ username: string }>();
+            const res = yield* http("GET", "/api/me", { cookie });
+            const body = yield* res.json<{ user: { username: string } | null }>();
 
             expect(res.status).toBe(200);
-            expect(body.username).toBe(username);
+            expect(body.user?.username).toBe(username);
           }),
         );
       }),
     );
 
-    it.effect("/me returns null for invalid session token", () =>
+    it.effect("/api/me returns null for invalid session token", () =>
       Effect.gen(function* () {
-        const res = yield* http("GET", "/me", {
+        const res = yield* http("GET", "/api/me", {
           cookie: "session=invalid.token",
         });
         const body = yield* res.json();
 
         expect(res.status).toBe(200);
-        expect(body).toBeFalsy();
+        expect(body).toEqual({ user: null });
       }),
     );
 
-    it.effect("/me returns null after session evicted from Valkey", () =>
+    it.effect("/api/me returns null after session evicted from Valkey", () =>
       Effect.flatMap(randomSuffix, (suffix) => {
         const username = `test_evict_${suffix}`;
         return withCleanup(
@@ -199,11 +199,11 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             const sessionKey = yield* sessionKeyOf;
             yield* Redis.use((redis) => redis.send("DEL", sessionKey(id)));
 
-            const res = yield* http("GET", "/me", { cookie });
+            const res = yield* http("GET", "/api/me", { cookie });
             const body = yield* res.json();
 
             expect(res.status).toBe(200);
-            expect(body).toBeFalsy();
+            expect(body).toEqual({ user: null });
           }),
         );
       }),
@@ -221,7 +221,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             yield* register(username);
 
-            const res = yield* http("POST", "/login", {
+            const res = yield* http("POST", "/api/auth/login", {
               body: {
                 id: `${username}@test.com`,
                 password: "TestPassword123!",
@@ -245,7 +245,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             yield* register(username);
 
-            const res = yield* http("POST", "/login", {
+            const res = yield* http("POST", "/api/auth/login", {
               body: { id: username, password: "TestPassword123!" },
             });
 
@@ -262,7 +262,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
       Effect.flatMap(randomSuffix, (suffix) => {
         const username = `test_lockout_${suffix}`;
         const login = (password: string) =>
-          http("POST", "/login", { body: { id: username, password } });
+          http("POST", "/api/auth/login", { body: { id: username, password } });
         return withCleanup(
           username,
           Effect.gen(function* () {
@@ -291,19 +291,19 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             yield* register(username);
 
             // Login for a fresh session
-            const loginRes = yield* http("POST", "/login", {
+            const loginRes = yield* http("POST", "/api/auth/login", {
               body: { id: username, password: "TestPassword123!" },
             });
             const cookie = parseCookie(loginRes);
 
             // Logout
-            const logoutRes = yield* http("POST", "/logout", { cookie });
+            const logoutRes = yield* http("POST", "/api/auth/logout", { cookie });
             expect(logoutRes.status).toBe(200);
 
             // Old session should be dead
-            const meRes = yield* http("GET", "/me", { cookie });
+            const meRes = yield* http("GET", "/api/me", { cookie });
             const meBody = yield* meRes.json();
-            expect(meBody).toBeFalsy();
+            expect(meBody).toEqual({ user: null });
           }),
         );
       }),
@@ -467,13 +467,13 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
               query: { username, verified: "true", redirectTo: "/" },
             });
             const cookie = parseCookie(login);
-            const me = yield* http("GET", "/me", { cookie });
-            const meBody = yield* me.json<{ username: string }>();
+            const me = yield* http("GET", "/api/me", { cookie });
+            const meBody = yield* me.json<{ user: { username: string } | null }>();
 
             expect(login.status).toBe(302);
             expect(cookie).toContain("session=");
             expect(me.status).toBe(200);
-            expect(meBody.username).toBe(username);
+            expect(meBody.user?.username).toBe(username);
           }),
         );
       }),
@@ -490,13 +490,13 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             });
             const cookie = parseCookie(login);
 
-            const logout = yield* http("POST", "/logout", { cookie });
-            const meAfter = yield* http("GET", "/me", { cookie });
+            const logout = yield* http("POST", "/api/auth/logout", { cookie });
+            const meAfter = yield* http("GET", "/api/me", { cookie });
             const meBody = yield* meAfter.json();
 
             expect(logout.status).toBe(200);
             expect(meAfter.status).toBe(200);
-            expect(meBody).toBeFalsy();
+            expect(meBody).toEqual({ user: null });
           }),
         );
       }),
@@ -521,12 +521,12 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             });
             const cookie = parseCookie(login);
 
-            const me = yield* http("GET", "/me", { cookie });
-            const meBody = yield* me.json<{ username: string }>();
+            const me = yield* http("GET", "/api/me", { cookie });
+            const meBody = yield* me.json<{ user: { username: string } | null }>();
 
             expect(login.status).toBe(302);
             expect(me.status).toBe(200);
-            expect(meBody.username).toBe(username);
+            expect(meBody.user?.username).toBe(username);
           }),
         );
       }),
@@ -551,12 +551,12 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             });
             const cookie = parseCookie(login);
 
-            const logout = yield* http("POST", "/logout", { cookie });
-            const meAfter = yield* http("GET", "/me", { cookie });
+            const logout = yield* http("POST", "/api/auth/logout", { cookie });
+            const meAfter = yield* http("GET", "/api/me", { cookie });
             const meBody = yield* meAfter.json();
 
             expect(logout.status).toBe(200);
-            expect(meBody).toBeFalsy();
+            expect(meBody).toEqual({ user: null });
           }),
         );
       }),
@@ -570,7 +570,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
 
-            const login = yield* http("POST", "/login", {
+            const login = yield* http("POST", "/api/auth/login", {
               body: {
                 id: `${username}@example.com`,
                 password: "StrongPass123!",
@@ -593,7 +593,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
 
-            const login = yield* http("POST", "/login", {
+            const login = yield* http("POST", "/api/auth/login", {
               body: {
                 id: username,
                 password: "WrongPassword999!",
@@ -614,7 +614,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
           Effect.gen(function* () {
             yield* createTestUser(username, { verified: "true", password: "StrongPass123!" });
 
-            const reg = yield* http("POST", "/register", {
+            const reg = yield* http("POST", "/api/auth/register", {
               body: {
                 username,
                 email: `${username}@duplicate.test`,

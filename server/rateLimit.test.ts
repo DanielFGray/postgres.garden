@@ -125,7 +125,7 @@ const post = Effect.fnUntraced(function* (
 });
 
 const login = (ip: string) =>
-  post("/login", { id: "nobody_rate_limit", password: "not the password" }, ip);
+  post("/api/auth/login", { id: "nobody_rate_limit", password: "not the password" }, ip);
 
 const addEmail = (cookie: string, email: string, ip: string) =>
   post("/api/me/emails", { email }, ip, cookie);

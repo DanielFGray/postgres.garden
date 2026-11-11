@@ -1,5 +1,5 @@
 import * as S from "effect/Schema";
-import { SessionUser } from "../../shared/api/auth.js";
+import { SessionUser } from "../../shared/session.js";
 import { CommitDetail } from "../../shared/api/playgrounds.js";
 
 export const RouteInfoSchema = S.Struct({

@@ -3,11 +3,14 @@
  * identity a request resolves to, and the middleware that resolves it. The
  * middleware's implementation lives in `server/services/sessionMiddleware.ts`.
  */
-import { Context } from "effect";
+import { Context, Struct } from "effect";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
-import type { UserRole } from "./schemas.js";
+import { User } from "./schemas.js";
 
 export const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "session" });
+
+/** The signed-in user a session resolves to, as the page's initial state carries it. */
+export const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
 
 export type SessionInfo = {
   readonly id: string;
@@ -22,12 +25,7 @@ export type SessionInfo = {
  * fields a user row has or there is no session at all.
  */
 export type SessionData = {
-  readonly user: {
-    readonly id: string;
-    readonly username: string;
-    readonly role: typeof UserRole.Type;
-    readonly is_verified: boolean;
-  } | null;
+  readonly user: typeof SessionUser.Type | null;
   readonly session: SessionInfo | null;
 };
 

@@ -64,8 +64,8 @@ const allRoutes = groupRoutes([
  * Whether the server answers `pathname` from the API rather than from the page
  * renderer.
  *
- * The auth group has no prefix, so `/register`, `/login`, `/me` and `/logout`
- * sit beside the page routes and only the contract can tell them apart. Asking
+ * The GitHub OAuth routes, `/webhooks` and `/healthz` sit outside `/api`,
+ * beside the page routes, and only the contract can tell them apart. Asking
  * the contract means an endpoint added to a group is served the moment it is
  * declared; a hand-kept list would answer the new path with the page shell and
  * a 200, which fails nowhere.

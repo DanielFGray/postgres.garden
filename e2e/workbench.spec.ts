@@ -332,7 +332,7 @@ test.describe("workbench basics", () => {
     await settings.locator('[data-pw="account-delete-confirm-button"]').click();
     expect((await deletion).status()).toBe(200);
 
-    const deletedAccountLogin = await request.post("/login", {
+    const deletedAccountLogin = await request.post("/api/auth/login", {
       data: { id: username, password },
     });
     expect(deletedAccountLogin.status()).toBe(401);
