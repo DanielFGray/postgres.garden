@@ -20,6 +20,7 @@ type Seen = {
   readonly method: string;
   readonly url: string;
   readonly contentType: Option.Option<string>;
+  readonly traceparent: Option.Option<string>;
   readonly body: string;
 };
 
@@ -67,6 +68,7 @@ const connect = Effect.fnUntraced(function* (respond: (seen: Seen) => Response) 
             method: request.method,
             url: url.toString(),
             contentType: Option.fromNullishOr(web.headers.get("content-type")),
+            traceparent: Option.fromNullishOr(web.headers.get("traceparent")),
             body: web.body === null ? "" : yield* Effect.promise(() => web.text()),
           };
           yield* Ref.update(seen, Array.append(record));
@@ -120,6 +122,26 @@ it.effect("a GET crosses the relay and comes back decoded against the contract",
     expect(
       Option.map(Option.fromNullishOr(result.user), (user) => user.created_at instanceof Date),
     ).toStrictEqual(Option.some(true));
+  }),
+);
+
+it.effect("the server's request joins the trace of the webview call that asked for it", () =>
+  Effect.gen(function* () {
+    const { client, request } = yield* connect(() => json(userJson));
+
+    const webviewTrace = yield* Effect.gen(function* () {
+      const span = yield* Effect.currentSpan;
+      yield* client.apiCall("test", (api) => api.apiUsers.me());
+      return span.traceId;
+    }).pipe(Effect.withSpan("webview action"));
+
+    // traceparent is version-traceId-spanId-flags.
+    expect(
+      Option.map(
+        Option.flatMap(yield* request, (seen) => seen.traceparent),
+        (header) => header.split("-")[1],
+      ),
+    ).toStrictEqual(Option.some(webviewTrace));
   }),
 );
 

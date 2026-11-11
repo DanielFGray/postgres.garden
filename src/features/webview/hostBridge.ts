@@ -18,8 +18,11 @@ import { relayHttpClient, relayReply } from "./relay";
  * This is the wiring: the offline check, the real HTTP client, and the channel
  * the answer goes back on. What a relayed request is allowed to become lives in
  * `relay.ts`, which has no VSCode import and can be tested on its own.
+ *
+ * It opens no span of its own: `relayReply`'s span is the host's part of the
+ * call, and it joins the webview's trace.
  */
-export const handleRelayRequest = Effect.fn("handleRelayRequest")(function* (
+export const handleRelayRequest = Effect.fnUntraced(function* (
   post: (response: RelayResponseEncoded) => void,
   request: RelayRequest,
 ) {

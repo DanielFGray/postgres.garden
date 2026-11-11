@@ -1,7 +1,9 @@
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as Headers from "effect/http/Headers";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpTraceContext from "effect/http/HttpTraceContext";
 import { Cause, Context, Effect, Layer, Option } from "effect";
 import { webviewRelayRoutes } from "../../../shared/httpApi";
 import { RelayFailure, RelayReply, type RelayRequest } from "./relayProtocol";
@@ -48,65 +50,77 @@ const resolveRelayUrl = (path: string, method: string, origin: string) =>
   );
 
 /**
- * Makes one HTTP request on a webview's behalf and posts the raw answer back.
+ * Makes one HTTP request on a webview's behalf and returns the raw answer.
  *
  * The host adds only what the webview cannot: its own origin and the session
  * cookie. It does not read or reshape the body, because the webview's own API
  * client decodes it against the contract. Keeping the host dumb is what stops a
  * second, hand-written client growing here.
- */
-/**
- * Turns one relayed request into the reply that goes back over the wire.
  *
  * Everything the relay decides lives here, and the HTTP client comes from the
  * context, so a test can drive the whole path with a stub client instead of a
  * browser.
+ *
+ * The relay is the webview's server, so its span joins the webview's trace as
+ * a server span joins its client's: the parent comes from the request's
+ * `traceparent`. The HTTP client then sends the server this span's context in
+ * place of the webview's header, and the trace stays unbroken from the UI
+ * action to the server. `Effect.fn` cannot name the parent: its span opens
+ * outside the functions piped after the body.
  */
-export const relayReply = Effect.fn("relayReply")(function* (
-  request: RelayRequest,
-  /**
-   * Headers the host adds on the webview's behalf. A webview has its own
-   * storage and cannot see the page's, so credentials that live in the page -
-   * the playground's edit key - are added here rather than sent by the caller.
-   */
-  hostHeaders: Record<string, string>,
-) {
-  const failure = (message: string) =>
-    new RelayFailure({ type: "api-relay-failure", id: request.id, message });
+export const relayReply = Effect.fnUntraced(
+  function* (
+    request: RelayRequest,
+    /**
+     * Headers the host adds on the webview's behalf. A webview has its own
+     * storage and cannot see the page's, so credentials that live in the page -
+     * the playground's edit key - are added here rather than sent by the caller.
+     */
+    hostHeaders: Record<string, string>,
+  ) {
+    const failure = (message: string) =>
+      new RelayFailure({ type: "api-relay-failure", id: request.id, message });
 
-  const url = resolveRelayUrl(request.path, request.method, yield* RelayOrigin);
-  if (Option.isNone(url)) {
-    yield* Effect.logWarning(
-      "A webview asked the relay for a route the contract does not serve",
-    ).pipe(Effect.annotateLogs({ method: request.method, path: request.path }));
-    return failure(`${request.method} ${request.path} is not an endpoint this app serves`);
-  }
+    const url = resolveRelayUrl(request.path, request.method, yield* RelayOrigin);
+    if (Option.isNone(url)) {
+      yield* Effect.logWarning(
+        "A webview asked the relay for a route the contract does not serve",
+      ).pipe(Effect.annotateLogs({ method: request.method, path: request.path }));
+      return failure(`${request.method} ${request.path} is not an endpoint this app serves`);
+    }
 
-  return yield* Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
-    const response = yield* httpClient.execute(
-      HttpClientRequest.make(request.method)(url.value, {
-        headers: { ...request.headers, ...hostHeaders },
-        body: Option.match(request.body, {
-          onNone: () => HttpBody.empty,
-          // Setting a body overwrites content-type from the body's own
-          // metadata, so the request's type has to be handed over with it or
-          // every relayed call arrives as text/plain.
-          onSome: (text) => HttpBody.text(text, request.headers["content-type"]),
+    return yield* Effect.gen(function* () {
+      const httpClient = yield* HttpClient.HttpClient;
+      const response = yield* httpClient.execute(
+        HttpClientRequest.make(request.method)(url.value, {
+          headers: { ...request.headers, ...hostHeaders },
+          body: Option.match(request.body, {
+            onNone: () => HttpBody.empty,
+            // Setting a body overwrites content-type from the body's own
+            // metadata, so the request's type has to be handed over with it or
+            // every relayed call arrives as text/plain.
+            onSome: (text) => HttpBody.text(text, request.headers["content-type"]),
+          }),
         }),
-      }),
+      );
+      const body = yield* response.text;
+      return new RelayReply({
+        type: "api-relay-reply",
+        id: request.id,
+        status: response.status,
+        headers: response.headers,
+        body,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.succeed(failure(`Could not reach the server: ${Cause.pretty(cause)}`)),
+      ),
     );
-    const body = yield* response.text;
-    return new RelayReply({
-      type: "api-relay-reply",
-      id: request.id,
-      status: response.status,
-      headers: response.headers,
-      body,
-    });
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.succeed(failure(`Could not reach the server: ${Cause.pretty(cause)}`)),
-    ),
-  );
-});
+  },
+  (effect, request) =>
+    Effect.withSpan(effect, "relayReply", {
+      parent: Option.getOrUndefined(
+        HttpTraceContext.fromHeaders(Headers.fromInput(request.headers)),
+      ),
+    }),
+);
