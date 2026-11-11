@@ -56,30 +56,23 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
           name?: string | null;
           avatarUrl?: string | null;
         }) {
-          const user = yield* root
-            .all(
-              root.connection
-                .selectFrom(
-                  sql<AppPublicUsers>`
-                          app_private.really_create_user(
-            username => ${username}::citext,
-            email => ${email || null},
-            email_is_verified => ${verified},
-            name => ${name},
-            avatar_url => ${avatarUrl},
-            password => ${password}::text
-                          )`.as("u"),
-                )
-                .selectAll()
-                // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
-                .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-            )
-            .pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementError", () =>
-                Effect.die(new Error("really_create_user returned no rows")),
-              ),
-            );
+          const user = yield* root.one(
+            root.connection
+              .selectFrom(
+                sql<AppPublicUsers>`
+                      app_private.really_create_user(
+                      username => ${username}::citext,
+                      email => ${email || null},
+                      email_is_verified => ${verified},
+                      name => ${name},
+                      avatar_url => ${avatarUrl},
+                      password => ${password}::text
+                      )`.as("u"),
+              )
+              .selectAll()
+              // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
+              .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
+          );
 
           const { token, expiresAt } = yield* sessionService
             .createSession(user.id)

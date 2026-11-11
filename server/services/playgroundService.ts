@@ -99,30 +99,23 @@ const commitTo = (
     readonly editKeyHash?: Buffer | null;
   },
 ) =>
-  db
-    .all(
-      db.connection
-        .selectFrom(
-          // Named arguments: the function has seven parameters, six of them with
-          // defaults, so a positional call says which value is which only by
-          // counting. A commit to an existing playground names neither its
-          // privacy nor its name, which the playground already has.
-          sql<CommitResultRow>`app_public.create_playground_commit(
-          p_playground_name => ${null},
-          p_commit_message => ${commit.message},
-          p_commit_data => ${commit.data}::jsonb,
-          p_playground_hash => ${commit.hash},
-          p_edit_key_hash => ${commit.editKeyHash ?? null}::bytea
-        )`.as("result"),
-        )
-        .selectAll(),
-    )
-    .pipe(
-      Effect.head,
-      Effect.catchTag("NoSuchElementError", () =>
-        Effect.die(new Error("create_playground_commit returned no rows")),
-      ),
-    );
+  db.one(
+    db.connection
+      .selectFrom(
+        // Named arguments: the function has seven parameters, six of them with
+        // defaults, so a positional call says which value is which only by
+        // counting. A commit to an existing playground names neither its
+        // privacy nor its name, which the playground already has.
+        sql<CommitResultRow>`app_public.create_playground_commit(
+      p_playground_name => ${null},
+      p_commit_message => ${commit.message},
+      p_commit_data => ${commit.data}::jsonb,
+      p_playground_hash => ${commit.hash},
+      p_edit_key_hash => ${commit.editKeyHash ?? null}::bytea
+    )`.as("result"),
+      )
+      .selectAll(),
+  );
 
 /**
  * Copy a playground into a new one the caller owns, whose first commit holds
@@ -132,25 +125,18 @@ const forkFrom = (
   db: DbHandle<PublicDB>,
   source: { readonly hash: string; readonly name: string | null },
 ) =>
-  db
-    .all(
-      db.connection
-        .selectFrom((eb) =>
-          eb
-            .fn<CommitResultRow>("app_public.fork_playground", [
-              eb.val(source.hash),
-              eb.val(source.name),
-            ])
-            .as("result"),
-        )
-        .selectAll(),
-    )
-    .pipe(
-      Effect.head,
-      Effect.catchTag("NoSuchElementError", () =>
-        Effect.die(new Error("fork_playground returned no rows")),
-      ),
-    );
+  db.one(
+    db.connection
+      .selectFrom((eb) =>
+        eb
+          .fn<CommitResultRow>("app_public.fork_playground", [
+            eb.val(source.hash),
+            eb.val(source.name),
+          ])
+          .as("result"),
+      )
+      .selectAll(),
+  );
 
 /**
  * @effect-expect-leaking CurrentSession
@@ -316,56 +302,42 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
 
         const { result, expires_at } = yield* RequestDatabase.use((db) =>
           Effect.gen(function* () {
-            const result = yield* db
-              .all(
-                db.connection
-                  .selectFrom(
-                    sql<{
-                      commit_id: string;
-                      playground_hash: string;
-                      parent_id: string | null;
-                      message: string;
-                      created_at: Date;
-                      // `p_privacy` is the privacy the caller asked for; NULL
-                      // means it asked for none and the function keeps its
-                      // default. Entitlement is the database's call: the
-                      // _200_privacy_entitlement trigger refuses 'private' for an
-                      // anonymous or non-sponsor author, and that reaches the
-                      // client as a 400 carrying the trigger's own message.
-                    }>`app_public.create_playground_commit(
-                p_playground_name => ${body.name ?? null},
-                p_commit_message => ${body.message},
-                p_commit_data => ${commitData}::jsonb,
-                p_playground_description => ${body.description ?? null},
-                p_privacy => ${body.privacy ?? null}::app_public.privacy,
-                p_edit_key_hash => ${editKeyHash}::bytea
-              )`.as("result"),
-                  )
-                  .selectAll(),
-              )
-              .pipe(
-                Effect.head,
-                Effect.catchTag("NoSuchElementError", () =>
-                  Effect.die(new Error("create_playground_commit returned no rows")),
-                ),
-              );
+            const result = yield* db.one(
+              db.connection
+                .selectFrom(
+                  sql<{
+                    commit_id: string;
+                    playground_hash: string;
+                    parent_id: string | null;
+                    message: string;
+                    created_at: Date;
+                    // `p_privacy` is the privacy the caller asked for; NULL
+                    // means it asked for none and the function keeps its
+                    // default. Entitlement is the database's call: the
+                    // _200_privacy_entitlement trigger refuses 'private' for an
+                    // anonymous or non-sponsor author, and that reaches the
+                    // client as a 400 carrying the trigger's own message.
+                  }>`app_public.create_playground_commit(
+            p_playground_name => ${body.name ?? null},
+            p_commit_message => ${body.message},
+            p_commit_data => ${commitData}::jsonb,
+            p_playground_description => ${body.description ?? null},
+            p_privacy => ${body.privacy ?? null}::app_public.privacy,
+            p_edit_key_hash => ${editKeyHash}::bytea
+                          )`.as("result"),
+                )
+                .selectAll(),
+            );
 
             // An unclaimed playground is pruned, so the author has to be told
             // when the link stops working. The row is the only place that date
             // exists: the retention it is calculated from depends on the size.
-            const row = yield* db
-              .all(
-                db.connection
-                  .selectFrom("app_public.playgrounds")
-                  .select("expires_at")
-                  .where("hash", "=", result.playground_hash),
-              )
-              .pipe(
-                Effect.head,
-                Effect.catchTag("NoSuchElementError", () =>
-                  Effect.die(new Error("the playground just created cannot be read back")),
-                ),
-              );
+            const row = yield* db.one(
+              db.connection
+                .selectFrom("app_public.playgrounds")
+                .select("expires_at")
+                .where("hash", "=", result.playground_hash),
+            );
 
             return { result, expires_at: row.expires_at };
           }),
@@ -385,37 +357,30 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
 
         return yield* RequestDatabase.use((db) =>
-          db
-            .all(
-              db.connection
-                .selectFrom(
-                  sql<
-                    Selectable<AppPublicPlaygrounds>
-                  >`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
-                )
-                // The columns the contract answers with. The function returns the
-                // whole row, and the row holds the digest of the key that was
-                // just spent: naming the columns keeps it on this side.
-                .select([
-                  "hash",
-                  "head_commit_id",
-                  "user_id",
-                  "fork_hash",
-                  "privacy",
-                  "created_at",
-                  "updated_at",
-                  "name",
-                  "description",
-                  "data_size",
-                  "expires_at",
-                ]),
-            )
-            .pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementError", () =>
-                Effect.die(new Error("claim_playground returned no rows")),
-              ),
-            ),
+          db.one(
+            db.connection
+              .selectFrom(
+                sql<
+                  Selectable<AppPublicPlaygrounds>
+                >`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
+              )
+              // The columns the contract answers with. The function returns the
+              // whole row, and the row holds the digest of the key that was
+              // just spent: naming the columns keeps it on this side.
+              .select([
+                "hash",
+                "head_commit_id",
+                "user_id",
+                "fork_hash",
+                "privacy",
+                "created_at",
+                "updated_at",
+                "name",
+                "description",
+                "data_size",
+                "expires_at",
+              ]),
+          ),
         );
       }),
 
