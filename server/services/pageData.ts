@@ -3,7 +3,9 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { PageState } from "../../src/shared/dehydrate.js";
 import { parseRoute, type RouteInfo } from "../../src/shared/routes.js";
 import { Commit, User } from "../../src/shared/schemas.js";
-import { visitorQuerier, withRequestTransaction } from "../db.js";
+import { RequestDatabase, withAuthContext } from "../requestDatabase.js";
+import { PgAuthDB } from "../db.js";
+import { CurrentSession } from "../../shared/session.js";
 import { injectInitialData } from "../initialData.js";
 import { SessionService, sessionCookieName } from "./sessionService.js";
 
@@ -23,43 +25,54 @@ import { SessionService, sessionCookieName } from "./sessionService.js";
 export class PageData extends Context.Service<PageData>()("PageData", {
   make: Effect.gen(function* () {
     const sessions = yield* SessionService;
-    const asVisitor = yield* visitorQuerier;
+    const auth = yield* PgAuthDB;
 
     /** The commit a playground names as its head, or `null` if it has none. */
-    const headCommit = (playgroundHash: string, sessionId: string | undefined) =>
-      asVisitor(sessionId, (db) =>
-        db
-          .selectFrom("app_public.playground_commits as c")
-          .innerJoin("app_public.playgrounds as p", "p.head_commit_id", "c.id")
-          .select([
-            "c.id",
-            "c.message",
-            "c.data",
-            "c.created_at",
-            "c.playground_hash",
-            "c.parent_id",
-          ])
-          .where("p.hash", "=", playgroundHash),
+    const headCommit = (playgroundHash: string) =>
+      RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.playground_commits as c")
+            .innerJoin("app_public.playgrounds as p", "p.head_commit_id", "c.id")
+            .select([
+              "c.id",
+              "c.message",
+              "c.data",
+              "c.created_at",
+              "c.playground_hash",
+              "c.parent_id",
+            ])
+            .where("p.hash", "=", playgroundHash),
+        ),
       ).pipe(Effect.flatMap(firstCommit));
 
     /** One named commit of a playground, or `null` if it is not there. */
-    const commit = (playgroundHash: string, commitId: string, sessionId: string | undefined) =>
-      asVisitor(sessionId, (db) =>
-        db
-          .selectFrom("app_public.playground_commits")
-          .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
-          .where("playground_hash", "=", playgroundHash)
-          .where("id", "=", commitId),
+    const commit = (playgroundHash: string, commitId: string) =>
+      RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.playground_commits")
+            .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
+            .where("playground_hash", "=", playgroundHash)
+            .where("id", "=", commitId),
+        ),
       ).pipe(Effect.flatMap(firstCommit));
 
-    /** The commit the route names, or `null` when the route names none. */
-    const routeCommit = (route: RouteInfo | null, sessionId: string | undefined) => {
+    /** Runs `read` as the visitor of `CurrentSession`, on the pool this service resolved. */
+    const visitorRead = <A, E, R>(read: Effect.Effect<A, E, R>) =>
+      withAuthContext(read).pipe(Effect.provideService(PgAuthDB, auth));
+
+    /**
+     * The commit the route names, or `null` when the route names none. Only a
+     * route that names a commit opens a visitor transaction.
+     */
+    const routeCommit = (route: RouteInfo | null) => {
       if (!route) return Effect.succeed(null);
       if (route.type === "commit" && route.commitId && route.playgroundHash) {
-        return commit(route.playgroundHash, route.commitId, sessionId);
+        return visitorRead(commit(route.playgroundHash, route.commitId));
       }
       if (route.type === "playground" && route.playgroundHash) {
-        return headCommit(route.playgroundHash, sessionId);
+        return visitorRead(headCommit(route.playgroundHash));
       }
       return Effect.succeed(null);
     };
@@ -78,7 +91,8 @@ export class PageData extends Context.Service<PageData>()("PageData", {
             })
           : null;
 
-        const commit = yield* routeCommit(route, sessionResult.session?.id).pipe(
+        const commit = yield* routeCommit(route).pipe(
+          Effect.provideService(CurrentSession, sessionResult),
           // The page renders without the commit rather than answering an error:
           // the workbench boots either way and asks for the playground itself, so
           // a failure here costs a round trip instead of the whole page. What it
@@ -103,7 +117,6 @@ export class PageData extends Context.Service<PageData>()("PageData", {
         Effect.orElseSucceed(
           () => ({ user: null, commit: null, route: parseRoute(pathname) }) satisfies PageState,
         ),
-        withRequestTransaction,
       );
 
     /** `html` with the initial state of the request in progress. */

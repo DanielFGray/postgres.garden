@@ -3,6 +3,7 @@ import { Effect, Layer, Random } from "effect";
 import { sql } from "kysely";
 import { DatabaseLive, unwrapPgError, PgRootDB, type DbHandle } from "../db.js";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
+import { withAuthContext } from "../requestDatabase.js";
 import { PlaygroundService } from "./playgroundService.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { SessionService } from "./sessionService.js";
@@ -138,7 +139,7 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
           const row = rows.find((candidate) => candidate.hash === hash);
           expect(row).toBeDefined();
           expect(row?.user).toBeNull();
-        }).pipe(Effect.provideService(CurrentSession, anonymousSession)),
+        }).pipe(withAuthContext, Effect.provideService(CurrentSession, anonymousSession)),
         PgRootDB.use((rootDb) =>
           rootDb.all(
             rootDb.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash),
@@ -283,4 +284,4 @@ const listAll = (
       search: fixtureHashes(search, fixtures),
       profile: fixtureHashes(profile, fixtures),
     };
-  }).pipe(Effect.provideService(CurrentSession, session));
+  }).pipe(withAuthContext, Effect.provideService(CurrentSession, session));

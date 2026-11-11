@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { type Selectable, sql } from "kysely";
-import { PgRootDB, sessionQuerier } from "../db.js";
+import { PgRootDB } from "../db.js";
+import { RequestDatabase } from "../requestDatabase.js";
 import type { AppPublicUserEmails as UserEmail } from "../../generated/db.js";
 
 export interface UpdateProfileInput {
@@ -12,16 +13,17 @@ export interface UpdateProfileInput {
 
 export class UserService extends Context.Service<UserService>()("UserService", {
   make: Effect.gen(function* () {
-    const asVisitor = yield* sessionQuerier;
     const root = yield* PgRootDB;
     return {
       requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
         if (!token) {
-          return yield* asVisitor((authDb) =>
-            authDb.selectNoFrom((eb) =>
-              eb
-                .fn<boolean>("app_public.request_account_deletion", [])
-                .as("request_account_deletion"),
+          return yield* RequestDatabase.use((db) =>
+            db.all(
+              db.connection.selectNoFrom((eb) =>
+                eb
+                  .fn<boolean>("app_public.request_account_deletion", [])
+                  .as("request_account_deletion"),
+              ),
             ),
           ).pipe(
             Effect.head,
@@ -29,11 +31,13 @@ export class UserService extends Context.Service<UserService>()("UserService", {
           );
         }
 
-        return yield* asVisitor((authDb) =>
-          authDb.selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.confirm_account_deletion", [eb.val(token)])
-              .as("confirm_account_deletion"),
+        return yield* RequestDatabase.use((db) =>
+          db.all(
+            db.connection.selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.confirm_account_deletion", [eb.val(token)])
+                .as("confirm_account_deletion"),
+            ),
           ),
         ).pipe(
           Effect.head,
@@ -41,67 +45,86 @@ export class UserService extends Context.Service<UserService>()("UserService", {
         );
       }),
 
-      getProfile: asVisitor((authDb) =>
-        authDb
-          .selectFrom("app_public.users")
-          .selectAll()
-          .where("id", "=", sql<string>`app_public.current_user_id()`),
+      getProfile: RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.users")
+            .selectAll()
+            .where("id", "=", sql<string>`app_public.current_user_id()`),
+        ),
       ).pipe(
         Effect.head,
         Effect.catchTag("NoSuchElementError", () => Effect.succeed(null)),
       ),
 
       updateProfile: (input: UpdateProfileInput) =>
-        asVisitor((authDb) =>
-          authDb
-            .updateTable("app_public.users")
-            .where("id", "=", sql<string>`app_public.current_user_id()`)
-            .$if(input.username !== undefined, (q) => q.set("username", input.username!))
-            .$if(input.name !== undefined, (q) => q.set("name", input.name!))
-            .$if(input.bio !== undefined, (q) => q.set("bio", input.bio!))
-            .$if(input.avatar_url !== undefined, (q) => q.set("avatar_url", input.avatar_url!))
-            .returningAll(),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .updateTable("app_public.users")
+              .where("id", "=", sql<string>`app_public.current_user_id()`)
+              .$if(input.username !== undefined, (q) => q.set("username", input.username!))
+              .$if(input.name !== undefined, (q) => q.set("name", input.name!))
+              .$if(input.bio !== undefined, (q) => q.set("bio", input.bio!))
+              .$if(input.avatar_url !== undefined, (q) => q.set("avatar_url", input.avatar_url!))
+              .returningAll(),
+          ),
         ).pipe(Effect.head),
 
-      listEmails: asVisitor((authDb) =>
-        authDb
-          .selectFrom("app_public.user_emails")
-          .selectAll()
-          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-          .orderBy("is_primary", "desc")
-          .orderBy("created_at", "asc"),
+      listEmails: RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.user_emails")
+            .selectAll()
+            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+            .orderBy("is_primary", "desc")
+            .orderBy("created_at", "asc"),
+        ),
       ),
 
       addEmail: (email: string) =>
-        asVisitor((authDb) =>
-          authDb.insertInto("app_public.user_emails").values({ email }).returningAll(),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection.insertInto("app_public.user_emails").values({ email }).returningAll(),
+          ),
         ).pipe(Effect.head),
 
       deleteEmail: (id: string) =>
-        asVisitor((authDb) =>
-          authDb.deleteFrom("app_public.user_emails").where("id", "=", id).returningAll(),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection.deleteFrom("app_public.user_emails").where("id", "=", id).returningAll(),
+          ),
         ).pipe(Effect.head),
 
-      listAuthentications: asVisitor((authDb) =>
-        authDb
-          .selectFrom("app_public.user_authentications")
-          .select(["id", "service", "identifier", "created_at"])
-          .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-          .orderBy("created_at", "asc"),
+      listAuthentications: RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.user_authentications")
+            .select(["id", "service", "identifier", "created_at"])
+            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+            .orderBy("created_at", "asc"),
+        ),
       ),
 
       unlinkAuthentication: (id: string) =>
-        asVisitor((authDb) =>
-          authDb.deleteFrom("app_public.user_authentications").where("id", "=", id).returningAll(),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .deleteFrom("app_public.user_authentications")
+              .where("id", "=", id)
+              .returningAll(),
+          ),
         ).pipe(Effect.head),
 
-      hasPassword: asVisitor((authDb) =>
-        authDb
-          .selectFrom("app_public.users as u")
-          .select((eb) => [
-            eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
-          ])
-          .where("u.id", "=", sql<string>`app_public.current_user_id()`),
+      hasPassword: RequestDatabase.use((db) =>
+        db.all(
+          db.connection
+            .selectFrom("app_public.users as u")
+            .select((eb) => [
+              eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
+            ])
+            .where("u.id", "=", sql<string>`app_public.current_user_id()`),
+        ),
       ).pipe(Effect.head),
 
       forgotPassword: (email: string) =>
@@ -134,11 +157,16 @@ export class UserService extends Context.Service<UserService>()("UserService", {
           ),
 
       changePassword: (oldPassword: string, newPassword: string) =>
-        asVisitor((authDb) =>
-          authDb.selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.change_password", [eb.val(oldPassword), eb.val(newPassword)])
-              .as("change_password"),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection.selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.change_password", [
+                  eb.val(oldPassword),
+                  eb.val(newPassword),
+                ])
+                .as("change_password"),
+            ),
           ),
         ).pipe(
           Effect.head,
@@ -160,14 +188,18 @@ export class UserService extends Context.Service<UserService>()("UserService", {
           ),
 
       makeEmailPrimary: (emailId: string) =>
-        asVisitor((authDb) =>
-          authDb
-            .selectFrom((eb) =>
-              eb
-                .fn<Selectable<UserEmail>>("app_public.make_email_primary", [sql`${emailId}::uuid`])
-                .as("make_email_primary"),
-            )
-            .selectAll(),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .selectFrom((eb) =>
+                eb
+                  .fn<Selectable<UserEmail>>("app_public.make_email_primary", [
+                    sql`${emailId}::uuid`,
+                  ])
+                  .as("make_email_primary"),
+              )
+              .selectAll(),
+          ),
         ).pipe(
           Effect.head,
           Effect.catchTag("NoSuchElementError", () =>
@@ -176,11 +208,13 @@ export class UserService extends Context.Service<UserService>()("UserService", {
         ),
 
       resendEmailVerificationCode: (emailId: string) =>
-        asVisitor((authDb) =>
-          authDb.selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.resend_email_verification_code", [sql`${emailId}::uuid`])
-              .as("resend_email_verification_code"),
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection.selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.resend_email_verification_code", [sql`${emailId}::uuid`])
+                .as("resend_email_verification_code"),
+            ),
           ),
         ).pipe(
           Effect.head,

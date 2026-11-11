@@ -16,7 +16,7 @@
 
 ### Server (`server/`)
 
-Bun + Effect Platform backend. The HTTP contract is `shared/httpApi.ts`, one group per file in `shared/api/`; each group's handlers are in `server/api/<group>.ts`. Feature logic and state live in `Context.Service` classes in `server/services/`, each with `make` and a static `layer`. `server/runtime.ts` holds the one layer graph (`AppLayer`, `ServerLive`); `server/index.ts` adds only the Valkey client and the platform. Kysely for DB queries: a service yields `sessionQuerier` (the caller's session, for RLS) or `rootQuerier` from `server/db.ts` in its `make`.
+Bun + Effect Platform backend. The HTTP contract is `shared/httpApi.ts`, one group per file in `shared/api/`; each group's handlers are in `server/api/<group>.ts`. Feature logic and state live in `Context.Service` classes in `server/services/`, each with `make` and a static `layer`. `server/runtime.ts` holds the one layer graph (`AppLayer`, `ServerLive`); `server/index.ts` adds only the Valkey client and the platform. Kysely for DB queries: a service method that queries as the visitor yields `RequestDatabase` (`server/requestDatabase.ts`), and its handler pipes the call through `withAuthContext`, which opens the request's transaction with the visitor role and session for RLS; owner-role work yields `PgRootDB` from `server/db.ts` in `make`.
 
 ### Client (`src/`)
 

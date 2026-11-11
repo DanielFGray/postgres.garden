@@ -9,7 +9,8 @@
 
 import { Effect, Logger, Random } from "effect";
 import { sql } from "kysely";
-import { type DbHandle } from "./db.js";
+import { type DbHandle, type PublicDB } from "./db.js";
+import { RequestDatabase, withAuthContext } from "./requestDatabase.js";
 
 /** Unique enough to keep concurrent test rows apart. */
 export const randomSuffix = Random.nextIntBetween(0, 0xffffffff).pipe(
@@ -32,6 +33,13 @@ export const createUser = (db: DbHandle, username: string) =>
         .selectAll(),
     )
     .pipe(Effect.head);
+
+/**
+ * Runs `use` as the visitor of the `CurrentSession` the caller provides, in one
+ * transaction, the way a handler runs a service call.
+ */
+export const asVisitor = <A, E, R>(use: (db: DbHandle<PublicDB>) => Effect.Effect<A, E, R>) =>
+  withAuthContext(RequestDatabase.use(use));
 
 /** Removes the user and everything that cascades from it. */
 export const deleteUser = (db: DbHandle, userId: string) =>

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
 import { withDbError, withDbErrorOrMissing, requireSession } from "./http.js";
+import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
 import { UserService } from "../services/userService.js";
 
@@ -15,7 +16,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           if (!session) return { user: null };
           const profile = yield* withDbError(
             "Failed to fetch profile",
-            users.getProfile,
+            users.getProfile.pipe(withAuthContext),
             request.headers,
           );
           return { user: profile };
@@ -25,7 +26,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.deleteMe", request.headers);
           const success = yield* withDbError(
             "Account deletion failed",
-            users.requestAccountDeletion(query.token),
+            users.requestAccountDeletion(query.token).pipe(withAuthContext),
             request.headers,
           );
           return { success };
@@ -35,7 +36,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.patchMe", request.headers);
           return yield* withDbErrorOrMissing(
             "Failed to update profile",
-            users.updateProfile(payload),
+            users.updateProfile(payload).pipe(withAuthContext),
             "User not found",
             request.headers,
           );
@@ -43,14 +44,18 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
       meEmails: ({ request }) =>
         Effect.gen(function* () {
           yield* requireSession("apiUsers.meEmails", request.headers);
-          return yield* withDbError("Failed to fetch emails", users.listEmails, request.headers);
+          return yield* withDbError(
+            "Failed to fetch emails",
+            users.listEmails.pipe(withAuthContext),
+            request.headers,
+          );
         }),
       createMeEmail: ({ payload, request }) =>
         Effect.gen(function* () {
           yield* requireSession("apiUsers.createMeEmail", request.headers);
           return yield* withDbError(
             "Failed to add email",
-            users.addEmail(payload.email),
+            users.addEmail(payload.email).pipe(withAuthContext),
             request.headers,
           );
         }),
@@ -59,7 +64,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.deleteMeEmail", request.headers);
           return yield* withDbErrorOrMissing(
             "Failed to delete email",
-            users.deleteEmail(params.id),
+            users.deleteEmail(params.id).pipe(withAuthContext),
             "Email not found",
             request.headers,
           );
@@ -69,7 +74,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.meAuthentications", request.headers);
           return yield* withDbError(
             "Failed to fetch authentications",
-            users.listAuthentications,
+            users.listAuthentications.pipe(withAuthContext),
             request.headers,
           );
         }),
@@ -78,7 +83,10 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.deleteMeAuthentication", request.headers);
           return yield* withDbErrorOrMissing(
             "Failed to delete authentication",
-            users.unlinkAuthentication(params.id).pipe(Effect.map((result) => ({ id: result.id }))),
+            users.unlinkAuthentication(params.id).pipe(
+              Effect.map((result) => ({ id: result.id })),
+              withAuthContext,
+            ),
             "Authentication not found",
             request.headers,
           );
@@ -88,7 +96,10 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.meHasPassword", request.headers);
           return yield* withDbErrorOrMissing(
             "Failed to check password",
-            users.hasPassword.pipe(Effect.map((result) => ({ has_password: result.has_password }))),
+            users.hasPassword.pipe(
+              Effect.map((result) => ({ has_password: result.has_password })),
+              withAuthContext,
+            ),
             "User not found",
             request.headers,
           );
@@ -110,7 +121,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.changePassword", request.headers);
           return yield* withDbError(
             "Failed to change password",
-            users.changePassword(payload.oldPassword, payload.newPassword),
+            users.changePassword(payload.oldPassword, payload.newPassword).pipe(withAuthContext),
             request.headers,
           );
         }),
@@ -125,7 +136,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.makeEmailPrimary", request.headers);
           return yield* withDbError(
             "Failed to update primary email",
-            users.makeEmailPrimary(payload.emailId),
+            users.makeEmailPrimary(payload.emailId).pipe(withAuthContext),
             request.headers,
           );
         }),
@@ -134,7 +145,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           yield* requireSession("apiUsers.resendEmailVerificationCode", request.headers);
           return yield* withDbError(
             "Failed to resend verification",
-            users.resendEmailVerificationCode(payload.emailId),
+            users.resendEmailVerificationCode(payload.emailId).pipe(withAuthContext),
             request.headers,
           );
         }),

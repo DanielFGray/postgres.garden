@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
 import { withDbError, withDbErrorOrMissing, editKeyFrom, requireSession } from "./http.js";
+import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
 import { PlaygroundService } from "../services/playgroundService.js";
 
@@ -15,11 +16,15 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
         userPlaygrounds: ({ params, query, request }) =>
           withDbError(
             "Failed to list user playgrounds",
-            playgrounds.listForUser(params.username, query),
+            playgrounds.listForUser(params.username, query).pipe(withAuthContext),
             request.headers,
           ),
         playgrounds: ({ query, request }) =>
-          withDbError("Failed to list playgrounds", playgrounds.list(query), request.headers),
+          withDbError(
+            "Failed to list playgrounds",
+            playgrounds.list(query).pipe(withAuthContext),
+            request.headers,
+          ),
         // A caller with no account may start a playground. The answer then carries
         // the key that holds it, which is the only time the server has it in a form
         // anyone can read.
@@ -36,6 +41,7 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
                 edit_key: result.edit_key,
                 expires_at: result.expires_at,
               })),
+              withAuthContext,
             ),
             request.headers,
           ),
@@ -43,7 +49,7 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
           withDbErrorOrMissing(
             "Failed to fetch playground",
             Effect.gen(function* () {
-              const pg = yield* playgrounds.getByHash(params.hash);
+              const pg = yield* playgrounds.getByHash(params.hash).pipe(withAuthContext);
               return {
                 ...pg,
                 user: pg.user?.username ? { username: pg.user.username } : null,
@@ -57,7 +63,7 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             yield* requireSession("apiPlaygrounds.forkPlayground", request.headers);
             return yield* withDbError(
               "Failed to fork playground",
-              playgrounds.fork(params.hash, payload.name),
+              playgrounds.fork(params.hash, payload.name).pipe(withAuthContext),
               request.headers,
             );
           }),
@@ -72,7 +78,9 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
         updatePlayground: ({ params, payload, request }) =>
           withDbErrorOrMissing(
             "Failed to update playground",
-            playgrounds.update(params.hash, payload, editKeyFrom(request.headers)),
+            playgrounds
+              .update(params.hash, payload, editKeyFrom(request.headers))
+              .pipe(withAuthContext),
             "Playground not found",
             request.headers,
           ),
@@ -84,12 +92,9 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             const { user } = yield* CurrentSession;
             return yield* withDbErrorOrMissing(
               "Failed to create commit",
-              playgrounds.createCommit(
-                user?.id ?? null,
-                params.hash,
-                payload,
-                editKeyFrom(request.headers),
-              ),
+              playgrounds
+                .createCommit(user?.id ?? null, params.hash, payload, editKeyFrom(request.headers))
+                .pipe(withAuthContext),
               "Playground not found",
               request.headers,
             );
@@ -99,33 +104,35 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             yield* requireSession("apiPlaygrounds.claimPlayground", request.headers);
             return yield* withDbError(
               "Failed to claim playground",
-              playgrounds.claim(params.hash, editKeyFrom(request.headers)),
+              playgrounds.claim(params.hash, editKeyFrom(request.headers)).pipe(withAuthContext),
               request.headers,
             );
           }),
         listCommits: ({ params, request }) =>
           withDbError(
             "Failed to fetch playground commits",
-            playgrounds.listCommits(params.hash),
+            playgrounds.listCommits(params.hash).pipe(withAuthContext),
             request.headers,
           ),
         getCommit: ({ params, request }) =>
           withDbErrorOrMissing(
             "Failed to fetch commit",
-            playgrounds.getCommit(params.hash, params.commit_id),
+            playgrounds.getCommit(params.hash, params.commit_id).pipe(withAuthContext),
             "Commit not found",
             request.headers,
           ),
         getCommitHistory: ({ params, query, request }) =>
           withDbError(
             "Failed to fetch commit history",
-            playgrounds.getCommitHistory(params.hash, params.commit_id, query.limit),
+            playgrounds
+              .getCommitHistory(params.hash, params.commit_id, query.limit)
+              .pipe(withAuthContext),
             request.headers,
           ),
         getCommitDiff: ({ params, request }) =>
           withDbErrorOrMissing(
             "Failed to generate diff",
-            playgrounds.getCommitDiff(params.hash, params.commit_id),
+            playgrounds.getCommitDiff(params.hash, params.commit_id).pipe(withAuthContext),
             "Commit not found",
             request.headers,
           ),
@@ -134,7 +141,7 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             yield* requireSession("apiPlaygrounds.togglePlaygroundStar", request.headers);
             return yield* withDbError(
               "Failed to toggle star",
-              playgrounds.toggleStar(params.hash),
+              playgrounds.toggleStar(params.hash).pipe(withAuthContext),
               request.headers,
             );
           }),
@@ -143,9 +150,10 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             yield* requireSession("apiPlaygrounds.deletePlayground", request.headers);
             return yield* withDbErrorOrMissing(
               "Failed to delete playground",
-              playgrounds
-                .deletePlayground(params.hash)
-                .pipe(Effect.map((result) => ({ hash: result.hash }))),
+              playgrounds.deletePlayground(params.hash).pipe(
+                Effect.map((result) => ({ hash: result.hash })),
+                withAuthContext,
+              ),
               "Playground not found",
               request.headers,
             );
@@ -153,7 +161,7 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
         searchPlaygrounds: ({ query, request }) =>
           withDbError(
             "Failed to search playgrounds",
-            playgrounds.search(query.q ?? "", query.limit, query.offset),
+            playgrounds.search(query.q ?? "", query.limit, query.offset).pipe(withAuthContext),
             request.headers,
           ),
       });

@@ -6,6 +6,8 @@ import { randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { SessionService } from "./sessionService.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { PageData } from "./pageData.js";
+import { withAuthContext } from "../requestDatabase.js";
+import { CurrentSession } from "../../shared/session.js";
 
 /**
  * One fixed instant for every seeded commit, so a test that needs two commits
@@ -83,7 +85,11 @@ const dropPlayground = (db: DbHandle, hash: string) =>
     );
 
 /** Nobody is signed in: these playgrounds are public, so RLS lets them through. */
-const headCommit = (hash: string) => PageData.use((pages) => pages.headCommit(hash, undefined));
+const headCommit = (hash: string) =>
+  PageData.use((pages) => pages.headCommit(hash)).pipe(
+    withAuthContext,
+    Effect.provideService(CurrentSession, { user: null, session: null }),
+  );
 
 /**
  * Seeds a public playground, runs `use` with its hash, and removes it again.

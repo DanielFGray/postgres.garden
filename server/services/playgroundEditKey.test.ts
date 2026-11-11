@@ -13,18 +13,17 @@ import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import {
-  asVisitor,
   DatabaseLive,
   type DatabaseError,
-  runQuery,
   unwrapPgError,
-  type KyselyDB,
   PgRootDB,
   type DbHandle,
+  type PublicDB,
 } from "../db.js";
 import { Secrets } from "../secrets.js";
 import { PlaygroundService } from "./playgroundService.js";
-import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { withAuthContext } from "../requestDatabase.js";
+import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
 
 /** One row of `app_public.playground_commit_result`. */
 interface CommitResultRow {
@@ -45,7 +44,7 @@ const commitData = (content: string) => JSON.stringify({ files: [{ path: "a.sql"
  * one, with the digest of the caller's key when it has no account.
  */
 const save = (
-  db: KyselyDB,
+  db: DbHandle<PublicDB>,
   values: {
     name?: string | null;
     message: string;
@@ -54,49 +53,53 @@ const save = (
     editKeyHash?: Buffer | null;
   },
 ) =>
-  runQuery(
-    db
-      .selectFrom(
-        sql<CommitResultRow>`app_public.create_playground_commit(
+  db
+    .all(
+      db.connection
+        .selectFrom(
+          sql<CommitResultRow>`app_public.create_playground_commit(
           p_playground_name => ${values.name ?? null},
           p_commit_message => ${values.message},
           p_commit_data => ${commitData(values.content)}::jsonb,
           p_playground_hash => ${values.hash ?? null},
           p_edit_key_hash => ${values.editKeyHash ?? null}::bytea
         )`.as("result"),
-      )
-      .selectAll(),
-  ).pipe(
-    Effect.head,
-    // A function that answers with no rows did not fail, it misbehaved: this one
-    // either returns a row or raises. Dying keeps the error channel to what the
-    // database actually refuses.
-    Effect.catchTag("NoSuchElementError", () =>
-      Effect.die(new Error("create_playground_commit returned no rows")),
-    ),
-  );
+        )
+        .selectAll(),
+    )
+    .pipe(
+      Effect.head,
+      // A function that answers with no rows did not fail, it misbehaved: this one
+      // either returns a row or raises. Dying keeps the error channel to what the
+      // database actually refuses.
+      Effect.catchTag("NoSuchElementError", () =>
+        Effect.die(new Error("create_playground_commit returned no rows")),
+      ),
+    );
 
-const claim = (db: KyselyDB, hash: string, editKeyHash: Buffer) =>
-  runQuery(
-    db
-      .selectFrom(
-        sql<{
-          hash: string;
-          user_id: string | null;
-          edit_key_hash: Buffer | null;
-          expires_at: Date | null;
-        }>`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
-      )
-      .selectAll(),
-  ).pipe(
-    Effect.head,
-    // A function that answers with no rows did not fail, it misbehaved: this one
-    // either returns a row or raises. Dying keeps the error channel to what the
-    // database actually refuses.
-    Effect.catchTag("NoSuchElementError", () =>
-      Effect.die(new Error("claim_playground returned no rows")),
-    ),
-  );
+const claim = (db: DbHandle<PublicDB>, hash: string, editKeyHash: Buffer) =>
+  db
+    .all(
+      db.connection
+        .selectFrom(
+          sql<{
+            hash: string;
+            user_id: string | null;
+            edit_key_hash: Buffer | null;
+            expires_at: Date | null;
+          }>`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
+        )
+        .selectAll(),
+    )
+    .pipe(
+      Effect.head,
+      // A function that answers with no rows did not fail, it misbehaved: this one
+      // either returns a row or raises. Dying keeps the error channel to what the
+      // database actually refuses.
+      Effect.catchTag("NoSuchElementError", () =>
+        Effect.die(new Error("claim_playground returned no rows")),
+      ),
+    );
 
 /**
  * What the update handler calls: a metadata change proved by the caller's key.
@@ -104,23 +107,25 @@ const claim = (db: KyselyDB, hash: string, editKeyHash: Buffer) =>
  * alone and one sent as null is cleared.
  */
 const updateMetadata = (
-  db: KyselyDB,
+  db: DbHandle<PublicDB>,
   hash: string,
   patch: Record<string, string | null>,
   editKeyHash: Buffer | null,
 ) =>
-  runQuery(
-    db
-      .selectFrom(
-        sql<{ hash: string; name: string | null; description: string | null; privacy: string }>`
+  db
+    .all(
+      db.connection
+        .selectFrom(
+          sql<{ hash: string; name: string | null; description: string | null; privacy: string }>`
           app_public.update_playground(
             ${hash},
             ${JSON.stringify(patch)}::jsonb,
             ${editKeyHash}::bytea
           )`.as("updated"),
-      )
-      .select(["hash", "name", "description", "privacy"]),
-  ).pipe(Effect.head);
+        )
+        .select(["hash", "name", "description", "privacy"]),
+    )
+    .pipe(Effect.head);
 
 const readPlayground = (db: DbHandle, hash: string) =>
   db
@@ -494,7 +499,7 @@ layer(
           message: "first",
           files: [{ path: "a.sql", content: "select 1" }],
         }),
-      ).pipe(anonymous);
+      ).pipe(withAuthContext, anonymous);
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
@@ -509,7 +514,7 @@ layer(
               { message: "second", files: [{ path: "a.sql", content: "select 2" }] },
               created.edit_key,
             ),
-          ).pipe(anonymous);
+          ).pipe(withAuthContext, anonymous);
 
           expect(second.playground_hash).toBe(created.playground_hash);
           expect(second.forked).toBe(false);
@@ -524,6 +529,7 @@ layer(
               null,
             ),
           ).pipe(
+            withAuthContext,
             anonymous,
             Effect.flip,
             // The save fails on the database refusing it. Any other failure
@@ -554,7 +560,7 @@ layer(
           message: "first",
           files: [{ path: "a.sql", content: "select 1" }],
         }),
-      ).pipe(anonymous);
+      ).pipe(withAuthContext, anonymous);
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
@@ -571,6 +577,7 @@ layer(
           const claimed = yield* PlaygroundService.use((service) =>
             service.claim(created.playground_hash, created.edit_key ?? ""),
           ).pipe(
+            withAuthContext,
             Effect.provideService(CurrentSession, {
               user: {
                 id: user.id,

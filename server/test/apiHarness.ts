@@ -57,7 +57,9 @@ export const makeTestHttpClientLive = ({
             Layer.provide(rateLimit),
             Layer.provide(RateLimiterMemory),
             Layer.provide(HttpServer.layerServices),
-            Layer.provide(AppLayer),
+            // Merged, not only provided: a handler reads PgAuthDB per request, and
+            // toWebHandler serves a request from what the app layer outputs.
+            Layer.provideMerge(AppLayer),
             Layer.provide(TestValkeyLive),
             Layer.provideMerge(overrides),
           ),

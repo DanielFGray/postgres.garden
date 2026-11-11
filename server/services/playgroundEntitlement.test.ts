@@ -14,16 +14,8 @@ import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
-import {
-  asVisitor,
-  DatabaseLive,
-  type DatabaseError,
-  runQuery,
-  unwrapPgError,
-  PgRootDB,
-  type DbHandle,
-} from "../db.js";
-import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { DatabaseLive, type DatabaseError, unwrapPgError, PgRootDB, type DbHandle } from "../db.js";
+import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
@@ -213,8 +205,8 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), { timeout: "30 seconds" })
 
             const fork = () =>
               asVisitor((db) =>
-                runQuery(
-                  db
+                db.all(
+                  db.connection
                     .selectFrom(
                       sql<{ playground_hash: string }>`app_public.fork_playground(${source})`.as(
                         "f",
