@@ -5,6 +5,7 @@ import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
 import { Cookies } from "./cookies.js";
 import { OAuthCallbackError, OAuthNotConfiguredError, OAuthService } from "./oauthService.js";
+import { Secrets } from "../secrets.js";
 
 /**
  * GitHub sign-in in a popup window. `start` sends the popup to GitHub with a
@@ -19,6 +20,7 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
   make: Effect.gen(function* () {
     const oauth = yield* OAuthService;
     const cookies = yield* Cookies;
+    const secrets = yield* Secrets;
 
     /**
      * A failed sign-in as the popup page. However the attempt ended, the flow
@@ -51,7 +53,11 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
       function* (query: typeof GithubCallbackQuery.Type) {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const storedState = Option.fromNullishOr(request.cookies[STATE_COOKIE]);
-        if (Option.isNone(storedState) || query.state !== storedState.value) {
+        const stateMatches = yield* Option.match(storedState, {
+          onNone: () => Effect.succeed(false),
+          onSome: (stored) => secrets.equals(query.state, stored),
+        });
+        if (!stateMatches) {
           yield* recordAuthAttempt({ method: "github", action: "oauth", result: "invalid_state" });
           return yield* failure("This sign-in could not be verified. Please try again.");
         }
@@ -106,7 +112,7 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer)),
+    Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer, Secrets.layer)),
   );
 }
 

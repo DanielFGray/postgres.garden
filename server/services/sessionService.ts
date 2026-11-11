@@ -5,7 +5,7 @@ import { Redis } from "effect/persistence/Redis";
 import { rootQuerier, runQuery } from "../db.js";
 import type { SessionData } from "../../shared/session.js";
 import { UserRole } from "../../shared/schemas.js";
-import { Secrets } from "../secrets.js";
+import { Secrets, constantTimeEqual } from "../secrets.js";
 
 export const sessionCookieName = "session";
 
@@ -45,18 +45,6 @@ const CachedSession = S.Struct({
 });
 
 const decodeCachedSession = S.decodeUnknownEffect(CachedSession);
-
-export function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    const aVal = a[i];
-    const bVal = b[i];
-    if (aVal === undefined || bVal === undefined) return false;
-    result |= aVal ^ bVal;
-  }
-  return result === 0;
-}
 
 export class SessionService extends Context.Service<SessionService>()("SessionService", {
   make: Effect.gen(function* () {
