@@ -535,11 +535,41 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
           ),
       ),
 
+      /**
+       * The playground's commits, newest first, in the order of the chain
+       * that leads back from the head: the order "version N of M" counts.
+       * The clock cannot give that order: a fork and the save on it share one
+       * transaction's `now()`, and a save whose transaction began first can
+       * be stamped before its parent.
+       *
+       * A commit the head does not lead back to still has a place, after the
+       * chain, newest first by the clock. Two saves that read the same head
+       * leave one, and so does a deleted commit, whose child loses its parent.
+       */
       listCommits: Effect.fn("PlaygroundService.listCommits")((hash: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
+              .withRecursive("chain", (cte) =>
+                cte
+                  .selectFrom("app_public.playground_commits as c")
+                  .innerJoin("app_public.playgrounds as p", "p.head_commit_id", "c.id")
+                  .select(["c.id", "c.parent_id", sql<number>`0`.as("position")])
+                  .where("p.hash", "=", hash)
+                  .unionAll((qb) =>
+                    qb
+                      .selectFrom("app_public.playground_commits as c")
+                      .innerJoin("chain", "chain.parent_id", "c.id")
+                      .select([
+                        "c.id",
+                        "c.parent_id",
+                        sql<number>`chain.position + 1`.as("position"),
+                      ])
+                      .where("c.playground_hash", "=", hash),
+                  ),
+              )
               .selectFrom("app_public.playground_commits as c")
+              .leftJoin("chain", "chain.id", "c.id")
               .leftJoin("app_public.users as u", "c.user_id", "u.id")
               .select([
                 "c.id",
@@ -550,6 +580,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                 "u.username",
               ])
               .where("c.playground_hash", "=", hash)
+              .orderBy("chain.position", (order) => order.asc().nullsLast())
               .orderBy("c.created_at", "desc"),
           ),
         ).pipe(

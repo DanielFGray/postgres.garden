@@ -1,10 +1,11 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
-import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
+import { DatabaseLive, PgRootDB } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { SessionService } from "./sessionService.js";
 import { TestValkeyLive } from "../test/valkey.js";
+import { insertCommit, setHead, withPlayground } from "../test/playgrounds.js";
 import { PageData } from "./pageData.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
@@ -15,95 +16,12 @@ import { CurrentSession } from "../../shared/session.js";
  */
 const fixedInstant = DateTime.toDate(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"));
 
-const insertPlayground = (db: DbHandle, hash: string) =>
-  db.all(db.connection.insertInto("app_public.playgrounds").values({ hash, privacy: "public" }));
-
-/**
- * What a seeded commit holds in its jsonb column: the shape the app writes, or
- * the broken shape the tests need in order to prove the read refuses it.
- */
-type SeededCommitData =
-  | {
-      readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
-      readonly activeFile?: string;
-    }
-  | { readonly files: string };
-
-/**
- * One commit of `hash`. `createdAt` is given explicitly so that two commits can
- * share a timestamp.
- */
-const insertCommit = (
-  db: DbHandle,
-  hash: string,
-  message: string,
-  data: SeededCommitData,
-  createdAt: Date,
-) =>
-  db
-    .all(
-      db.connection
-        .insertInto("app_public.playground_commits")
-        .values({
-          playground_hash: hash,
-          message,
-          data: JSON.stringify(data),
-          created_at: createdAt,
-        })
-        .returning("id"),
-    )
-    .pipe(Effect.head);
-
-const setHead = (db: DbHandle, hash: string, commitId: string) =>
-  db.all(
-    db.connection
-      .updateTable("app_public.playgrounds")
-      .set({ head_commit_id: commitId })
-      .where("hash", "=", hash),
-  );
-
-/** Clears the head first: the commits cannot go while a playground names one. */
-const dropPlayground = (db: DbHandle, hash: string) =>
-  db
-    .all(
-      db.connection
-        .updateTable("app_public.playgrounds")
-        .set({ head_commit_id: null })
-        .where("hash", "=", hash),
-    )
-    .pipe(
-      Effect.andThen(
-        db.all(
-          db.connection
-            .deleteFrom("app_public.playground_commits")
-            .where("playground_hash", "=", hash),
-        ),
-      ),
-      Effect.andThen(
-        db.all(db.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
-      ),
-    );
-
 /** Nobody is signed in: these playgrounds are public, so RLS lets them through. */
 const headCommit = (hash: string) =>
   PageData.use((pages) => pages.headCommit(hash)).pipe(
     withAuthContext,
     Effect.provideService(CurrentSession, { user: null, session: null }),
   );
-
-/**
- * Seeds a public playground, runs `use` with its hash, and removes it again.
- */
-const withPlayground = <A, E, R>(use: (hash: string) => Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const suffix = yield* randomSuffix;
-    const hash = `pgtest${suffix}`;
-    yield* PgRootDB.use((db) => insertPlayground(db, hash));
-    return yield* Effect.ensuring(
-      use(hash),
-      PgRootDB.use((db) => dropPlayground(db, hash)).pipe(Effect.asVoid, Effect.orDie),
-    );
-  });
 
 layer(
   PageData.layer.pipe(
@@ -118,22 +36,18 @@ layer(
         // One timestamp for both commits: ordering by the clock cannot tell
         // them apart, which is why the head is a column and not a maximum.
         const first = yield* PgRootDB.use((db) =>
-          insertCommit(
-            db,
-            hash,
-            "first",
-            { files: [{ path: "a.sql", content: "select 1" }] },
-            fixedInstant,
-          ),
+          insertCommit(db, hash, {
+            message: "first",
+            data: { files: [{ path: "a.sql", content: "select 1" }] },
+            createdAt: fixedInstant,
+          }),
         );
         const second = yield* PgRootDB.use((db) =>
-          insertCommit(
-            db,
-            hash,
-            "second",
-            { files: [{ path: "b.sql", content: "select 2" }] },
-            fixedInstant,
-          ),
+          insertCommit(db, hash, {
+            message: "second",
+            data: { files: [{ path: "b.sql", content: "select 2" }] },
+            createdAt: fixedInstant,
+          }),
         );
         yield* PgRootDB.use((db) => setHead(db, hash, first.id));
 
@@ -150,7 +64,13 @@ layer(
   it.effect("answers null for a playground with no head commit", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        yield* PgRootDB.use((db) => insertCommit(db, hash, "orphan", { files: [] }, fixedInstant));
+        yield* PgRootDB.use((db) =>
+          insertCommit(db, hash, {
+            message: "orphan",
+            data: { files: [] },
+            createdAt: fixedInstant,
+          }),
+        );
 
         const commit = yield* headCommit(hash);
 
@@ -173,7 +93,11 @@ layer(
     withPlayground((hash) =>
       Effect.gen(function* () {
         const head = yield* PgRootDB.use((db) =>
-          insertCommit(db, hash, "malformed", { files: "not-an-array" }, fixedInstant),
+          insertCommit(db, hash, {
+            message: "malformed",
+            data: { files: "not-an-array" },
+            createdAt: fixedInstant,
+          }),
         );
         yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 
@@ -189,7 +113,11 @@ layer(
     withPlayground((hash) =>
       Effect.gen(function* () {
         const head = yield* PgRootDB.use((db) =>
-          insertCommit(db, hash, "malformed", { files: "not-an-array" }, fixedInstant),
+          insertCommit(db, hash, {
+            message: "malformed",
+            data: { files: "not-an-array" },
+            createdAt: fixedInstant,
+          }),
         );
         yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 
@@ -213,13 +141,11 @@ layer(
     withPlayground((hash) =>
       Effect.gen(function* () {
         const head = yield* PgRootDB.use((db) =>
-          insertCommit(
-            db,
-            hash,
-            "initial",
-            { files: [{ path: "a.sql", content: "select 1" }], activeFile: "a.sql" },
-            fixedInstant,
-          ),
+          insertCommit(db, hash, {
+            message: "initial",
+            data: { files: [{ path: "a.sql", content: "select 1" }], activeFile: "a.sql" },
+            createdAt: fixedInstant,
+          }),
         );
         yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 

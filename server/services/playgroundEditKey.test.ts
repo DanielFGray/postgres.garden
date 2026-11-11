@@ -17,6 +17,7 @@ import { Secrets } from "../secrets.js";
 import { PlaygroundService } from "./playgroundService.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { dropPlayground } from "../test/playgrounds.js";
 
 /** One row of `app_public.playground_commit_result`. */
 interface CommitResultRow {
@@ -149,27 +150,6 @@ const commitCount = (db: DbHandle, hash: string) =>
     .pipe(
       Effect.head,
       Effect.map((row) => Number(row.commits)),
-    );
-
-const dropPlayground = (db: DbHandle, hash: string) =>
-  db
-    .all(
-      db.connection
-        .updateTable("app_public.playgrounds")
-        .set({ head_commit_id: null })
-        .where("hash", "=", hash),
-    )
-    .pipe(
-      Effect.andThen(
-        db.all(
-          db.connection
-            .deleteFrom("app_public.playground_commits")
-            .where("playground_hash", "=", hash),
-        ),
-      ),
-      Effect.andThen(
-        db.all(db.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
-      ),
     );
 
 /** What Postgres reported about a refused query: its code, and the message the database wrote. */

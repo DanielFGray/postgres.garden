@@ -16,6 +16,7 @@ import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
 import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { dropPlayground } from "../test/playgrounds.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
@@ -49,27 +50,6 @@ const readPrivacy = (db: DbHandle, hash: string) =>
       db.connection.selectFrom("app_public.playgrounds").select("privacy").where("hash", "=", hash),
     )
     .pipe(Effect.head);
-
-const dropPlayground = (db: DbHandle, hash: string) =>
-  db
-    .all(
-      db.connection
-        .updateTable("app_public.playgrounds")
-        .set({ head_commit_id: null })
-        .where("hash", "=", hash),
-    )
-    .pipe(
-      Effect.andThen(
-        db.all(
-          db.connection
-            .deleteFrom("app_public.playground_commits")
-            .where("playground_hash", "=", hash),
-        ),
-      ),
-      Effect.andThen(
-        db.all(db.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
-      ),
-    );
 
 /** What Postgres reported about a refused query: its code, and the message the database wrote. */
 const refusal = (error: DatabaseError) => Effect.fromOption(error.report);
