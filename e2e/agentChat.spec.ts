@@ -363,15 +363,21 @@ async function acceptGlobalAutoApproveIfAsked(page: Page) {
 async function send(page: Page, prompt: string, model = "Claude") {
   await runCommand(page, "Chat: Focus on Chat View");
   await expect(page.locator(".interactive-input-part")).toBeAttached({ timeout: 15_000 });
-  const selected = page.getByLabel(/^Set Agent/);
+  // The mode picker is the input's button named after the current mode.
+  const selected = page
+    .locator(".interactive-input-part")
+    .getByRole("button", { name: "Agent", exact: true });
   if (!(await selected.isVisible().catch(() => false))) {
     await page.keyboard.press("Control+.");
     await page.locator(".action-widget").getByText("Agent", { exact: true }).click();
   }
-  await expect(page.getByLabel(/^Set Agent/)).toBeAttached();
+  await expect(selected).toBeAttached();
   // Pick the model from the chat picker when it is not the selected one. A
   // model missing from the picker fails here, before any request is sent.
-  const picker = page.locator('[aria-label^="Models, "]').first();
+  // The picker's group and its button both carry the "Models, <model>" label.
+  const modelButton = (label: string) =>
+    page.getByRole("button").and(page.locator(`[aria-label^="Models, "]${label}`));
+  const picker = modelButton("");
   await expect(picker).toBeAttached({ timeout: 15_000 });
   if (!(await picker.getAttribute("aria-label"))?.includes(model)) {
     await picker.click();
@@ -394,7 +400,7 @@ async function send(page: Page, prompt: string, model = "Claude") {
       await page.keyboard.press("Enter");
     }
   }
-  await expect(page.locator(`[aria-label^="Models, "][aria-label*="${model}"]`)).toBeAttached({
+  await expect(modelButton(`[aria-label*="${model}"]`)).toBeAttached({
     timeout: 15_000,
   });
   // Prefer session Auto Approve before the first tool call needs confirmation.
