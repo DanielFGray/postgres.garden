@@ -159,6 +159,12 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
             if (head === null) {
               progress.report({ message: "Clearing workspace..." });
               yield* clearWorkspace;
+              // The tab now holds this playground, so its first save lands here and
+              // not on the playground loaded before.
+              yield* reportLoaded(
+                [],
+                Option.some({ playgroundHash, commitId: Option.none(), head: Option.none() }),
+              );
               vscode.window.showInformationMessage(
                 `Playground #${playgroundHash} is empty. Create some files and click "Sync to Server" to save your first commit.`,
               );
@@ -219,8 +225,8 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
           yield* reportLoaded(
             workspace.files,
             Option.some({
-              commitId: workspace.id,
               playgroundHash,
+              commitId: Option.some(workspace.id),
               head: Option.fromNullishOr(data.head_commit_id),
             }),
           );
@@ -338,8 +344,8 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
             yield* reportLoaded(
               commit.files,
               Option.some({
-                commitId: commit.id,
                 playgroundHash: route.playgroundHash ?? commit.playground_hash,
+                commitId: Option.some(commit.id),
                 head: Option.fromNullishOr(commit.head_commit_id),
               }),
             );
@@ -386,13 +392,13 @@ const fromPromise = <A>(run: () => PromiseLike<A>) =>
 
 /**
  * Tells server sync which files the workspace now holds, so that they become
- * its baseline and `commit` its position.
+ * its baseline and `playground` its position.
  */
 const reportLoaded = (
   files: ReadonlyArray<WorkspaceFile>,
-  commit: (typeof WorkspaceLoaded.Type)["commit"],
+  playground: (typeof WorkspaceLoaded.Type)["playground"],
 ) =>
-  S.encodeEffect(WorkspaceLoaded)({ files, commit }).pipe(
+  S.encodeEffect(WorkspaceLoaded)({ files, playground }).pipe(
     Effect.flatMap((notice) =>
       fromPromise(() => vscode.commands.executeCommand(SERVER_SYNC_WORKSPACE_LOADED, notice)),
     ),

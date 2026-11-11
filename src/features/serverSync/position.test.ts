@@ -14,7 +14,9 @@ const addressed = Option.some(hash);
 
 /** A load of `commitId` from a playground whose head is `head`. */
 const load = (commitId: string, head: string) =>
-  afterLoad(Option.some({ commitId, playgroundHash: hash, head: Option.some(head) }));
+  afterLoad(
+    Option.some({ playgroundHash: hash, commitId: Option.some(commitId), head: Option.some(head) }),
+  );
 
 const onTopOf = (basis: string) =>
   Option.some({ openPlayground: Option.some(hash), basis: Option.some(basis) });
@@ -54,6 +56,16 @@ describe("the commit a save goes on top of", () => {
 
   it("is unknown while the playground in the address bar has not loaded, so no save goes", () => {
     expect(saveTarget(unknownPosition, addressed)).toEqual(Option.none());
+  });
+
+  it("is none in a playground with no commits, whose first save is its root", () => {
+    const position = afterLoad(
+      Option.some({ playgroundHash: hash, commitId: Option.none(), head: Option.none() }),
+    );
+
+    expect(saveTarget(position, addressed)).toEqual(
+      Option.some({ openPlayground: Option.some(hash), basis: Option.none() }),
+    );
   });
 
   it("is none for a save with no playground on screen, which starts one", () => {

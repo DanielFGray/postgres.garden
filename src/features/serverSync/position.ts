@@ -32,20 +32,21 @@ export const unknownPosition: Position = {
 };
 
 /**
- * The position after a load. `commit` is none for files no commit holds, such
- * as the sample or a shared link. The version picker loads too, so it moves the
- * head to what the load read, and the commit on screen to the picked one.
+ * The position after a load. `playground` is none for files no playground
+ * holds, such as the sample or a shared link. The version picker loads too, so
+ * it moves the head to what the load read, and the commit on screen to the
+ * picked one.
  */
 export const afterLoad = (
-  commit: Option.Option<{
-    readonly commitId: string;
+  playground: Option.Option<{
     readonly playgroundHash: string;
+    readonly commitId: Option.Option<string>;
     readonly head: Option.Option<string>;
   }>,
 ): Position => ({
-  playgroundHash: Option.map(commit, ({ playgroundHash }) => playgroundHash),
-  commitId: Option.map(commit, ({ commitId }) => commitId),
-  head: Option.flatMap(commit, ({ head }) => head),
+  playgroundHash: Option.map(playground, ({ playgroundHash }) => playgroundHash),
+  commitId: Option.flatMap(playground, ({ commitId }) => commitId),
+  head: Option.flatMap(playground, ({ head }) => head),
 });
 
 /** The position after a save: the new commit is on screen, and it is the head. */

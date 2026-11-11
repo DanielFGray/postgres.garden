@@ -46,7 +46,7 @@ const withAnonymousPlayground = <A, E, R>(
 /** A save to `hash` as the edit key's holder, naming `basis` as what it was edited from. */
 const save = (
   created: { readonly hash: string; readonly editKey: string | null },
-  basis: string,
+  basis: string | null,
   content: string,
 ) =>
   PlaygroundService.use((playgrounds) =>
@@ -197,6 +197,26 @@ layer(
         expect(yield* listCommitIds(created.hash)).toEqual([created.first]);
         // The head is back on the first commit, so a save from it is taken.
         yield* save(created, created.first, "select 3");
+      }),
+    ),
+  );
+
+  it.effect("takes a save with no basis as the new root of a playground emptied by a delete", () =>
+    withAnonymousPlayground((created) =>
+      Effect.gen(function* () {
+        yield* PgRootDB.use((db) =>
+          db.all(
+            db.connection
+              .deleteFrom("app_public.playground_commits")
+              .where("id", "=", created.first),
+          ),
+        );
+        expect(yield* listCommitIds(created.hash)).toEqual([]);
+
+        const root = yield* save(created, null, "select 2");
+
+        expect(root.parent_id).toBeNull();
+        expect(yield* listCommitIds(created.hash)).toEqual([root.commit_id]);
       }),
     ),
   );

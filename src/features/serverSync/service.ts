@@ -65,16 +65,17 @@ export class ServerSyncError extends Schema.TaggedError<
 }) {}
 
 /**
- * What `workspaceSwitcher` reports after it fills the workspace. `commit` names
- * the commit that holds `files`, and is none for files that no commit holds,
- * such as the sample or a shared link.
+ * What `workspaceSwitcher` reports after it fills the workspace. `playground`
+ * names the playground that holds `files`, and is none for files that no
+ * playground holds, such as the sample or a shared link.
  */
 export const WorkspaceLoaded = Schema.Struct({
   files: Schema.Array(WorkspaceFile),
-  commit: Schema.OptionFromNullOr(
+  playground: Schema.OptionFromNullOr(
     Schema.Struct({
-      commitId: Schema.String,
       playgroundHash: Schema.String,
+      /** The commit that holds `files`. None for a playground with no commits. */
+      commitId: Schema.OptionFromNullOr(Schema.String),
       /** The playground's head, read with the commit. */
       head: Schema.OptionFromNullOr(Schema.String),
     }),
@@ -681,10 +682,10 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     ) {
       yield* Effect.log(
         "[ServerSync] Workspace loaded notification:",
-        Option.getOrNull(loaded.commit),
+        Option.getOrNull(loaded.playground),
         `${loaded.files.length} files`,
       );
-      yield* Ref.set(position, afterLoad(loaded.commit));
+      yield* Ref.set(position, afterLoad(loaded.playground));
       yield* resetBaseline(loaded.files);
       commitHistory.refresh();
       forkHistory.refresh();
