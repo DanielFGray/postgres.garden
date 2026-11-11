@@ -2,7 +2,6 @@ import { Cause, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { PageState } from "../../src/shared/dehydrate.js";
 import { parseRoute, type RouteInfo } from "../../src/shared/routes.js";
-import { Commit, User } from "../../src/shared/schemas.js";
 import { RequestDatabase, withAuthContext } from "../requestDatabase.js";
 import { PgAuthDB } from "../db.js";
 import { CurrentSession } from "../../shared/session.js";
@@ -85,14 +84,6 @@ export class PageData extends Context.Service<PageData>()("PageData", {
             Option.getOrUndefined(sessionToken),
           );
           const route = parseRoute(pathname);
-          const user = sessionResult.user
-            ? new User({
-                id: sessionResult.user.id,
-                username: sessionResult.user.username,
-                role: sessionResult.user.role,
-              })
-            : null;
-
           const commit = yield* routeCommit(route).pipe(
             Effect.provideService(CurrentSession, sessionResult),
             // The page renders without the commit rather than answering an error:
@@ -107,7 +98,7 @@ export class PageData extends Context.Service<PageData>()("PageData", {
             Effect.orElseSucceed(() => null),
           );
 
-          return { user, commit, route } satisfies PageState;
+          return { user: sessionResult.user, commit, route } satisfies PageState;
         }).pipe(
           // The same policy one level out: a visitor whose session cannot be read is
           // served the page as a stranger, and the reason is recorded.
@@ -161,19 +152,16 @@ type CommitRow = {
 
 const toCommit = (row: CommitRow) =>
   decodeCommitData(row.data).pipe(
-    Effect.map(
-      (data) =>
-        new Commit({
-          id: row.id,
-          message: row.message,
-          created_at: row.created_at.toISOString(),
-          playground_hash: row.playground_hash,
-          parent_id: row.parent_id,
-          files: Array.from(data.files ?? []),
-          activeFile: data.activeFile ?? null,
-          timestamp: row.created_at.getTime(),
-        }),
-    ),
+    Effect.map((data) => ({
+      id: row.id,
+      message: row.message,
+      created_at: row.created_at,
+      playground_hash: row.playground_hash,
+      parent_id: row.parent_id,
+      files: Array.from(data.files ?? []),
+      activeFile: data.activeFile ?? null,
+      timestamp: row.created_at.getTime(),
+    })),
   );
 
 const firstCommit = (rows: ReadonlyArray<CommitRow>) => {

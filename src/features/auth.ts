@@ -8,7 +8,7 @@ import * as S from "effect/Schema";
 import { Effect, Layer, Match, Option } from "effect";
 import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
-import type { User } from "../shared/schemas";
+import type { SessionUser } from "../../shared/api/auth";
 import {
   GITHUB_SIGNIN,
   GITHUB_ACCOUNT_MENU,
@@ -83,7 +83,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
   }
 
   constructor(
-    user: Option.Option<User>,
+    user: Option.Option<typeof SessionUser.Type>,
     /** The caller for server requests, taken when the layer is built. */
     private readonly call: ApiCaller["Service"]["call"],
     /**

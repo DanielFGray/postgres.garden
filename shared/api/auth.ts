@@ -5,7 +5,8 @@ import { SuccessResponse, User } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";
 
-const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
+/** The signed-in user as `/me` answers it and the page's initial state carries it. */
+export const SessionUser = User.mapFields(Struct.pick(["id", "username", "role", "is_verified"]));
 
 /** What GitHub sends the callback: `code` on consent, `error` when the user declines. */
 export const GithubCallbackQuery = S.Struct({

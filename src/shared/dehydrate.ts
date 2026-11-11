@@ -1,5 +1,6 @@
 import * as S from "effect/Schema";
-import { Commit, User } from "./schemas.js";
+import { SessionUser } from "../../shared/api/auth.js";
+import { CommitDetail } from "../../shared/api/playgrounds.js";
 
 export const RouteInfoSchema = S.Struct({
   type: S.Literals(["home", "shared", "playground", "commit", "verify", "reset", "settings"]),
@@ -9,8 +10,8 @@ export const RouteInfoSchema = S.Struct({
 });
 
 export const PageStateSchema = S.Struct({
-  user: S.NullOr(User),
-  commit: S.NullOr(Commit),
+  user: S.NullOr(SessionUser),
+  commit: S.NullOr(CommitDetail),
   route: S.NullOr(RouteInfoSchema),
 });
 
