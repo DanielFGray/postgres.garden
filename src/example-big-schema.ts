@@ -1324,8 +1324,11 @@ begin
   end if;
 
   -- Not too many reset attempts, let's check the token
-  if v_user_secret.reset_password_token != reset_token then
-    -- Wrong token, bump all the attempt tracking figures
+  if v_user_secret.reset_password_token is null
+    or v_user_secret.reset_password_token is distinct from reset_token
+    or v_user_secret.reset_password_token_generated is null
+    or v_user_secret.reset_password_token_generated < now() - v_token_max_duration then
+    -- Wrong or expired token, bump all the attempt tracking figures
     update app_private.user_secrets
     set
       failed_reset_password_attempts = (case when first_failed_reset_password_attempt is null or first_failed_reset_password_attempt < now() - v_token_max_duration then 1 else failed_reset_password_attempts + 1 end),
@@ -1464,7 +1467,7 @@ begin
   from app_public.users
   where id = app_public.current_user_id();
 
-  if not (v_user is null) then
+  if v_user is null then
     raise exception 'You must log in to change your password' using errcode = 'LOGIN';
   end if;
 
@@ -1472,7 +1475,8 @@ begin
   select * into v_user_secret from app_private.user_secrets
   where user_secrets.user_id = v_user.id;
 
-  if v_user_secret.password_hash != crypt(old_password, v_user_secret.password_hash) then
+  if v_user_secret.password_hash is null
+    or v_user_secret.password_hash is distinct from crypt(old_password, v_user_secret.password_hash) then
     raise exception 'Incorrect password' using errcode = 'CREDS';
   end if;
 
