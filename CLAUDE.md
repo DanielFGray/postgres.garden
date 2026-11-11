@@ -16,7 +16,7 @@
 
 ### Server (`server/`)
 
-Bun + Effect Platform backend. Look at `server/apiHandlers.ts` for routes and `server/services/` for service layers. SSR uses Effect HttpApi contracts. Kysely for DB queries, scoped to the caller's session via `asVisitor()`/`asRoot()` in `server/db.ts` for RLS.
+Bun + Effect Platform backend. The HTTP contract is `shared/httpApi.ts`, one group per file in `shared/api/`; each group's handlers are in `server/api/<group>.ts`. Feature logic and state live in `Context.Service` classes in `server/services/`, each with `make` and a static `layer`. `server/runtime.ts` holds the one layer graph (`AppLayer`, `ServerLive`); `server/index.ts` adds only the Valkey client and the platform. Kysely for DB queries: a service yields `sessionQuerier` (the caller's session, for RLS) or `rootQuerier` from `server/db.ts` in its `make`.
 
 ### Client (`src/`)
 
