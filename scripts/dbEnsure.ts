@@ -76,20 +76,28 @@ const runAllOpts = {
   silent: true,
 };
 
-const mainProgram = Effect.gen(function* () {
-  const url = yield* Config.String("DATABASE_URL").pipe(
-    Effect.mapError(() => new ConfigurationError({ message: "DATABASE_URL is not set" })),
-  );
-
-  yield* Effect.tryPromise({
-    try: () => runAll(["db:up"], runAllOpts),
+const run = (script: string) =>
+  Effect.tryPromise({
+    try: () => runAll([script], runAllOpts),
     catch: (error) =>
       new DatabaseError({
         message: `Failed to start database: ${error instanceof Error ? error.message : String(error)}`,
       }),
   });
 
-  const result = yield* dbTest(url, { maxTries: 7, verbose: false });
+const mainProgram = Effect.gen(function* () {
+  const url = yield* Config.String("DATABASE_URL").pipe(
+    Effect.mapError(() => new ConfigurationError({ message: "DATABASE_URL is not set" })),
+  );
+
+  // `ops dev db up` needs a login to the database host, so ask ops only when
+  // the database does not answer. Valkey is local; starting it again is a no-op.
+  const result = yield* dbTest(url, { maxTries: 0, verbose: false }).pipe(
+    Effect.catch(() =>
+      run("db:up").pipe(Effect.andThen(dbTest(url, { maxTries: 7, verbose: false }))),
+    ),
+  );
+  yield* run("valkey:up");
 
   yield* Effect.log("Database is ready");
   return result;
