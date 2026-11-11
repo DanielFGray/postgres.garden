@@ -340,8 +340,9 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
                 },
               });
               expect(created.status).toBe(200);
-              const { playground_hash: source } = yield* created.json<{
+              const { playground_hash: source, commit_id: sourceHead } = yield* created.json<{
                 playground_hash: string;
+                commit_id: string;
               }>();
 
               const forkerCookie = yield* registerAndGetCookie(forker);
@@ -350,6 +351,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
                 body: {
                   message: "the forker's commit",
                   files: [{ path: "query.sql", content: "-- the forker's" }],
+                  basis: sourceHead,
                 },
               });
               expect(commit.status).toBe(200);
@@ -404,6 +406,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
                   body: {
                     message: "the forker's second commit",
                     files: [{ path: "query.sql", content: "-- the forker's, again" }],
+                    basis: fork.commit_id,
                   },
                 },
               );

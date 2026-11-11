@@ -69,6 +69,7 @@ const customCodes: Record<string, (message: string) => DatabaseRefusal> = {
   EMTKN: (message) => new Conflict({ message, reason: "email_taken" }),
   ISMBR: (message) => new Conflict({ message, reason: "already_member" }),
   OWNER: (message) => new Conflict({ message, reason: "owns_organization" }),
+  STALE: (message) => new Conflict({ message, reason: "stale_basis" }),
 };
 
 /**

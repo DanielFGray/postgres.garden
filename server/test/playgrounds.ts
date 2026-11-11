@@ -44,6 +44,7 @@ export const insertCommit = (
     readonly data: SeededCommitData;
     readonly createdAt: Date;
     readonly parentId?: string;
+    readonly userId?: string;
   },
 ) =>
   db
@@ -53,6 +54,7 @@ export const insertCommit = (
         .values({
           playground_hash: hash,
           parent_id: commit.parentId ?? null,
+          user_id: commit.userId ?? null,
           message: commit.message,
           data: JSON.stringify(commit.data),
           created_at: commit.createdAt,

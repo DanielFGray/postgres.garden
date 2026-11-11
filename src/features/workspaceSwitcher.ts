@@ -218,7 +218,11 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
 
           yield* reportLoaded(
             workspace.files,
-            Option.some({ commitId: workspace.id, playgroundHash }),
+            Option.some({
+              commitId: workspace.id,
+              playgroundHash,
+              head: Option.fromNullishOr(data.head_commit_id),
+            }),
           );
 
           vscode.window.showInformationMessage(
@@ -336,6 +340,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
               Option.some({
                 commitId: commit.id,
                 playgroundHash: route.playgroundHash ?? commit.playground_hash,
+                head: Option.fromNullishOr(commit.head_commit_id),
               }),
             );
 

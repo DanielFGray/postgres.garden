@@ -1,6 +1,6 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { NotFound, Unauthorized } from "../errors.js";
+import { Conflict, NotFound, Unauthorized } from "../errors.js";
 import { Playground, Privacy } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 
@@ -98,6 +98,12 @@ export const CommitDetail = S.Struct({
   created_at: S.DateFromString,
   playground_hash: S.String,
   parent_id: S.NullOr(S.String),
+  /**
+   * The playground's head when this commit was read: the commit the next save
+   * goes on top of, whichever commit is on screen. Read with the commit, so
+   * the two cannot come from different moments.
+   */
+  head_commit_id: S.NullOr(S.String),
   files: S.Array(PlaygroundFile),
   activeFile: S.NullOr(S.String),
   timestamp: S.Finite,
@@ -202,9 +208,12 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
         message: S.String,
         files: S.Array(PlaygroundFile),
         activeFile: S.optional(S.NullOr(S.String)),
+        // The commit the files were edited from. The save is refused with a
+        // Conflict unless it is still the head: someone saved in between.
+        basis: S.NullOr(S.String),
       }),
       success: CreateCommitResult,
-      error: NotFound,
+      error: [NotFound, Conflict],
     }),
   )
   .add(

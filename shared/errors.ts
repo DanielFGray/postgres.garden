@@ -60,6 +60,7 @@ export class Conflict extends S.TaggedError<Conflict, { readonly brand: unique s
       "slug_taken",
       "already_exists",
       "related_data",
+      "stale_basis",
     ]),
   },
   { httpApiStatus: 409 },

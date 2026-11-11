@@ -47,16 +47,17 @@ layer(
             message: "second",
             data: { files: [{ path: "b.sql", content: "select 2" }] },
             createdAt: fixedInstant,
+            parentId: first.id,
           }),
         );
-        yield* PgRootDB.use((db) => setHead(db, hash, first.id));
+        yield* PgRootDB.use((db) => setHead(db, hash, second.id));
 
         const commit = yield* headCommit(hash);
 
-        expect(commit?.id).toBe(first.id);
-        expect(commit?.id).not.toBe(second.id);
-        expect(commit?.message).toBe("first");
-        expect(commit?.files).toEqual([{ path: "a.sql", content: "select 1" }]);
+        expect(commit?.id).toBe(second.id);
+        expect(commit?.id).not.toBe(first.id);
+        expect(commit?.message).toBe("second");
+        expect(commit?.files).toEqual([{ path: "b.sql", content: "select 2" }]);
       }),
     ),
   );

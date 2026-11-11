@@ -35,6 +35,8 @@ export const SaveRequest = Schema.Struct({
   activeFile: Schema.Option(Schema.String),
   /** The playground on screen, which the save goes to when the caller may write to it. */
   openPlayground: Schema.Option(Schema.String),
+  /** The head this tab last saw of the open playground, which the save goes on top of. */
+  basis: Schema.Option(Schema.String),
 });
 export type SaveRequest = typeof SaveRequest.Type;
 
@@ -54,7 +56,10 @@ export const Saved = Schema.TaggedStruct("Saved", {
 /** The server refused the session, so nothing was saved. */
 export const SessionExpired = Schema.TaggedStruct("SessionExpired", {});
 
-export const SaveOutcome = Schema.Union([Saved, SessionExpired]);
+/** Someone saved the playground after the head the save named, so nothing was saved. */
+export const Stale = Schema.TaggedStruct("Stale", {});
+
+export const SaveOutcome = Schema.Union([Saved, SessionExpired, Stale]);
 export type SaveOutcome = typeof SaveOutcome.Type;
 
 export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/PlaygroundSaver", {
@@ -148,7 +153,10 @@ export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/Pla
       const sent = Option.match(saveTo, {
         onSome: (hash) =>
           call("apiPlaygrounds.createCommit", (api) =>
-            api.apiPlaygrounds.createCommit({ params: { hash }, payload }),
+            api.apiPlaygrounds.createCommit({
+              params: { hash },
+              payload: { ...payload, basis: Option.getOrNull(request.basis) },
+            }),
           ).pipe(
             Effect.map((result): typeof Saved.Type => ({
               _tag: "Saved",
@@ -186,14 +194,20 @@ export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/Pla
         Effect.catch((error) =>
           Effect.logError("[ServerSync] Commit failed:", error).pipe(
             Effect.andThen(
-              error.status === 401
-                ? Effect.succeed<SaveOutcome>({ _tag: "SessionExpired" })
-                : Effect.fail(
+              Match.value(error.status).pipe(
+                Match.when(401, () => Effect.succeed<SaveOutcome>({ _tag: "SessionExpired" })),
+                // Only createCommit answers 409, and only when the basis is no
+                // longer the head.
+                Match.when(409, () => Effect.succeed<SaveOutcome>({ _tag: "Stale" })),
+                Match.orElse(() =>
+                  Effect.fail(
                     new PlaygroundSaveError({
                       message: `Failed to commit workspace: ${error.status} ${error.message}`,
                       cause: error,
                     }),
                   ),
+                ),
+              ),
             ),
           ),
         ),
@@ -298,9 +312,10 @@ export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/Pla
     /**
      * Tells the author what `outcome` means for their work. It waits while a
      * dialog waits for an answer, so it runs after any progress notification
-     * has closed.
+     * has closed. A stale save is the caller's to resolve: the choice it
+     * offers changes what the tab holds.
      */
-    const announce = (outcome: SaveOutcome) =>
+    const announce = (outcome: typeof Saved.Type | typeof SessionExpired.Type) =>
       Match.valueTags(outcome, {
         SessionExpired: () => offerSignIn,
         Saved: (saved) =>

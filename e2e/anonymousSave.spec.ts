@@ -65,6 +65,9 @@ test.describe("saving without an account", () => {
     // out of the bar is the first thing it does.
     await expect(later).toHaveURL(firstUrl, { timeout: 30_000 });
 
+    // A save before the files arrive is refused: until then the tab does not
+    // know the head the save would go on top of.
+    await expect(later.getByText(/Workspace restored/i).first()).toBeVisible({ timeout: 30_000 });
     await saveWorkspace(later);
 
     await expect(later.getByText(/file\(s\) saved/i).first()).toBeVisible({ timeout: 30_000 });

@@ -45,6 +45,7 @@ const save = (
     content: string;
     hash?: string | null;
     editKeyHash?: Buffer | null;
+    basis?: string | null;
   },
 ) =>
   db
@@ -56,7 +57,8 @@ const save = (
           p_commit_message => ${values.message},
           p_commit_data => ${commitData(values.content)}::jsonb,
           p_playground_hash => ${values.hash ?? null},
-          p_edit_key_hash => ${values.editKeyHash ?? null}::bytea
+          p_edit_key_hash => ${values.editKeyHash ?? null}::bytea,
+          p_basis_commit_id => ${values.basis ?? null}
         )`.as("result"),
         )
         .selectAll(),
@@ -164,6 +166,8 @@ const withAnonymousPlayground = <A, E, R>(
     readonly hash: string;
     readonly key: string;
     readonly keyHash: Buffer;
+    /** The playground's one commit, which a save to it names as its basis. */
+    readonly head: string;
   }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
@@ -181,7 +185,7 @@ const withAnonymousPlayground = <A, E, R>(
     ).pipe(anonymous);
 
     return yield* Effect.ensuring(
-      use({ hash: created.playground_hash, key, keyHash }),
+      use({ hash: created.playground_hash, key, keyHash, head: created.commit_id }),
       PgRootDB.use((db) => dropPlayground(db, created.playground_hash)).pipe(
         Effect.asVoid,
         Effect.orDie,
@@ -212,7 +216,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
   );
 
   it.effect("commits to the same playground when the key is presented again", () =>
-    withAnonymousPlayground(({ hash, keyHash }) =>
+    withAnonymousPlayground(({ hash, keyHash, head }) =>
       Effect.gen(function* () {
         const second = yield* asVisitor((db) =>
           save(db, {
@@ -220,6 +224,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
             content: "select 2",
             hash,
             editKeyHash: keyHash,
+            basis: head,
           }),
         ).pipe(anonymous);
 
@@ -351,7 +356,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
       const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
       yield* Effect.ensuring(
-        withAnonymousPlayground(({ hash, keyHash }) =>
+        withAnonymousPlayground(({ hash, keyHash, head }) =>
           Effect.gen(function* () {
             yield* PgRootDB.use((db) =>
               db.all(
@@ -386,7 +391,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
 
             // The owner's own save needs no key from here on.
             const third = yield* asVisitor((db) =>
-              save(db, { message: "mine now", content: "select 4", hash }),
+              save(db, { message: "mine now", content: "select 4", hash, basis: head }),
             ).pipe(asUser);
             expect(third.playground_hash).toBe(hash);
           }),
@@ -479,7 +484,11 @@ layer(
             service.createCommit(
               null,
               created.playground_hash,
-              { message: "second", files: [{ path: "a.sql", content: "select 2" }] },
+              {
+                message: "second",
+                files: [{ path: "a.sql", content: "select 2" }],
+                basis: created.commit_id,
+              },
               created.edit_key,
             ),
           ).pipe(withAuthContext, anonymous);
@@ -493,7 +502,11 @@ layer(
             service.createCommit(
               null,
               created.playground_hash,
-              { message: "third", files: [{ path: "a.sql", content: "select 3" }] },
+              {
+                message: "third",
+                files: [{ path: "a.sql", content: "select 3" }],
+                basis: second.commit_id,
+              },
               null,
             ),
           ).pipe(

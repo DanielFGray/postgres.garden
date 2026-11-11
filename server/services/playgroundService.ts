@@ -44,6 +44,12 @@ export interface CommitPayload {
   readonly activeFile?: string | null;
 }
 
+/** A save to an existing playground: its files, and the commit they were edited from. */
+export interface CommitToPlayground extends CommitPayload {
+  /** Refused unless this is still the head. Null when the editor had no commit on screen. */
+  readonly basis: string | null;
+}
+
 /**
  * Lift a flat `username` column into the nested `user` object the API contract
  * expects, collapsing the anonymous case to a null user rather than a user with
@@ -97,12 +103,13 @@ const commitTo = (
     readonly message: string;
     readonly data: string;
     readonly editKeyHash?: Buffer | null;
+    readonly basis: string | null;
   },
 ) =>
   db.one(
     db.connection
       .selectFrom(
-        // Named arguments: the function has seven parameters, six of them with
+        // Named arguments: the function has eight parameters, seven of them with
         // defaults, so a positional call says which value is which only by
         // counting. A commit to an existing playground names neither its
         // privacy nor its name, which the playground already has.
@@ -111,7 +118,8 @@ const commitTo = (
       p_commit_message => ${commit.message},
       p_commit_data => ${commit.data}::jsonb,
       p_playground_hash => ${commit.hash},
-      p_edit_key_hash => ${commit.editKeyHash ?? null}::bytea
+      p_edit_key_hash => ${commit.editKeyHash ?? null}::bytea,
+      p_basis_commit_id => ${commit.basis}
     )`.as("result"),
       )
       .selectAll(),
@@ -478,7 +486,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
       }),
 
       createCommit: Effect.fn("PlaygroundService.createCommit")(
-        (userId: string | null, hash: string, body: CommitPayload, editKey: string | null) =>
+        (userId: string | null, hash: string, body: CommitToPlayground, editKey: string | null) =>
           RequestDatabase.use((db) =>
             Effect.gen(function* () {
               if (userId === null) {
@@ -494,6 +502,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                     message: body.message,
                     data,
                     editKeyHash,
+                    basis: body.basis,
                   })),
                   forked: false as const,
                 };
@@ -512,7 +521,12 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
 
               if (playground.user_id === userId) {
                 return {
-                  ...(yield* commitTo(db, { hash, message: body.message, data })),
+                  ...(yield* commitTo(db, {
+                    hash,
+                    message: body.message,
+                    data,
+                    basis: body.basis,
+                  })),
                   forked: false as const,
                 };
               }
@@ -528,6 +542,9 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                   hash: fork.playground_hash,
                   message: body.message,
                   data,
+                  // The fork was made in this transaction, so its one commit is
+                  // its head. The caller's basis is a commit of the source.
+                  basis: fork.commit_id,
                 })),
                 forked: true as const,
               };
@@ -536,15 +553,11 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
       ),
 
       /**
-       * The playground's commits, newest first, in the order of the chain
-       * that leads back from the head: the order "version N of M" counts.
-       * The clock cannot give that order: a fork and the save on it share one
-       * transaction's `now()`, and a save whose transaction began first can
-       * be stamped before its parent.
-       *
-       * A commit the head does not lead back to still has a place, after the
-       * chain, newest first by the clock. Two saves that read the same head
-       * leave one, and so does a deleted commit, whose child loses its parent.
+       * The playground's commits, newest first: the chain that leads back from
+       * the head, which the database keeps whole, so it holds every commit. The
+       * clock cannot give this order: a fork and the save on it share one
+       * transaction's `now()`, and a save whose transaction began first can be
+       * stamped before its parent.
        */
       listCommits: Effect.fn("PlaygroundService.listCommits")((hash: string) =>
         RequestDatabase.use((db) =>
@@ -568,8 +581,8 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                       .where("c.playground_hash", "=", hash),
                   ),
               )
-              .selectFrom("app_public.playground_commits as c")
-              .leftJoin("chain", "chain.id", "c.id")
+              .selectFrom("chain")
+              .innerJoin("app_public.playground_commits as c", "c.id", "chain.id")
               .leftJoin("app_public.users as u", "c.user_id", "u.id")
               .select([
                 "c.id",
@@ -579,9 +592,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
                 "c.user_id",
                 "u.username",
               ])
-              .where("c.playground_hash", "=", hash)
-              .orderBy("chain.position", (order) => order.asc().nullsLast())
-              .orderBy("c.created_at", "desc"),
+              .orderBy("chain.position", "asc"),
           ),
         ).pipe(
           Effect.map((commits) =>
@@ -601,10 +612,19 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         RequestDatabase.use((db) =>
           db.all(
             db.connection
-              .selectFrom("app_public.playground_commits")
-              .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
-              .where("id", "=", commitId)
-              .where("playground_hash", "=", hash),
+              .selectFrom("app_public.playground_commits as c")
+              .innerJoin("app_public.playgrounds as p", "p.hash", "c.playground_hash")
+              .select([
+                "c.id",
+                "c.message",
+                "c.data",
+                "c.created_at",
+                "c.playground_hash",
+                "c.parent_id",
+                "p.head_commit_id",
+              ])
+              .where("c.id", "=", commitId)
+              .where("c.playground_hash", "=", hash),
           ),
         ).pipe(
           Effect.head,
@@ -619,6 +639,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
               created_at: commit.created_at,
               playground_hash: commit.playground_hash,
               parent_id: commit.parent_id,
+              head_commit_id: commit.head_commit_id,
               files: data.files || [],
               activeFile: data.activeFile || null,
               timestamp: commit.created_at.getTime(),

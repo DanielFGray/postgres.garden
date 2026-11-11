@@ -114,12 +114,13 @@ test.describe("source control", () => {
         files: [{ path: "/workspace/history.sql", content: "select 1;\n" }],
       },
     });
-    const { playground_hash, edit_key } = await created.json();
+    const { playground_hash, edit_key, commit_id } = await created.json();
     const second = await request.post(`/api/playgrounds/${playground_hash}/commits`, {
       headers: { "x-playground-edit-key": edit_key },
       data: {
         message: "second",
         files: [{ path: "/workspace/history.sql", content: "select 2;\n" }],
+        basis: commit_id,
       },
     });
     expect(second.status()).toBe(200);

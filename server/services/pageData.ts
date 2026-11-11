@@ -40,6 +40,7 @@ export class PageData extends Context.Service<PageData>()("PageData", {
               "c.created_at",
               "c.playground_hash",
               "c.parent_id",
+              "p.head_commit_id",
             ])
             .where("p.hash", "=", playgroundHash),
         ),
@@ -51,10 +52,19 @@ export class PageData extends Context.Service<PageData>()("PageData", {
       RequestDatabase.use((db) =>
         db.all(
           db.connection
-            .selectFrom("app_public.playground_commits")
-            .select(["id", "message", "data", "created_at", "playground_hash", "parent_id"])
-            .where("playground_hash", "=", playgroundHash)
-            .where("id", "=", commitId),
+            .selectFrom("app_public.playground_commits as c")
+            .innerJoin("app_public.playgrounds as p", "p.hash", "c.playground_hash")
+            .select([
+              "c.id",
+              "c.message",
+              "c.data",
+              "c.created_at",
+              "c.playground_hash",
+              "c.parent_id",
+              "p.head_commit_id",
+            ])
+            .where("c.playground_hash", "=", playgroundHash)
+            .where("c.id", "=", commitId),
         ),
       ).pipe(Effect.flatMap(firstCommit));
 
@@ -148,6 +158,7 @@ type CommitRow = {
   readonly created_at: Date;
   readonly playground_hash: string;
   readonly parent_id: string | null;
+  readonly head_commit_id: string | null;
 };
 
 const toCommit = (row: CommitRow) =>
@@ -158,6 +169,7 @@ const toCommit = (row: CommitRow) =>
       created_at: row.created_at,
       playground_hash: row.playground_hash,
       parent_id: row.parent_id,
+      head_commit_id: row.head_commit_id,
       files: Array.from(data.files ?? []),
       activeFile: data.activeFile ?? null,
       timestamp: row.created_at.getTime(),
