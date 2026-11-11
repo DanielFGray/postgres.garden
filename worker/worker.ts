@@ -13,7 +13,7 @@ import {
 import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
-import { getTasks, type JobHelpers, Logger, run, type Runner, type Task } from "graphile-worker";
+import { type JobHelpers, Logger, run, type Runner, type Task } from "graphile-worker";
 import {
   AccountMail,
   AuditEvent,
@@ -24,6 +24,8 @@ import {
 } from "./accountMail.js";
 import { Mailer } from "./email/mailer.js";
 import { QueuedEmail, sendEmail } from "./email/sendEmail.js";
+import { ExpiredPlaygrounds, PruneExpiredPlaygrounds } from "./expiredPlaygrounds.js";
+import { Sponsorship, SponsorshipEvent } from "./sponsorship.js";
 import { DependencyUnavailable } from "../server/ready.js";
 
 class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: unique symbol }>()(
@@ -36,7 +38,7 @@ class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: uniq
 
 /**
  * Background jobs run in the server process as a graphile-worker library. The
- * task files, crontab and templates stay in `worker/`. No other process runs
+ * jobs, crontab and templates live in `worker/`. No other process runs
  * jobs: the graphile-worker CLI only installs the job schema (`worker:schema`).
  *
  * Building the layer starts the runner in the background, so the server keeps
@@ -72,7 +74,9 @@ export class Worker extends Context.Service<Worker>()("Worker", {
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(AccountMail.layer));
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Layer.mergeAll(AccountMail.layer, ExpiredPlaygrounds.layer, Sponsorship.layer)),
+  );
 }
 
 /**
@@ -93,19 +97,14 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
   const services = yield* Effect.context<FileSystem | Path.Path | RateLimiter>();
   const context = Context.merge(services, mailer);
   const mail = yield* AccountMail;
+  const playgrounds = yield* ExpiredPlaygrounds;
+  const sponsorship = yield* Sponsorship;
   const logger = new Logger(
     (scope) => (level, message) =>
       Option.match(Record.get(graphileLevels, level), {
         onNone: () => undefined,
         onSome: (log) => Effect.runSyncWith(context)(log(message).pipe(Effect.annotateLogs(scope))),
       }),
-  );
-  const loadedTasks = yield* Effect.acquireRelease(
-    Effect.tryPromise({
-      try: () => getTasks({ logger }, path.resolve("worker/tasks")),
-      catch: (cause) => new WorkerError({ message: "Could not load worker tasks", cause }),
-    }),
-    (loaded) => Effect.sync(() => loaded.release()),
   );
   // Graphile owns retry scheduling: a failed job rejects its callback, and a
   // job stops when graphile aborts it.
@@ -129,7 +128,6 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
         { signal: helpers.abortSignal },
       );
   const taskList = {
-    ...loadedTasks.tasks,
     send_email: task(QueuedEmail, sendEmail),
     user__audit: task(AuditEvent, (event, helpers) => mail.audit(event, helpers.job.created_at)),
     user__forgot_password: task(ForgotPassword, mail.forgotPassword),
@@ -139,6 +137,8 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
     ),
     user__send_delete_account_email: task(DeleteAccount, mail.sendDeleteAccount),
     user_emails__send_verification: task(SendVerification, mail.sendVerification),
+    prune_expired_playgrounds: task(PruneExpiredPlaygrounds, playgrounds.prune),
+    sponsor_webhook: task(SponsorshipEvent, sponsorship.apply),
   };
   const runner = yield* Effect.acquireRelease(
     Effect.tryPromise({
@@ -199,9 +199,6 @@ type JobServices = FileSystem | Path.Path | RateLimiter | Mailer;
  * Runs one job in its Worker.job span. This is the worker's failure boundary:
  * a failure is logged here, once, inside the span, so the line carries the
  * trace id. A stop is not a failure, so an interrupt alone is not logged.
- *
- * The JavaScript task files in `worker/tasks` run outside Effect and make no
- * span.
  */
 const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobHelpers) =>
   job.pipe(
