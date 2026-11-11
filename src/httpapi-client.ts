@@ -18,7 +18,7 @@ import {
   TooManyRequests,
   Unauthorized,
 } from "../shared/errors";
-import { makeRequestTelemetry, type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
+import { type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
 /** The generated client for `PgGardenApi`. */
 export type PgGardenClient = HttpApiClient.ForApi<typeof PgGardenApi>;
@@ -68,12 +68,14 @@ export class ApiCaller extends Context.Service<
         }).pipe(Effect.provide(options.transport));
 
         const call: ApiCaller["Service"]["call"] = (action, run) =>
-          Effect.gen(function* () {
-            const telemetry = yield* makeRequestTelemetry({ action, feature: options.feature });
-            return yield* run(client).pipe(
-              Effect.provideService(CurrentRequestTelemetry, Option.some(telemetry)),
-            );
-          }).pipe(Effect.withSpan(`api ${action}`), Effect.mapError(toApiRequestError));
+          run(client).pipe(
+            Effect.provideService(
+              CurrentRequestTelemetry,
+              Option.some({ action, feature: options.feature }),
+            ),
+            Effect.withSpan(`api ${action}`),
+            Effect.mapError(toApiRequestError),
+          );
 
         return { call };
       }),
@@ -125,7 +127,7 @@ export type ClientFailure =
 
 /**
  * Observability context for the call in flight. `ApiCaller` provides it around
- * each call; the client turns it into request headers the server reads back.
+ * each call; the client turns it into request headers.
  * The generated client takes no per-call headers, so this is the only channel.
  * None means there is no UI action to attribute the call to.
  */

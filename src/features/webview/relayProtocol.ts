@@ -24,7 +24,7 @@ const HeaderMap = S.Record(S.String, S.String);
  * drops every other key, on both sides of the wire.
  *
  * These are the headers an `HttpApiClient` call actually produces: the body
- * type and accept from the request itself, the tracing pair, and the three the
+ * type and accept from the request itself, the tracing pair, and the two the
  * client adds to attribute a call to a UI action.
  */
 const RelayHeaders = S.Struct({
@@ -32,7 +32,6 @@ const RelayHeaders = S.Struct({
   "content-type": S.optionalKey(S.String),
   traceparent: S.optionalKey(S.String),
   b3: S.optionalKey(S.String),
-  "x-request-id": S.optionalKey(S.String),
   "x-ui-action": S.optionalKey(S.String),
   "x-ui-feature": S.optionalKey(S.String),
 });
