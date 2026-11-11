@@ -46,6 +46,15 @@ import {
   ListTreeProvider,
 } from "./historyTree";
 import { PlaygroundSaver, type Saved, WorkspaceFile } from "./playgroundSaver";
+import {
+  afterLoad,
+  afterNewestHeadRead,
+  afterRestore,
+  afterSave,
+  type Position,
+  saveTarget,
+  unknownPosition,
+} from "./position";
 
 export class ServerSyncError extends Schema.TaggedError<
   ServerSyncError,
@@ -72,21 +81,6 @@ export const WorkspaceLoaded = Schema.Struct({
   ),
 });
 
-/**
- * The playground the workspace holds, the commit on screen, and the playground's
- * head. Each is none until a load or a save names it.
- *
- * The head works as a git branch does: Restore and the version picker change
- * the commit on screen and leave the head, and a save goes on top of the head,
- * which it names as its basis. The server refuses the save when someone else
- * has moved the head since this tab last saw it.
- */
-interface Position {
-  readonly playgroundHash: Option.Option<string>;
-  readonly commitId: Option.Option<string>;
-  readonly head: Option.Option<string>;
-}
-
 export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", {
   make: Effect.gen(function* () {
     const { api: vscodeApi, withProgress } = yield* VSCodeService;
@@ -97,11 +91,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
 
     yield* Effect.sync(takeEditKeyFromUrl);
 
-    const position = yield* Ref.make<Position>({
-      playgroundHash: Option.none(),
-      commitId: Option.none(),
-      head: Option.none(),
-    });
+    const position = yield* Ref.make<Position>(unknownPosition);
     /** Baseline content by file path. */
     const baseline = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
     /** Changed files by URI. */
@@ -345,16 +335,17 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       message: Option.Option<string>,
       progress: vscode.Progress<{ message?: string }>,
     ) {
-      const { playgroundHash, head } = yield* Ref.get(position);
-      // The URL names the playground on screen from the first paint, while the
-      // position waits for the workspace-loaded notification. Until it arrives
-      // the tab does not know the head, so a save could not name the commit it
-      // goes on top of.
-      if (Option.isNone(playgroundHash) && getCurrentPlaygroundId() !== null) {
-        return yield* new ServerSyncError({
-          message: "The playground is still loading. Save again when its files appear.",
-        });
-      }
+      const target = yield* Ref.get(position).pipe(
+        Effect.flatMap((current) =>
+          Effect.fromOption(
+            saveTarget(current, Option.fromNullishOr(getCurrentPlaygroundId())),
+            () =>
+              new ServerSyncError({
+                message: "The playground is still loading. Save again when its files appear.",
+              }),
+          ),
+        ),
+      );
 
       progress.report({ message: "Saving files..." });
       // Flush unsaved editor buffers, so the scan reads what is on screen.
@@ -377,8 +368,8 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
           Option.getOrElse(() => `Workspace snapshot at ${DateTime.formatIso(now)}`),
         ),
         activeFile: Option.fromNullishOr(vscodeApi.window.activeTextEditor?.document.uri.path),
-        openPlayground: playgroundHash,
-        basis: head,
+        openPlayground: target.openPlayground,
+        basis: target.basis,
       });
       return Option.some({ outcome, files });
     });
@@ -404,11 +395,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
           buildPath({ type: "playground", playgroundHash: saved.playgroundHash }),
         );
       }
-      yield* Ref.set(position, {
-        playgroundHash: Option.some(saved.playgroundHash),
-        commitId: Option.some(saved.commitId),
-        head: Option.some(saved.commitId),
-      });
+      yield* Ref.set(position, afterSave(saved));
       scm.inputBox.value = "";
       yield* resetBaseline(files);
       commitHistory.refresh();
@@ -485,10 +472,9 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
             }),
         ),
       );
-      yield* Ref.update(position, (current) => ({
-        ...current,
-        head: Option.fromNullishOr(playground.head_commit_id),
-      }));
+      yield* Ref.update(position, (current) =>
+        afterNewestHeadRead(current, Option.fromNullishOr(playground.head_commit_id)),
+      );
       return true;
     });
 
@@ -554,12 +540,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       void vscodeApi.window.showInformationMessage(
         `Restored ${restored.files.length} files from commit`,
       );
-      // The head stays where it is: the next save goes on top of it, with
-      // the restored files.
-      yield* Ref.update(position, (current) => ({
-        ...current,
-        commitId: Option.some(commitId),
-      }));
+      yield* Ref.update(position, (current) => afterRestore(current, commitId));
       yield* resetBaseline(restored.files);
       commitHistory.refresh();
     });
@@ -703,11 +684,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
         Option.getOrNull(loaded.commit),
         `${loaded.files.length} files`,
       );
-      yield* Ref.set(position, {
-        commitId: Option.map(loaded.commit, ({ commitId }) => commitId),
-        playgroundHash: Option.map(loaded.commit, ({ playgroundHash }) => playgroundHash),
-        head: Option.flatMap(loaded.commit, ({ head }) => head),
-      });
+      yield* Ref.set(position, afterLoad(loaded.commit));
       yield* resetBaseline(loaded.files);
       commitHistory.refresh();
       forkHistory.refresh();
