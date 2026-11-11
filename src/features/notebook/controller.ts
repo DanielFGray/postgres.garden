@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { toErrorMessage } from "../../shared/errors.js";
 import { PGLITE_EXECUTE, type ExtendedResults } from "../constants.js";
+import { escapeHtml, renderRowsAsTable } from "./html.js";
 
 export class SQLNotebookExecutionController {
   readonly #controller: vscode.NotebookController;
@@ -106,41 +107,4 @@ function errorOutput(message: string): vscode.NotebookCellOutput {
       "text/markdown",
     ),
   ]);
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("\n", "<br>");
-}
-
-function renderRowsAsTable(result: ExtendedResults): string {
-  if ("error" in result) {
-    return `Error: ${result.error?.message ?? "Unknown error"}`;
-  }
-
-  const { rows, fields, statement } = result;
-  return `<table>${
-    fields.length < 1
-      ? null
-      : `<thead><tr>${fields.map((col) => `<th>${col.name}</th>`).join("")}</tr></thead>`
-  }<tbody>${
-    fields.length < 1
-      ? `<tr><td>${statement || "No results"}</td></tr>`
-      : rows.length < 1
-        ? `<tr><td colspan=${fields.length}>No results</td></tr>`
-        : rows
-            .map(
-              (row) =>
-                `<tr>${fields
-                  .map(
-                    (col) => `<td>${row[col.name] === null ? "<i>null</i>" : row[col.name]}</td>`,
-                  )
-                  .join("")}</tr>`,
-            )
-            .join("")
-  }</tbody></table>`;
 }
