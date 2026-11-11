@@ -40,7 +40,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
       );
 
     return {
-      register: Effect.fnUntraced(
+      register: Effect.fn("AuthService.register")(
         function* ({
           username,
           email,
@@ -103,7 +103,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
         ),
       ),
 
-      login: Effect.fnUntraced(
+      login: Effect.fn("AuthService.login")(
         function* ({ id, password }: { id: string; password: string }) {
           // A wrong password must not fail inside the boundary. `app_private.login`
           // records the failed attempt and then returns null, and a failure here would
@@ -152,15 +152,16 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
         ),
       ),
 
-      logout: Effect.gen(function* () {
-        const { session } = yield* CurrentSession;
-        if (session) {
-          yield* sessionService.deleteSession(session.cookie_id);
-        }
-        yield* recordActiveSessions(-1);
-        yield* cookies.expireSession;
-        return { success: true as const };
-      }).pipe(
+      logout: Effect.fn("AuthService.logout")(
+        function* () {
+          const { session } = yield* CurrentSession;
+          if (session) {
+            yield* sessionService.deleteSession(session.cookie_id);
+          }
+          yield* recordActiveSessions(-1);
+          yield* cookies.expireSession;
+          return { success: true as const };
+        },
         // The session cache could not be read or cleared: nothing the client can act on.
         Effect.catchTags({ RedisError: Effect.die, SchemaError: Effect.die }),
       ),

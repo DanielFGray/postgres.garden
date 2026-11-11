@@ -1,6 +1,6 @@
 /**
  * Server metric instruments. Each `record*` function returns an Effect that
- * adds one sample. `telemetry.ts` decides whether the samples are exported.
+ * adds one sample. `tracing.ts` decides whether the samples are exported.
  */
 import { Metric } from "effect";
 

@@ -17,7 +17,7 @@ export const SessionMiddlewareLive = Layer.effect(
   Effect.gen(function* () {
     const sessionService = yield* SessionService;
     return SessionMiddleware.of({
-      session: Effect.fn(function* (httpEffect, { credential }) {
+      session: Effect.fn("SessionMiddleware.session")(function* (httpEffect, { credential }) {
         const token = Redacted.value(credential);
         const session = token
           ? yield* sessionService

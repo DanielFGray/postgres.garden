@@ -16,10 +16,9 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
         Effect.gen(function* () {
           const { session } = yield* CurrentSession;
           if (!session) return { user: null };
-          const profile = yield* users.getProfile.pipe(
-            withAuthContext,
-            Effect.catchTag("DatabaseError", toHttpError),
-          );
+          const profile = yield* users
+            .getProfile()
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
           return { user: profile };
         }),
       deleteMe: ({ query }) =>
@@ -44,10 +43,9 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
       meEmails: () =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users.listEmails.pipe(
-            withAuthContext,
-            Effect.catchTag("DatabaseError", toHttpError),
-          );
+          return yield* users
+            .listEmails()
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
       createMeEmail: ({ payload }) =>
         Effect.gen(function* () {
@@ -70,10 +68,9 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
       meAuthentications: () =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users.listAuthentications.pipe(
-            withAuthContext,
-            Effect.catchTag("DatabaseError", toHttpError),
-          );
+          return yield* users
+            .listAuthentications()
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
       deleteMeAuthentication: ({ params }) =>
         Effect.gen(function* () {
@@ -91,7 +88,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
       meHasPassword: () =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users.hasPassword.pipe(
+          return yield* users.hasPassword().pipe(
             Effect.map((result) => ({ has_password: result.has_password })),
             withAuthContext,
             Effect.catchTags({

@@ -14,7 +14,7 @@ export const WebhooksApiGroupLive = HttpApiBuilder.group(PgGardenApi, "webhooks"
   Effect.gen(function* () {
     const webhooks = yield* WebhookService;
     return handlers.handleRaw("githubSponsorWebhook", () =>
-      webhooks.handleGitHubSponsor.pipe(
+      webhooks.handleGitHubSponsor().pipe(
         Effect.map((result) => HttpServerResponse.jsonUnsafe(result)),
         Effect.catchTags({
           WebhookNotConfigured: () =>

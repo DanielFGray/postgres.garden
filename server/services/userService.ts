@@ -15,7 +15,9 @@ export class UserService extends Context.Service<UserService>()("UserService", {
   make: Effect.gen(function* () {
     const root = yield* PgRootDB;
     return {
-      requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
+      requestAccountDeletion: Effect.fn("UserService.requestAccountDeletion")(function* (
+        token: string | undefined,
+      ) {
         if (!token) {
           return yield* RequestDatabase.use((db) =>
             db.one(
@@ -39,19 +41,21 @@ export class UserService extends Context.Service<UserService>()("UserService", {
         ).pipe(Effect.map((row) => row.confirm_account_deletion === true));
       }),
 
-      getProfile: RequestDatabase.use((db) =>
-        db.all(
-          db.connection
-            .selectFrom("app_public.users")
-            .selectAll()
-            .where("id", "=", sql<string>`app_public.current_user_id()`),
+      getProfile: Effect.fn("UserService.getProfile")(() =>
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .selectFrom("app_public.users")
+              .selectAll()
+              .where("id", "=", sql<string>`app_public.current_user_id()`),
+          ),
+        ).pipe(
+          Effect.head,
+          Effect.catchTag("NoSuchElementError", () => Effect.succeed(null)),
         ),
-      ).pipe(
-        Effect.head,
-        Effect.catchTag("NoSuchElementError", () => Effect.succeed(null)),
       ),
 
-      updateProfile: (input: UpdateProfileInput) =>
+      updateProfile: Effect.fn("UserService.updateProfile")((input: UpdateProfileInput) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -64,43 +68,50 @@ export class UserService extends Context.Service<UserService>()("UserService", {
               .returningAll(),
           ),
         ).pipe(Effect.head),
+      ),
 
-      listEmails: RequestDatabase.use((db) =>
-        db.all(
-          db.connection
-            .selectFrom("app_public.user_emails")
-            .selectAll()
-            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-            .orderBy("is_primary", "desc")
-            .orderBy("created_at", "asc"),
+      listEmails: Effect.fn("UserService.listEmails")(() =>
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .selectFrom("app_public.user_emails")
+              .selectAll()
+              .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+              .orderBy("is_primary", "desc")
+              .orderBy("created_at", "asc"),
+          ),
         ),
       ),
 
-      addEmail: (email: string) =>
+      addEmail: Effect.fn("UserService.addEmail")((email: string) =>
         RequestDatabase.use((db) =>
           db.one(
             db.connection.insertInto("app_public.user_emails").values({ email }).returningAll(),
           ),
         ),
+      ),
 
-      deleteEmail: (id: string) =>
+      deleteEmail: Effect.fn("UserService.deleteEmail")((id: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection.deleteFrom("app_public.user_emails").where("id", "=", id).returningAll(),
           ),
         ).pipe(Effect.head),
+      ),
 
-      listAuthentications: RequestDatabase.use((db) =>
-        db.all(
-          db.connection
-            .selectFrom("app_public.user_authentications")
-            .select(["id", "service", "identifier", "created_at"])
-            .where("user_id", "=", sql<string>`app_public.current_user_id()`)
-            .orderBy("created_at", "asc"),
+      listAuthentications: Effect.fn("UserService.listAuthentications")(() =>
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .selectFrom("app_public.user_authentications")
+              .select(["id", "service", "identifier", "created_at"])
+              .where("user_id", "=", sql<string>`app_public.current_user_id()`)
+              .orderBy("created_at", "asc"),
+          ),
         ),
       ),
 
-      unlinkAuthentication: (id: string) =>
+      unlinkAuthentication: Effect.fn("UserService.unlinkAuthentication")((id: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -109,19 +120,22 @@ export class UserService extends Context.Service<UserService>()("UserService", {
               .returningAll(),
           ),
         ).pipe(Effect.head),
+      ),
 
-      hasPassword: RequestDatabase.use((db) =>
-        db.all(
-          db.connection
-            .selectFrom("app_public.users as u")
-            .select((eb) => [
-              eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
-            ])
-            .where("u.id", "=", sql<string>`app_public.current_user_id()`),
-        ),
-      ).pipe(Effect.head),
+      hasPassword: Effect.fn("UserService.hasPassword")(() =>
+        RequestDatabase.use((db) =>
+          db.all(
+            db.connection
+              .selectFrom("app_public.users as u")
+              .select((eb) => [
+                eb.fn<boolean>("app_public.users_has_password", [sql`u.*`]).as("has_password"),
+              ])
+              .where("u.id", "=", sql<string>`app_public.current_user_id()`),
+          ),
+        ).pipe(Effect.head),
+      ),
 
-      forgotPassword: (email: string) =>
+      forgotPassword: Effect.fn("UserService.forgotPassword")((email: string) =>
         root
           .all(
             root.connection.selectNoFrom((eb) =>
@@ -131,37 +145,42 @@ export class UserService extends Context.Service<UserService>()("UserService", {
             ),
           )
           .pipe(Effect.asVoid),
+      ),
 
-      resetPassword: (userId: string, token: string, password: string) =>
-        root
-          .one(
-            root.connection.selectNoFrom((eb) =>
-              eb
-                .fn<boolean>("app_private.reset_password", [
-                  sql`${userId}::uuid`,
-                  eb.val(token),
-                  eb.val(password),
-                ])
-                .as("reset_password"),
+      resetPassword: Effect.fn("UserService.resetPassword")(
+        (userId: string, token: string, password: string) =>
+          root
+            .one(
+              root.connection.selectNoFrom((eb) =>
+                eb
+                  .fn<boolean>("app_private.reset_password", [
+                    sql`${userId}::uuid`,
+                    eb.val(token),
+                    eb.val(password),
+                  ])
+                  .as("reset_password"),
+              ),
+            )
+            .pipe(Effect.map((row) => ({ success: row.reset_password === true }))),
+      ),
+
+      changePassword: Effect.fn("UserService.changePassword")(
+        (oldPassword: string, newPassword: string) =>
+          RequestDatabase.use((db) =>
+            db.one(
+              db.connection.selectNoFrom((eb) =>
+                eb
+                  .fn<boolean>("app_public.change_password", [
+                    eb.val(oldPassword),
+                    eb.val(newPassword),
+                  ])
+                  .as("change_password"),
+              ),
             ),
-          )
-          .pipe(Effect.map((row) => ({ success: row.reset_password === true }))),
+          ).pipe(Effect.map((row) => ({ success: row.change_password === true }))),
+      ),
 
-      changePassword: (oldPassword: string, newPassword: string) =>
-        RequestDatabase.use((db) =>
-          db.one(
-            db.connection.selectNoFrom((eb) =>
-              eb
-                .fn<boolean>("app_public.change_password", [
-                  eb.val(oldPassword),
-                  eb.val(newPassword),
-                ])
-                .as("change_password"),
-            ),
-          ),
-        ).pipe(Effect.map((row) => ({ success: row.change_password === true }))),
-
-      verifyEmail: (emailId: string, token: string) =>
+      verifyEmail: Effect.fn("UserService.verifyEmail")((emailId: string, token: string) =>
         root
           .one(
             root.connection.selectNoFrom((eb) =>
@@ -171,8 +190,9 @@ export class UserService extends Context.Service<UserService>()("UserService", {
             ),
           )
           .pipe(Effect.map((row) => ({ success: row.verify_email === true }))),
+      ),
 
-      makeEmailPrimary: (emailId: string) =>
+      makeEmailPrimary: Effect.fn("UserService.makeEmailPrimary")((emailId: string) =>
         RequestDatabase.use((db) =>
           db.one(
             db.connection
@@ -186,21 +206,24 @@ export class UserService extends Context.Service<UserService>()("UserService", {
               .selectAll(),
           ),
         ),
+      ),
 
-      resendEmailVerificationCode: (emailId: string) =>
-        RequestDatabase.use((db) =>
-          db.one(
-            db.connection.selectNoFrom((eb) =>
-              eb
-                .fn<boolean>("app_public.resend_email_verification_code", [sql`${emailId}::uuid`])
-                .as("resend_email_verification_code"),
+      resendEmailVerificationCode: Effect.fn("UserService.resendEmailVerificationCode")(
+        (emailId: string) =>
+          RequestDatabase.use((db) =>
+            db.one(
+              db.connection.selectNoFrom((eb) =>
+                eb
+                  .fn<boolean>("app_public.resend_email_verification_code", [sql`${emailId}::uuid`])
+                  .as("resend_email_verification_code"),
+              ),
             ),
+          ).pipe(
+            Effect.map((row) => ({
+              success: row.resend_email_verification_code === true,
+            })),
           ),
-        ).pipe(
-          Effect.map((row) => ({
-            success: row.resend_email_verification_code === true,
-          })),
-        ),
+      ),
     } as const;
   }),
 }) {

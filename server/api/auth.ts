@@ -47,10 +47,10 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
             }),
           ),
         authMe: () => CurrentSession.pipe(Effect.map(({ user }) => user)),
-        logout: () => auth.logout.pipe(Effect.catchTag("DatabaseError", toHttpError)),
+        logout: () => auth.logout().pipe(Effect.catchTag("DatabaseError", toHttpError)),
       })
       .handleRaw("authGithubStart", () =>
-        popup.start.pipe(
+        popup.start().pipe(
           Effect.catchTag("OAuthNotConfigured", () => popup.failure(notConfigured, 503)),
           Effect.catchCauseIf(Cause.hasDies, answerDefect),
         ),

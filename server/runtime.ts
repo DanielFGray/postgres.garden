@@ -23,7 +23,7 @@ import { SessionMiddlewareLive } from "./services/sessionMiddleware.js";
 import { SessionService } from "./services/sessionService.js";
 import { UserService } from "./services/userService.js";
 import { WebhookService } from "./services/webhookService.js";
-import { TelemetryLive } from "./telemetry.js";
+import { TracingLayer } from "./tracing.js";
 import { Worker } from "./worker.js";
 
 /**
@@ -113,7 +113,7 @@ const ListenerLive = Layer.unwrap(
  */
 const ServicesLive = Layer.mergeAll(
   Pages.layer,
-  TelemetryLive,
+  TracingLayer,
   PagesUntraced,
   RateLimitMiddlewareLive,
   // Layer.provide builds the wait first, so the runner starts only once

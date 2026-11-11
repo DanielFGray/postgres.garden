@@ -176,7 +176,7 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
           password: body.password,
         }).pipe(Effect.map(({ session }) => sessionRedirect(session, body.redirectTo))),
 
-      loginPost: Effect.fnUntraced(function* (body: typeof LoginPostBody.Type) {
+      loginPost: Effect.fn("TestingService.loginPost")(function* (body: typeof LoginPostBody.Type) {
         const user = yield* root
           .all(
             root.connection
@@ -194,7 +194,7 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
         return sessionRedirect(session, body.redirectTo);
       }),
 
-      createUser: Effect.fnUntraced(function* (query: typeof UserQuery.Type) {
+      createUser: Effect.fn("TestingService.createUser")(function* (query: typeof UserQuery.Type) {
         const { user } = yield* reallyCreateUser({
           username: query.username,
           email: query.email,

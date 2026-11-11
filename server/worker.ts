@@ -1,8 +1,8 @@
-import { Config, Context, Effect, Layer, Redacted, Ref, Schema } from "effect";
+import { Cause, Config, Context, Effect, Layer, Redacted, Ref, Schema } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
-import { getTasks, run, type Runner, type Task } from "graphile-worker";
+import { getTasks, type JobHelpers, run, type Runner, type Task } from "graphile-worker";
 import { Mailer } from "../worker/email/mailer.js";
 import { sendEmail } from "../worker/email/sendEmail.js";
 import { DependencyUnavailable } from "./ready.js";
@@ -82,7 +82,9 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
   );
   // Graphile owns retry scheduling. A rejected delivery must reject this callback.
   const deliver: Task = (payload, helpers) =>
-    Effect.runPromiseWith(context)(sendEmail(payload), { signal: helpers.abortSignal });
+    Effect.runPromiseWith(context)(traced(sendEmail(payload), helpers), {
+      signal: helpers.abortSignal,
+    });
   const runner = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () =>
@@ -127,3 +129,26 @@ const stop = Effect.fnUntraced(function* (runner: Runner, stopped: Ref.Ref<boole
   }).pipe(Effect.catch((error) => Effect.logError(error.message, error.cause)));
   yield* Ref.set(stopped, true);
 });
+
+/**
+ * Runs one job in its Worker.job span. This is the worker's failure boundary:
+ * a failure is logged here, once, inside the span, so the line carries the
+ * trace id. A stop is not a failure, so an interrupt alone is not logged.
+ *
+ * Only the Effect tasks run through it; the JavaScript task files in
+ * `worker/tasks` run outside Effect and make no span.
+ */
+const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobHelpers) =>
+  job.pipe(
+    Effect.tapCauseIf(
+      (cause) => !Cause.hasInterruptsOnly(cause),
+      (cause) => Effect.logError("The job failed", cause),
+    ),
+    Effect.withSpan("Worker.job", {
+      attributes: {
+        "job.task": helpers.job.task_identifier,
+        "job.id": helpers.job.id,
+        "job.attempt": helpers.job.attempts,
+      },
+    }),
+  );

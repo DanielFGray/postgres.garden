@@ -201,7 +201,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     };
 
     return {
-      createAuthorizationUrl: (scopes: string[]) =>
+      createAuthorizationUrl: Effect.fn("OAuthService.createAuthorizationUrl")((scopes: string[]) =>
         Effect.gen(function* () {
           const provider = getProvider();
           if (!provider) {
@@ -213,133 +213,136 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
           const url = provider.createAuthorizationURL(state, scopes);
           return { url, state };
         }),
+      ),
 
-      handleCallback: (code: string, currentUserId: string | undefined) =>
-        Effect.gen(function* () {
-          const provider = getProvider();
-          if (!provider) {
-            return yield* new OAuthNotConfiguredError({
-              message: "GitHub OAuth is not configured",
-            });
-          }
-
-          // 1. Validate authorization code
-          const tokens = yield* Effect.tryPromise({
-            try: () => provider.validateAuthorizationCode(code),
-            catch: (err) =>
-              new OAuthCallbackError({
-                message: "GitHub could not confirm this sign-in.",
-                cause: err,
-                isBadCode:
-                  err instanceof arctic.OAuth2RequestError &&
-                  err.message === "bad_verification_code",
-              }),
-          });
-          const accessToken = tokens.accessToken();
-
-          // 2. Fetch user profile
-          const userJson: unknown = yield* fetchGitHubJson(
-            "https://api.github.com/user",
-            accessToken,
-            "Failed to fetch GitHub user",
-          );
-          const userInfo = yield* S.decodeUnknownEffect(GitHubUserSchema)(userJson).pipe(
-            mapDecodeError("Invalid GitHub user profile response"),
-          );
-
-          // 3. Resolve email: prefer public, else fetch from API
-          const email: string = yield* userInfo.email
-            ? Effect.succeed(userInfo.email)
-            : Effect.gen(function* () {
-                const emailsJson: unknown = yield* fetchGitHubJson(
-                  "https://api.github.com/user/emails",
-                  accessToken,
-                  "Failed to fetch GitHub emails",
-                );
-                const emails = yield* S.decodeUnknownEffect(GitHubEmailsSchema)(emailsJson).pipe(
-                  mapDecodeError("Invalid GitHub emails response"),
-                );
-                return yield* pipe(
-                  Arr.findFirst(emails, (e) => e.primary && e.verified),
-                  Option.orElse(() => Arr.findFirst(emails, (e) => e.verified)),
-                  Option.map((e) => e.email),
-                  Option.match({
-                    onNone: () =>
-                      callbackError(
-                        "Could not get email from GitHub. Please make sure you have a verified email on your GitHub account.",
-                      ),
-                    onSome: Effect.succeed,
-                  }),
-                );
+      handleCallback: Effect.fn("OAuthService.handleCallback")(
+        (code: string, currentUserId: string | undefined) =>
+          Effect.gen(function* () {
+            const provider = getProvider();
+            if (!provider) {
+              return yield* new OAuthNotConfiguredError({
+                message: "GitHub OAuth is not configured",
               });
+            }
 
-          // 4. Resolve role. If sponsor lookup is unavailable, keep existing DB role.
-          const resolvedRole: Option.Option<UserRole> = yield* resolveRole(userInfo.login);
+            // 1. Validate authorization code
+            const tokens = yield* Effect.tryPromise({
+              try: () => provider.validateAuthorizationCode(code),
+              catch: (err) =>
+                new OAuthCallbackError({
+                  message: "GitHub could not confirm this sign-in.",
+                  cause: err,
+                  isBadCode:
+                    err instanceof arctic.OAuth2RequestError &&
+                    err.message === "bad_verification_code",
+                }),
+            });
+            const accessToken = tokens.accessToken();
 
-          const profile = pipe(
-            resolvedRole,
-            Option.match({
-              onNone: () => ({ ...userInfo, email }),
-              onSome: (role) => ({ ...userInfo, email, role }),
-            }),
-          );
+            // 2. Fetch user profile
+            const userJson: unknown = yield* fetchGitHubJson(
+              "https://api.github.com/user",
+              accessToken,
+              "Failed to fetch GitHub user",
+            );
+            const userInfo = yield* S.decodeUnknownEffect(GitHubUserSchema)(userJson).pipe(
+              mapDecodeError("Invalid GitHub user profile response"),
+            );
 
-          const profileJson = yield* S.encodeEffect(S.fromJsonString(LinkedProfile))(profile).pipe(
-            Effect.orDie,
-          );
-          const tokensJson = yield* S.decodeUnknownEffect(GitHubTokens)(tokens).pipe(
-            mapDecodeError("Invalid GitHub token response"),
-            Effect.flatMap((decoded) =>
-              S.encodeEffect(S.fromJsonString(GitHubTokens))(decoded).pipe(Effect.orDie),
-            ),
-          );
+            // 3. Resolve email: prefer public, else fetch from API
+            const email: string = yield* userInfo.email
+              ? Effect.succeed(userInfo.email)
+              : Effect.gen(function* () {
+                  const emailsJson: unknown = yield* fetchGitHubJson(
+                    "https://api.github.com/user/emails",
+                    accessToken,
+                    "Failed to fetch GitHub emails",
+                  );
+                  const emails = yield* S.decodeUnknownEffect(GitHubEmailsSchema)(emailsJson).pipe(
+                    mapDecodeError("Invalid GitHub emails response"),
+                  );
+                  return yield* pipe(
+                    Arr.findFirst(emails, (e) => e.primary && e.verified),
+                    Option.orElse(() => Arr.findFirst(emails, (e) => e.verified)),
+                    Option.map((e) => e.email),
+                    Option.match({
+                      onNone: () =>
+                        callbackError(
+                          "Could not get email from GitHub. Please make sure you have a verified email on your GitHub account.",
+                        ),
+                      onSome: Effect.succeed,
+                    }),
+                  );
+                });
 
-          // 5. Link or register user
-          const linkedUser = yield* root
-            .all(
-              root.connection
-                .selectFrom(
-                  sql<{
-                    id: string;
-                    username: string;
-                    role: string;
-                  }>`app_private.link_or_register_user(
+            // 4. Resolve role. If sponsor lookup is unavailable, keep existing DB role.
+            const resolvedRole: Option.Option<UserRole> = yield* resolveRole(userInfo.login);
+
+            const profile = pipe(
+              resolvedRole,
+              Option.match({
+                onNone: () => ({ ...userInfo, email }),
+                onSome: (role) => ({ ...userInfo, email, role }),
+              }),
+            );
+
+            const profileJson = yield* S.encodeEffect(S.fromJsonString(LinkedProfile))(
+              profile,
+            ).pipe(Effect.orDie);
+            const tokensJson = yield* S.decodeUnknownEffect(GitHubTokens)(tokens).pipe(
+              mapDecodeError("Invalid GitHub token response"),
+              Effect.flatMap((decoded) =>
+                S.encodeEffect(S.fromJsonString(GitHubTokens))(decoded).pipe(Effect.orDie),
+              ),
+            );
+
+            // 5. Link or register user
+            const linkedUser = yield* root
+              .all(
+                root.connection
+                  .selectFrom(
+                    sql<{
+                      id: string;
+                      username: string;
+                      role: string;
+                    }>`app_private.link_or_register_user(
           f_user_id => ${currentUserId ?? null},
           f_service => ${"github"},
           f_identifier => ${userInfo.login},
           f_profile => ${profileJson}::json,
           f_auth_details => ${tokensJson}::json
                         )`.as("linked_user"),
-                )
-                .selectAll(),
-            )
-            .pipe(
-              Effect.head,
-              Effect.catchTag("NoSuchElementError", () =>
-                callbackError("Failed to link or register user"),
-              ),
-            );
-
-          const userId = linkedUser.id;
-          const username = linkedUser.username || userInfo.login;
-          const userRole = linkedUser.role;
-
-          // 6. Create session if no existing session
-          const setCookie = currentUserId
-            ? undefined
-            : yield* sessions.createSession(userId).pipe(
-                Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
-                // The user row was just written and Valkey holds the session: either
-                // failing leaves nothing the popup can tell the user to fix.
-                Effect.catchTags({ NoSuchElementError: Effect.die, RedisError: Effect.die }),
+                  )
+                  .selectAll(),
+              )
+              .pipe(
+                Effect.head,
+                Effect.catchTag("NoSuchElementError", () =>
+                  callbackError("Failed to link or register user"),
+                ),
               );
 
-          return {
-            user: { id: userId, username, role: userRole },
-            setCookie,
-            isNewSession: !currentUserId,
-          };
-        }),
+            const userId = linkedUser.id;
+            const username = linkedUser.username || userInfo.login;
+            const userRole = linkedUser.role;
+
+            // 6. Create session if no existing session
+            const setCookie = currentUserId
+              ? undefined
+              : yield* sessions.createSession(userId).pipe(
+                  Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
+                  // The user row was just written and Valkey holds the session: either
+                  // failing leaves nothing the popup can tell the user to fix.
+                  Effect.catchTags({ NoSuchElementError: Effect.die, RedisError: Effect.die }),
+                );
+
+            return {
+              user: { id: userId, username, role: userRole },
+              setCookie,
+              isNewSession: !currentUserId,
+            };
+          }),
+      ),
     } as const;
   }),
 }) {

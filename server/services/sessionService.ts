@@ -55,7 +55,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
     const sessionKey = yield* sessionKeyOf;
 
     return {
-      createSession: Effect.fnUntraced(function* (userId: string) {
+      createSession: Effect.fn("SessionService.createSession")(function* (userId: string) {
         const id = yield* secrets.generate;
         const secret = yield* secrets.generate;
         const secretHash = (yield* secrets.digest(secret)).toString("hex");
@@ -122,7 +122,9 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
        * Resolve a session cookie to the caller's identity. An absent, malformed
        * or unrecognised token is an anonymous visitor, not an error.
        */
-      validateSessionToken: Effect.fnUntraced(function* (token?: string) {
+      validateSessionToken: Effect.fn("SessionService.validateSessionToken")(function* (
+        token?: string,
+      ) {
         if (!token) return anonymous;
 
         const [id, secret] = token.split(".");
@@ -188,7 +190,7 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         return { user, session };
       }),
 
-      deleteSession: Effect.fnUntraced(function* (cookieId: string) {
+      deleteSession: Effect.fn("SessionService.deleteSession")(function* (cookieId: string) {
         const key = sessionKey(cookieId);
         const sessionUuid = yield* redis
           .send("HGET", key, "session_uuid")

@@ -26,7 +26,7 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
      * A failed sign-in as the popup page. However the attempt ended, the flow
      * is over, so the state cookie goes with it.
      */
-    const failure = (message: string, status = 400) =>
+    const failure = Effect.fn("OAuthPopup.failure")((message: string, status = 400) =>
       buildOAuthPopupHtml({ type: "github-auth-failure", message }).pipe(
         Effect.map((html) =>
           HttpServerResponse.text(html, {
@@ -35,21 +35,24 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
             headers: { "Set-Cookie": cookies.expiredHeader(STATE_COOKIE) },
           }),
         ),
-      );
-
-    const start = oauth.createAuthorizationUrl(["user:email"]).pipe(
-      Effect.map(({ url, state }) =>
-        HttpServerResponse.empty({
-          status: 302,
-          headers: {
-            Location: url.toString(),
-            "Set-Cookie": cookies.shortLivedHeader(STATE_COOKIE, state),
-          },
-        }),
       ),
     );
 
-    const finish = Effect.fnUntraced(
+    const start = Effect.fn("OAuthPopup.start")(() =>
+      oauth.createAuthorizationUrl(["user:email"]).pipe(
+        Effect.map(({ url, state }) =>
+          HttpServerResponse.empty({
+            status: 302,
+            headers: {
+              Location: url.toString(),
+              "Set-Cookie": cookies.shortLivedHeader(STATE_COOKIE, state),
+            },
+          }),
+        ),
+      ),
+    );
+
+    const finish = Effect.fn("OAuthPopup.finish")(
       function* (query: typeof GithubCallbackQuery.Type) {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const storedState = Option.fromNullishOr(request.cookies[STATE_COOKIE]);

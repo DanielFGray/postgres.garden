@@ -28,7 +28,7 @@ export class PageData extends Context.Service<PageData>()("PageData", {
     const auth = yield* PgAuthDB;
 
     /** The commit a playground names as its head, or `null` if it has none. */
-    const headCommit = (playgroundHash: string) =>
+    const headCommit = Effect.fn("PageData.headCommit")((playgroundHash: string) =>
       RequestDatabase.use((db) =>
         db.all(
           db.connection
@@ -44,7 +44,8 @@ export class PageData extends Context.Service<PageData>()("PageData", {
             ])
             .where("p.hash", "=", playgroundHash),
         ),
-      ).pipe(Effect.flatMap(firstCommit));
+      ).pipe(Effect.flatMap(firstCommit)),
+    );
 
     /** One named commit of a playground, or `null` if it is not there. */
     const commit = (playgroundHash: string, commitId: string) =>
@@ -77,56 +78,59 @@ export class PageData extends Context.Service<PageData>()("PageData", {
       return Effect.succeed(null);
     };
 
-    const initialState = (pathname: string, sessionToken: Option.Option<string>) =>
-      Effect.gen(function* () {
-        const sessionResult = yield* sessions.validateSessionToken(
-          Option.getOrUndefined(sessionToken),
-        );
-        const route = parseRoute(pathname);
-        const user = sessionResult.user
-          ? new User({
-              id: sessionResult.user.id,
-              username: sessionResult.user.username,
-              role: sessionResult.user.role,
-            })
-          : null;
+    const initialState = Effect.fn("PageData.initialState")(
+      (pathname: string, sessionToken: Option.Option<string>) =>
+        Effect.gen(function* () {
+          const sessionResult = yield* sessions.validateSessionToken(
+            Option.getOrUndefined(sessionToken),
+          );
+          const route = parseRoute(pathname);
+          const user = sessionResult.user
+            ? new User({
+                id: sessionResult.user.id,
+                username: sessionResult.user.username,
+                role: sessionResult.user.role,
+              })
+            : null;
 
-        const commit = yield* routeCommit(route).pipe(
-          Effect.provideService(CurrentSession, sessionResult),
-          // The page renders without the commit rather than answering an error:
-          // the workbench boots either way and asks for the playground itself, so
-          // a failure here costs a round trip instead of the whole page. What it
-          // must not do is look like an empty playground, so it is logged.
-          Effect.tapError((error) =>
-            Effect.logError("Rendering the page without its commit").pipe(
-              Effect.annotateLogs({ pathname, reason: String(error) }),
+          const commit = yield* routeCommit(route).pipe(
+            Effect.provideService(CurrentSession, sessionResult),
+            // The page renders without the commit rather than answering an error:
+            // the workbench boots either way and asks for the playground itself, so
+            // a failure here costs a round trip instead of the whole page. What it
+            // must not do is look like an empty playground, so it is logged.
+            Effect.tapError((error) =>
+              Effect.logError("Rendering the page without its commit").pipe(
+                Effect.annotateLogs({ pathname, reason: String(error) }),
+              ),
+            ),
+            Effect.orElseSucceed(() => null),
+          );
+
+          return { user, commit, route } satisfies PageState;
+        }).pipe(
+          // The same policy one level out: a visitor whose session cannot be read is
+          // served the page as a stranger, and the reason is recorded.
+          Effect.tapCause((cause) =>
+            Effect.logError("Rendering the page with no initial data").pipe(
+              Effect.annotateLogs({ pathname, reason: Cause.pretty(cause) }),
             ),
           ),
-          Effect.orElseSucceed(() => null),
-        );
-
-        return { user, commit, route } satisfies PageState;
-      }).pipe(
-        // The same policy one level out: a visitor whose session cannot be read is
-        // served the page as a stranger, and the reason is recorded.
-        Effect.tapCause((cause) =>
-          Effect.logError("Rendering the page with no initial data").pipe(
-            Effect.annotateLogs({ pathname, reason: Cause.pretty(cause) }),
+          Effect.orElseSucceed(
+            () => ({ user: null, commit: null, route: parseRoute(pathname) }) satisfies PageState,
           ),
         ),
-        Effect.orElseSucceed(
-          () => ({ user: null, commit: null, route: parseRoute(pathname) }) satisfies PageState,
-        ),
-      );
+    );
 
     /** `html` with the initial state of the request in progress. */
-    const render = (html: string) =>
+    const render = Effect.fn("PageData.render")((html: string) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
         initialState(
           pathnameOf(request),
           Option.fromNullishOr(request.cookies[sessionCookieName]),
         ).pipe(Effect.map((state) => HttpServerResponse.html(injectInitialData(html, state)))),
-      );
+      ),
+    );
 
     return { render, initialState, headCommit } as const;
   }),
