@@ -7,7 +7,9 @@ import { ServerLive } from "./runtime.js";
 const MainLive = ServerLive.pipe(
   // Bun's client connects on first use, so a Valkey that is down does not fail
   // this layer; the dependency wait in ServerLive keeps the port closed until it
-  // answers. By default the client stops after a few reconnect attempts and
+  // answers. With the offline queue off, the first command of a process fails
+  // while it opens the connection; that command is the wait's PING, which it
+  // retries, so no request or job meets it. By default the client stops after a few reconnect attempts and
   // stays closed when Valkey returns, and it holds commands while it
   // reconnects. With these options it keeps reconnecting, and a command fails
   // at once while Valkey is down, so a page or a session read does not wait on
