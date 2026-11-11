@@ -101,7 +101,7 @@ test.describe("workbench basics", () => {
     page.on("pageerror", (err) => errors.push(err.message));
 
     await page.goto(
-      `/verify?id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
+      `/verify#id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
     );
 
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
@@ -161,7 +161,7 @@ test.describe("workbench basics", () => {
     );
 
     await page.goto(
-      `/reset?userId=${encodeURIComponent(String(userId))}&token=${encodeURIComponent(String(token))}`,
+      `/reset#userId=${encodeURIComponent(String(userId))}&token=${encodeURIComponent(String(token))}`,
     );
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: /^sign in$/i }).click({ force: true });
@@ -225,7 +225,7 @@ test.describe("workbench basics", () => {
     const { user_email_id: userEmailId, verification_token: verificationToken } =
       await serverCommand(request, "getEmailSecrets", { email: newEmail });
     await page.goto(
-      `/verify?id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
+      `/verify#id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
     );
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: /^sign in$/i }).click({ force: true });
@@ -329,7 +329,7 @@ test.describe("workbench basics", () => {
     });
     expect(deleteToken).toBeTruthy();
 
-    await page.goto(`/settings?delete_token=${encodeURIComponent(String(deleteToken))}`, {
+    await page.goto(`/settings#token=${encodeURIComponent(String(deleteToken))}`, {
       waitUntil: "domcontentloaded",
     });
     await waitForWorkbench(page);
@@ -340,8 +340,8 @@ test.describe("workbench basics", () => {
       timeout: 15_000,
     });
     // Wait for the DELETE itself, not for the URL. The workbench strips the
-    // delete_token from the URL while it boots (src/features/auth.ts), so "/"
-    // with no query string is already true before the click: a wait on the URL
+    // token from the URL while it boots (src/features/auth.ts), so "/" with no
+    // fragment is already true before the click: a wait on the URL
     // resolves while the request is still in flight, and the login below needs
     // the deletion to have finished.
     const deletion = page.waitForResponse(

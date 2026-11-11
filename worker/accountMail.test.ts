@@ -46,7 +46,7 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), { timeout: "30 seco
               template: "verify_email.mjml",
               variables: {
                 token,
-                verifyLink: `${yield* rootUrl}/verify?id=${id}&token=${token}`,
+                verifyLink: `${yield* rootUrl}/verify#id=${id}&token=${token}`,
                 username: marker,
                 name: null,
               },
@@ -148,7 +148,7 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), { timeout: "30 seco
               template: "password_reset.mjml",
               variables: {
                 token,
-                verifyLink: `${root}/reset?userId=${user.id}&token=${encodeURIComponent(token)}`,
+                verifyLink: `${root}/reset#userId=${user.id}&token=${encodeURIComponent(token)}`,
               },
             },
             {

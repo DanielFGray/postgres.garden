@@ -103,7 +103,7 @@ export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountM
           template: "delete_account.mjml",
           variables: {
             token,
-            deleteAccountLink: yield* link("/settings", { delete_token: token }),
+            deleteAccountLink: yield* link("/settings", { token }),
           },
         });
       }),
@@ -243,13 +243,17 @@ const emailJob = Effect.fnUntraced(function* (email: QueuedEmail) {
   return sql`select graphile_worker.add_job('send_email', ${json}::json)`;
 });
 
-/** `src/features/auth.ts` reads these parameters from the link's query string. */
+/**
+ * The parameters travel in the link's fragment, which no request carries, so a
+ * token never reaches server logs or a Referer header. `src/features/auth.ts`
+ * reads them from there.
+ */
 const link = (path: string, params: Record.ReadonlyRecord<string, string>) =>
   Effect.map(rootUrl, (url) => {
-    const query = Record.toEntries(params)
+    const fragment = Record.toEntries(params)
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join("&");
-    return `${url}${path}?${query}`;
+    return `${url}${path}#${fragment}`;
   });
 
 const describe = Match.type<AuditEvent>().pipe(

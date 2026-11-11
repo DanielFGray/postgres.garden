@@ -500,14 +500,15 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
       // Initial status bar update
       void updateStatusBar();
 
-      // === URL Parameter Detection ===
-      // Check for /verify and /reset URLs from email links
-      const url = new URL(window.location.href);
-      const pathname = url.pathname;
+      // === Account mail links ===
+      // worker/accountMail.ts puts each link's parameters in the fragment, so
+      // its token reaches no server log or Referer header.
+      const pathname = window.location.pathname;
+      const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
 
       if (pathname === "/reset") {
-        const userId = url.searchParams.get("userId");
-        const token = url.searchParams.get("token");
+        const userId = fragment.get("userId");
+        const token = fragment.get("token");
         if (userId && token) {
           AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", {
             userId,
@@ -517,8 +518,8 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
           window.history.replaceState({}, "", "/");
         }
       } else if (pathname === "/verify") {
-        const emailId = url.searchParams.get("id");
-        const token = url.searchParams.get("token");
+        const emailId = fragment.get("id");
+        const token = fragment.get("token");
         if (emailId && token) {
           AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", {
             emailId,
@@ -528,7 +529,7 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
           window.history.replaceState({}, "", "/");
         }
       } else if (pathname === "/settings") {
-        const deleteToken = url.searchParams.get("delete_token");
+        const deleteToken = fragment.get("token");
         AccountSettingsPanelProvider.createOrShow(extensionUri, {
           section: deleteToken ? "danger-zone" : undefined,
           deleteToken: deleteToken ?? undefined,
