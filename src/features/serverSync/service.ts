@@ -25,7 +25,7 @@ import { ApiCaller } from "../../httpapi-client";
 import { takeEditKeyFromUrl } from "../../shared/editKey";
 import { toErrorMessage } from "../../shared/errors";
 import { navigateTo } from "../../shared/navigation";
-import { buildPath, getCurrentPlaygroundId } from "../../shared/routes";
+import { buildPath } from "../../shared/routes";
 import { VSCodeService } from "../../vscode/service";
 import { Workbench } from "../../workbench";
 import {
@@ -51,9 +51,14 @@ import {
   afterNewestHeadRead,
   afterRestore,
   afterSave,
+  commitOf,
+  loadFailed,
+  loading,
+  newPlayground,
+  playgroundOf,
   type Position,
+  type SaveTarget,
   saveTarget,
-  unknownPosition,
 } from "./position";
 
 export class ServerSyncError extends Schema.TaggedError<
@@ -65,11 +70,11 @@ export class ServerSyncError extends Schema.TaggedError<
 }) {}
 
 /**
- * What `workspaceSwitcher` reports after it fills the workspace. `playground`
- * names the playground that holds `files`, and is none for files that no
- * playground holds, such as the sample or a shared link.
+ * The workspace now holds `files`, which become the baseline. `playground` names
+ * the playground that holds them, and is none for files that no playground
+ * holds, such as the sample or a shared link.
  */
-export const WorkspaceLoaded = Schema.Struct({
+export const Loaded = Schema.TaggedStruct("Loaded", {
   files: Schema.Array(WorkspaceFile),
   playground: Schema.OptionFromNullOr(
     Schema.Struct({
@@ -82,6 +87,15 @@ export const WorkspaceLoaded = Schema.Struct({
   ),
 });
 
+/** The workspace keeps the files it opened with, which no playground holds. */
+export const Kept = Schema.TaggedStruct("Kept", {});
+
+/** The playground did not load. */
+export const Failed = Schema.TaggedStruct("Failed", {});
+
+/** How a load of the workspace ended, which `workspaceSwitcher` reports after each load. */
+export const LoadEnded = Schema.Union([Loaded, Kept, Failed]);
+
 export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", {
   make: Effect.gen(function* () {
     const { api: vscodeApi, withProgress } = yield* VSCodeService;
@@ -92,7 +106,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
 
     yield* Effect.sync(takeEditKeyFromUrl);
 
-    const position = yield* Ref.make<Position>(unknownPosition);
+    const position = yield* Ref.make<Position>(loading);
     /** Baseline content by file path. */
     const baseline = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
     /** Changed files by URI. */
@@ -196,9 +210,9 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     });
 
     const currentPlayground = Ref.get(position).pipe(
-      Effect.flatMap(({ playgroundHash }) =>
+      Effect.flatMap((current) =>
         Effect.fromOption(
-          playgroundHash,
+          playgroundOf(current),
           () => new ServerSyncError({ message: "No playground loaded" }),
         ),
       ),
@@ -210,8 +224,9 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       );
 
     const loadCommitHistory = Effect.gen(function* () {
-      const { playgroundHash, commitId } = yield* Ref.get(position);
-      return yield* Option.match(playgroundHash, {
+      const current = yield* Ref.get(position);
+      const commitId = commitOf(current);
+      return yield* Option.match(playgroundOf(current), {
         onNone: () =>
           Effect.log("[ServerSync] No playground loaded, commit history is empty").pipe(
             Effect.as(Arr.empty<CommitHistoryItem>()),
@@ -271,8 +286,8 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       );
 
     const loadForkHistory = Ref.get(position).pipe(
-      Effect.flatMap(({ playgroundHash }) =>
-        Option.match(playgroundHash, {
+      Effect.flatMap((current) =>
+        Option.match(playgroundOf(current), {
           onNone: () => Effect.succeed(Arr.empty<ForkHistoryItem>()),
           onSome: (hash) => forkChain(hash, hash),
         }),
@@ -300,8 +315,9 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     yield* showTree(SERVER_SYNC_FORK_HISTORY, forkHistory);
 
     const updateStatusBar = Effect.gen(function* () {
-      const { playgroundHash, commitId } = yield* Ref.get(position);
-      const commits = yield* Option.match(playgroundHash, {
+      const current = yield* Ref.get(position);
+      const commitId = commitOf(current);
+      const commits = yield* Option.match(playgroundOf(current), {
         onNone: () => Effect.succeedNone,
         onSome: (hash) =>
           listCommits(hash).pipe(
@@ -331,23 +347,12 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
         catch: toServerSyncError,
       });
 
-    /** Reads the workspace and sends it to the server. None when the workspace holds no files. */
+    /** Reads the workspace and sends it to `target`. None when the workspace holds no files. */
     const upload = Effect.fnUntraced(function* (
       message: Option.Option<string>,
+      target: typeof SaveTarget.Type,
       progress: vscode.Progress<{ message?: string }>,
     ) {
-      const target = yield* Ref.get(position).pipe(
-        Effect.flatMap((current) =>
-          Effect.fromOption(
-            saveTarget(current, Option.fromNullishOr(getCurrentPlaygroundId())),
-            () =>
-              new ServerSyncError({
-                message: "The playground is still loading. Save again when its files appear.",
-              }),
-          ),
-        ),
-      );
-
       progress.report({ message: "Saving files..." });
       // Flush unsaved editor buffers, so the scan reads what is on screen.
       yield* Effect.tryPromise({
@@ -380,7 +385,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       saved: typeof Saved.Type,
       files: ReadonlyArray<WorkspaceFile>,
     ) {
-      const { playgroundHash } = yield* Ref.get(position);
+      const playgroundHash = playgroundOf(yield* Ref.get(position));
       // A save that moves the workspace to another playground (new or forked)
       // changes which playground is loaded, though no file changes.
       if (!Option.contains(playgroundHash, saved.playgroundHash)) {
@@ -414,14 +419,27 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     );
 
     /** One save and what follows it. True when the author asked to send the save again. */
-    const saveOnce = Effect.fnUntraced(function* (message: Option.Option<string>) {
+    const saveOnce = (message: Option.Option<string>) =>
+      chooseTarget.pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(false),
+            onSome: (target) => saveTo(message, target),
+          }),
+        ),
+      );
+
+    const saveTo = Effect.fnUntraced(function* (
+      message: Option.Option<string>,
+      target: typeof SaveTarget.Type,
+    ) {
       const uploaded = yield* withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: "Syncing workspace to server...",
           cancellable: false,
         },
-        (progress) => upload(message, progress),
+        (progress) => upload(message, target, progress),
       );
       return yield* Option.match(uploaded, {
         onNone: () =>
@@ -438,6 +456,35 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
             SessionExpired: (expired) => saver.announce(expired).pipe(Effect.as(false)),
             Stale: () => offerNewestVersion,
           }),
+      });
+    });
+
+    /**
+     * Where the next save goes. None when nothing loaded and the author chose not
+     * to start a new playground.
+     */
+    const chooseTarget = Effect.gen(function* () {
+      const decision = saveTarget(yield* Ref.get(position));
+      return yield* Match.valueTags(decision, {
+        StillLoading: () =>
+          Effect.fail(
+            new ServerSyncError({
+              message: "The playground is still loading. Save again when its files appear.",
+            }),
+          ),
+        AskNewPlayground: () =>
+          showWarning(
+            "This playground did not load. Save as a new playground?",
+            "Save as New Playground",
+          ).pipe(
+            Effect.map((choice) =>
+              Option.as(
+                Option.liftPredicate(choice, (picked) => picked === "Save as New Playground"),
+                newPlayground,
+              ),
+            ),
+          ),
+        Save: ({ target }) => Effect.succeedSome(target),
       });
     });
 
@@ -618,7 +665,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     /** Lets the user pick a commit of the playground and opens it. */
     const checkoutVersion = Effect.fn("ServerSync.checkoutVersion")(function* () {
       const hash = yield* currentPlayground;
-      const { commitId } = yield* Ref.get(position);
+      const commitId = commitOf(yield* Ref.get(position));
       const commits = yield* listCommits(hash).pipe(
         Effect.mapError(
           (error) =>
@@ -673,20 +720,20 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
     });
 
     /**
-     * Makes the files `workspaceSwitcher` just loaded the baseline, and their
-     * commit the position. Loaded files are not changes, even when no commit
-     * holds them: the author has not edited them yet.
+     * Moves the position to where the load ended, and sets the baseline. Loaded
+     * files are not changes, even when no commit holds them: the author has not
+     * edited them yet. Kept files stay on the baseline they opened with. After
+     * a failed load no commit is behind the files on screen, so all of them
+     * are changes, as they would be in a new playground.
      */
-    const workspaceLoaded = Effect.fn("ServerSync.workspaceLoaded")(function* (
-      loaded: typeof WorkspaceLoaded.Type,
-    ) {
-      yield* Effect.log(
-        "[ServerSync] Workspace loaded notification:",
-        Option.getOrNull(loaded.playground),
-        `${loaded.files.length} files`,
-      );
-      yield* Ref.set(position, afterLoad(loaded.playground));
-      yield* resetBaseline(loaded.files);
+    const loadEnded = Effect.fn("ServerSync.loadEnded")(function* (ended: typeof LoadEnded.Type) {
+      yield* Effect.log("[ServerSync] Load ended:", ended._tag);
+      yield* Match.valueTags(ended, {
+        Loaded: ({ files, playground }) =>
+          Ref.set(position, afterLoad(playground)).pipe(Effect.andThen(resetBaseline(files))),
+        Kept: () => Ref.set(position, afterLoad(Option.none())),
+        Failed: () => Ref.set(position, loadFailed).pipe(Effect.andThen(resetBaseline([]))),
+      });
       commitHistory.refresh();
       forkHistory.refresh();
       yield* updateStatusBar;
@@ -745,7 +792,7 @@ export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", 
       checkoutVersion,
       openCommit,
       openFork,
-      workspaceLoaded,
+      loadEnded,
       markChanged,
       offerReload,
       refreshCommitHistory: Effect.sync(() => commitHistory.refresh()),

@@ -17,10 +17,10 @@ import {
   SERVER_SYNC_RESTORE_COMMIT,
   SERVER_SYNC_VIEW_COMMIT,
   SERVER_SYNC_VIEW_FORK_SOURCE,
-  SERVER_SYNC_WORKSPACE_LOADED,
+  SERVER_SYNC_LOAD_ENDED,
 } from "../constants";
 import type { PlaygroundSaveError } from "./playgroundSaver";
-import { ServerSync, type ServerSyncError, WorkspaceLoaded } from "./service";
+import { LoadEnded, ServerSync, type ServerSyncError } from "./service";
 
 /** A commit id, given directly or as the commit history item a context menu passes. */
 const CommitArgument = Schema.Union([
@@ -116,10 +116,10 @@ export const ServerSyncFeatureLive = Layer.effectDiscard(
       sync.restore,
     );
     yield* registerDecoded(
-      SERVER_SYNC_WORKSPACE_LOADED,
-      WorkspaceLoaded,
-      "Failed to track the loaded workspace",
-      sync.workspaceLoaded,
+      SERVER_SYNC_LOAD_ENDED,
+      LoadEnded,
+      "Failed to track the workspace load",
+      sync.loadEnded,
     );
     yield* registerDecoded(
       SERVER_SYNC_VIEW_FORK_SOURCE,
