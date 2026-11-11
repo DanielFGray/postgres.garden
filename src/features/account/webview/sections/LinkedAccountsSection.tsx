@@ -37,7 +37,9 @@ export const LinkedAccountsSection = () => {
       ),
     )
       .then(
-        () => refresh(accounts),
+        () => {
+          void refresh(accounts);
+        },
         (error: Error) => setMutationError(error.message),
       )
       .finally(() => setUnlinking(null));

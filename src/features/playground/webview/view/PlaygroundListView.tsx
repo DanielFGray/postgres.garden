@@ -187,7 +187,7 @@ export const PlaygroundListView = () => {
             <button
               class="button"
               onClick={() => {
-                refresh(playgrounds);
+                void refresh(playgrounds);
                 reset();
               }}
             >

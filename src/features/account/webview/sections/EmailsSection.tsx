@@ -30,7 +30,9 @@ export const EmailsSection = () => {
     setMutationError(null);
     void runRequest(request)
       .then(
-        () => refreshAfter && refresh(emails),
+        () => {
+          if (refreshAfter) void refresh(emails);
+        },
         (error: Error) => setMutationError(error.message),
       )
       .finally(() => setActionLoading(null));
@@ -79,7 +81,7 @@ export const EmailsSection = () => {
       .then(
         () => {
           form.reset();
-          refresh(emails);
+          void refresh(emails);
         },
         (error: Error) => setMutationError(error.message),
       )

@@ -49,7 +49,7 @@ export const SecuritySection = () => {
       .then(
         () => {
           setSuccess(hasPassword ? "Password changed successfully" : "Password set successfully");
-          refresh(status);
+          void refresh(status);
           form.reset();
         },
         (error: Error) => setMutationError(error.message),

@@ -7,7 +7,9 @@ export const runRequest = <A, E>(request: Effect.Effect<A, E>): Promise<A> =>
 /**
  * An async computation over an Effect. Reading it before the promise settles
  * suspends to the nearest `<Loading>`; a failure propagates to the nearest
- * `<Errored>`. Call `refresh(resource)` to re-run the request.
+ * `<Errored>`. Call `refresh(resource)` to re-run the request. Its promise
+ * settles when the re-run does; a caller that does not wait marks it with
+ * `void`, because a failed re-run already reaches the nearest `<Errored>`.
  */
 export const createRequest = <A, E>(makeRequest: () => Effect.Effect<A, E>) =>
   createMemo(() => runRequest(makeRequest()));

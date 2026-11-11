@@ -29,7 +29,9 @@ export const ProfileSection = () => {
       ),
     )
       .then(
-        () => refresh(profile),
+        () => {
+          void refresh(profile);
+        },
         (error: Error) => setSaveError(error.message),
       )
       .finally(() => setSaving(false));
