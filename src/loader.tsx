@@ -31,7 +31,6 @@ import "@codingame/monaco-vscode-json-default-extension";
 import "@codingame/monaco-vscode-markdown-basics-default-extension";
 import "@codingame/monaco-vscode-markdown-language-features-default-extension";
 import "@codingame/monaco-vscode-markdown-math-default-extension";
-import "@codingame/monaco-vscode-media-preview-default-extension";
 import "@codingame/monaco-vscode-npm-default-extension";
 import "@codingame/monaco-vscode-references-view-default-extension";
 import "@codingame/monaco-vscode-search-result-default-extension";

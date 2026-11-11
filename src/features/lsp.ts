@@ -33,16 +33,11 @@ export const LspFeatureLive = Layer.effectDiscard(
 
     const worker = new Worker(new URL("./lsp/pgls.worker.ts", import.meta.url), { type: "module" });
 
-    const client = new LanguageClient(
-      "pgls",
-      "Postgres Language Server",
-      {
-        documentSelector: [{ language: "sql" }],
-        synchronize: {},
-        initializationOptions: {},
-      },
-      worker,
-    );
+    const client = new LanguageClient("pgls", "Postgres Language Server", worker, {
+      documentSelector: [{ language: "sql" }],
+      synchronize: {},
+      initializationOptions: {},
+    });
 
     yield* Effect.tryPromise({
       try: () => client.start(),

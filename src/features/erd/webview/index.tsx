@@ -47,6 +47,10 @@ function initMermaidTheme() {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "loose",
+    // Mermaid 12 defaults to the ELK layout and the "neo" look. The themeCSS
+    // below styles the classes of the dagre layout and the classic look.
+    layout: "dagre",
+    look: "classic",
     theme: "base",
     themeVariables: {
       background: bg,
