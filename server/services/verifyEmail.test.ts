@@ -10,68 +10,71 @@ import { asUser, deleteUser, randomSuffix } from "../testSupport.js";
  * token's hash. No worker runs against the test database, so the job stays in
  * the table to be read.
  */
-layer(DatabaseLive, { timeout: "30 seconds" })("app_public.verify_email", (it) => {
-  it.effect("verifies the address with the mailed token alone, once", () =>
-    withUnverifiedAddress("verify_valid", ({ emailId, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        expect(yield* verifyEmail(db, token)).toBe(true);
-        expect(yield* address(db, emailId)).toEqual({
-          is_verified: true,
-          verification_token_hash: null,
-        });
-        expect(yield* verifyEmail(db, token)).toBe(false);
-      }),
-    ),
-  );
+layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
+  "app_public.verify_email",
+  (it) => {
+    it.effect("verifies the address with the mailed token alone, once", () =>
+      withUnverifiedAddress("verify_valid", ({ emailId, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          expect(yield* verifyEmail(db, token)).toBe(true);
+          expect(yield* address(db, emailId)).toEqual({
+            is_verified: true,
+            verification_token_hash: null,
+          });
+          expect(yield* verifyEmail(db, token)).toBe(false);
+        }),
+      ),
+    );
 
-  it.effect("rejects the mailed token once it is older than 24 hours", () =>
-    withUnverifiedAddress("verify_expired", ({ emailId, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        yield* db.all(
-          db.connection
-            .updateTable("app_private.user_email_secrets")
-            .set({ verification_token_generated: sql`now() - interval '24 hours 1 minute'` })
-            .where("user_email_id", "=", emailId),
-        );
-        expect(yield* verifyEmail(db, token)).toBe(false);
-        expect((yield* address(db, emailId)).is_verified).toBe(false);
-      }),
-    ),
-  );
+    it.effect("rejects the mailed token once it is older than 24 hours", () =>
+      withUnverifiedAddress("verify_expired", ({ emailId, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          yield* db.all(
+            db.connection
+              .updateTable("app_private.user_email_secrets")
+              .set({ verification_token_generated: sql`now() - interval '24 hours 1 minute'` })
+              .where("user_email_id", "=", emailId),
+          );
+          expect(yield* verifyEmail(db, token)).toBe(false);
+          expect((yield* address(db, emailId)).is_verified).toBe(false);
+        }),
+      ),
+    );
 
-  it.effect("keeps the mailed link alive when a resend comes within 3 minutes", () =>
-    withUnverifiedAddress("verify_resend_early", ({ userId, emailId, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        expect(yield* resend(db, userId, emailId)).toBe(false);
-        expect(yield* verificationTokens(db, emailId)).toEqual([token]);
-        expect(yield* verifyEmail(db, token)).toBe(true);
-      }),
-    ),
-  );
+    it.effect("keeps the mailed link alive when a resend comes within 3 minutes", () =>
+      withUnverifiedAddress("verify_resend_early", ({ userId, emailId, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          expect(yield* resend(db, userId, emailId)).toBe(false);
+          expect(yield* verificationTokens(db, emailId)).toEqual([token]);
+          expect(yield* verifyEmail(db, token)).toBe(true);
+        }),
+      ),
+    );
 
-  it.effect("replaces the mailed link when a resend comes after 3 minutes", () =>
-    withUnverifiedAddress("verify_resend_late", ({ userId, emailId, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        yield* db.all(
-          db.connection
-            .updateTable("app_private.user_email_secrets")
-            .set({ verification_token_generated: sql`now() - interval '3 minutes 1 second'` })
-            .where("user_email_id", "=", emailId),
-        );
-        expect(yield* resend(db, userId, emailId)).toBe(true);
-        const tokens = yield* verificationTokens(db, emailId);
-        expect(tokens).toEqual([token, expect.any(String)]);
-        const fresh = yield* Effect.fromOption(Arr.last(tokens));
-        expect(yield* verifyEmail(db, token)).toBe(false);
-        expect(yield* verifyEmail(db, fresh)).toBe(true);
-      }),
-    ),
-  );
-});
+    it.effect("replaces the mailed link when a resend comes after 3 minutes", () =>
+      withUnverifiedAddress("verify_resend_late", ({ userId, emailId, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          yield* db.all(
+            db.connection
+              .updateTable("app_private.user_email_secrets")
+              .set({ verification_token_generated: sql`now() - interval '3 minutes 1 second'` })
+              .where("user_email_id", "=", emailId),
+          );
+          expect(yield* resend(db, userId, emailId)).toBe(true);
+          const tokens = yield* verificationTokens(db, emailId);
+          expect(tokens).toEqual([token, expect.any(String)]);
+          const fresh = yield* Effect.fromOption(Arr.last(tokens));
+          expect(yield* verifyEmail(db, token)).toBe(false);
+          expect(yield* verifyEmail(db, fresh)).toBe(true);
+        }),
+      ),
+    );
+  },
+);
 
 /**
  * Runs `test` with a new user whose only address is unverified, and the token

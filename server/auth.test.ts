@@ -1,24 +1,20 @@
 /**
  * Authentication integration tests.
  *
- * Uses @effect/vitest to run each test as an Effect, with a shared layer
- * providing the in-process HttpClient (no TCP listener) and direct DB access
- * for setup/cleanup.
+ * Uses @effect/vitest to run each test as an Effect, with one API server for
+ * the suite (`TestApi`) and the database pool and Valkey client it uses, for
+ * setup and cleanup.
  *
  * Run: bun vitest run server/auth.test.ts
  */
 
 import { describe, expect, layer } from "@effect/vitest";
-import { Effect, Layer, Random, pipe } from "effect";
+import { Effect, Random, pipe } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import { DatabaseLive, PgRootDB } from "./db.js";
+import { PgRootDB } from "./db.js";
 import { Redis } from "effect/persistence/Redis";
 import { sessionKeyOf } from "./services/sessionService.js";
-import { origin, TestHttpClientLive } from "./test/apiHarness.js";
-import { TestValkeyLive } from "./test/valkey.js";
-
-/** Shared layer: in-process HTTP + direct DB for cleanup. */
-const TestLayer = Layer.mergeAll(TestHttpClientLive, DatabaseLive, TestValkeyLive);
+import { TestApi } from "./test/apiHarness.js";
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -39,14 +35,14 @@ const sessionIdFromCookie = (cookie: string): string =>
 // Effectful helpers (all yieldable — no floating promises)
 // ---------------------------------------------------------------------------
 
-/** Send a request through the in-process client. */
+/** Send a request to the suite's API server. */
 const send = Effect.fnUntraced(function* (
   method: "GET" | "POST",
   path: string,
   opts?: { query?: Record<string, string>; body?: unknown; cookie?: string },
 ) {
   const client = yield* HttpClient.HttpClient;
-  const request = HttpClientRequest.make(method)(`${origin}${path}`, {
+  const request = HttpClientRequest.make(method)(path, {
     urlParams: opts?.query,
     headers: opts?.cookie ? { Cookie: opts.cookie } : undefined,
   });
@@ -117,7 +113,7 @@ const createTestUser = (
 // Tests
 // ---------------------------------------------------------------------------
 
-layer(TestLayer, { timeout: "30 seconds" })("Auth API", (it) => {
+layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API", (it) => {
   // -- Registration -------------------------------------------------------
 
   describe("Registration", () => {

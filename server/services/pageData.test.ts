@@ -110,7 +110,7 @@ layer(
     Layer.provideMerge(SessionService.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
   ),
-  { timeout: "30 seconds" },
+  { excludeTestServices: true, timeout: "30 seconds" },
 )("the commit a server-rendered page starts from", (it) => {
   it.effect("reads the commit the playground names as head, not the newest by clock", () =>
     withPlayground((hash) =>

@@ -4,16 +4,11 @@
  * Run: bun vitest run server/healthz.test.ts
  */
 
-import { describe, expect, it } from "@effect/vitest";
+import { expect, layer } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { HttpClient } from "effect/http";
 import { DependencyUnavailable, Readiness } from "./ready.js";
-import {
-  makeTestHttpClientLive,
-  origin,
-  workerRunning,
-  type HealthDependencies,
-} from "./test/apiHarness.js";
+import { makeTestApi, workerRunning } from "./test/apiHarness.js";
 import { Worker } from "../worker/worker.js";
 
 const COMMIT = "9d1e4c2";
@@ -27,14 +22,10 @@ const commitEnv = Layer.succeed(
 );
 
 const getHealthz = Effect.fnUntraced(function* () {
-  const response = yield* HttpClient.get(`${origin}/healthz`);
+  const response = yield* HttpClient.get("/healthz");
   const body = yield* response.json;
   return { status: response.status, body };
 });
-
-/** The API with `health` as its health dependencies. */
-const healthClient = (health?: HealthDependencies) =>
-  makeTestHttpClientLive({ overrides: commitEnv, health });
 
 /** A worker whose runner has stopped, exactly as the real one reports it. */
 const workerStopped = Layer.succeed(
@@ -62,41 +53,39 @@ const databaseDown = Layer.succeed(
   }),
 );
 
-describe("GET /healthz", () => {
-  it.effect(
-    "answers 200 with the commit when the database answers",
-    () =>
-      Effect.gen(function* () {
-        const { status, body } = yield* getHealthz().pipe(Effect.provide(healthClient()));
-        expect(status).toBe(200);
-        expect(body).toEqual({ status: "ok", commit: COMMIT });
-      }),
-    30_000,
-  );
+const cases = [
+  {
+    name: "answers 200 with the commit when the database answers",
+    health: Layer.mergeAll(Readiness.layer, workerRunning),
+    status: 200,
+    body: { status: "ok", commit: COMMIT },
+  },
+  {
+    name: 'answers 503 naming "worker" when the worker runner has stopped',
+    health: Layer.mergeAll(Readiness.layer, workerStopped),
+    status: 503,
+    body: { status: "error", commit: COMMIT, failed: ["worker"] },
+  },
+  {
+    name: "answers 503 naming the database when the database does not answer",
+    health: Layer.mergeAll(databaseDown, workerRunning),
+    status: 503,
+    body: { status: "error", commit: COMMIT, failed: ["database"] },
+  },
+] as const;
 
-  it.effect(
-    'answers 503 naming "worker" when the worker runner has stopped',
-    () =>
+// Each case serves the API over its own health dependencies.
+for (const { name, health, status, body } of cases) {
+  layer(makeTestApi({ overrides: commitEnv, health }), {
+    excludeTestServices: true,
+    timeout: "30 seconds",
+  })("GET /healthz", (it) => {
+    it.effect(name, () =>
       Effect.gen(function* () {
-        const { status, body } = yield* getHealthz().pipe(
-          Effect.provide(healthClient(Layer.mergeAll(Readiness.layer, workerStopped))),
-        );
-        expect(status).toBe(503);
-        expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["worker"] });
+        const response = yield* getHealthz();
+        expect(response.status).toBe(status);
+        expect(response.body).toEqual(body);
       }),
-    30_000,
-  );
-
-  it.effect(
-    "answers 503 naming the database when the database does not answer",
-    () =>
-      Effect.gen(function* () {
-        const { status, body } = yield* getHealthz().pipe(
-          Effect.provide(healthClient(Layer.mergeAll(databaseDown, workerRunning))),
-        );
-        expect(status).toBe(503);
-        expect(body).toEqual({ status: "error", commit: COMMIT, failed: ["database"] });
-      }),
-    30_000,
-  );
-});
+    );
+  });
+}

@@ -1,5 +1,6 @@
 import { expect, it, suite } from "@effect/vitest";
 import { Config, Effect, Layer, Schema as S } from "effect";
+import { HttpClientRequest } from "effect/http";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -113,7 +114,7 @@ const request = (path: string) =>
       Layer.provide(FailureBoundaryLive),
       Layer.provide(Layer.mergeAll(PgRootDB.layer, PgAuthDB.layer)),
     ),
-    path,
+    HttpClientRequest.get(path),
   );
 
 const parseBody = S.decodeUnknownEffect(S.fromJsonString(S.Json));

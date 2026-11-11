@@ -10,55 +10,62 @@ import { asUser, createUser, deleteUser, randomSuffix } from "../testSupport.js"
  * keeps only the token's hash. No worker runs against the test database, so
  * the job stays in the table to be read.
  */
-layer(DatabaseLive, { timeout: "30 seconds" })("account deletion", (it) => {
-  it.effect("deletes the account with the mailed token, and stores only its hash", () =>
-    withUsers("delete_valid", ([user]) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        const token = yield* requestDeletion(db, user);
-        expect((yield* userSecrets(db, user.id)).delete_account_token_hash).toBe(
-          yield* sha256(db, token),
-        );
+layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
+  "account deletion",
+  (it) => {
+    it.effect("deletes the account with the mailed token, and stores only its hash", () =>
+      withUsers("delete_valid", ([user]) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          const token = yield* requestDeletion(db, user);
+          expect((yield* userSecrets(db, user.id)).delete_account_token_hash).toBe(
+            yield* sha256(db, token),
+          );
 
-        expect(yield* confirmDeletion(db, user.id, token)).toBe(true);
-        expect(yield* userExists(db, user.id)).toBe(false);
-      }),
-    ),
-  );
+          expect(yield* confirmDeletion(db, user.id, token)).toBe(true);
+          expect(yield* userExists(db, user.id)).toBe(false);
+        }),
+      ),
+    );
 
-  it.effect("refuses a wrong token, and another account's token", () =>
-    withUsers("delete_refused", ([owner, other]) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        const token = yield* requestDeletion(db, owner);
-        const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
+    it.effect("refuses a wrong token, and another account's token", () =>
+      withUsers("delete_refused", ([owner, other]) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          const token = yield* requestDeletion(db, owner);
+          const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
 
-        expect(yield* refusal(confirmDeletion(db, owner.id, guess))).toEqual(Option.some("DNIED"));
-        expect(yield* refusal(confirmDeletion(db, other.id, token))).toEqual(Option.some("DNIED"));
-        expect(yield* userExists(db, owner.id)).toBe(true);
-        expect(yield* userExists(db, other.id)).toBe(true);
-      }),
-    ),
-  );
+          expect(yield* refusal(confirmDeletion(db, owner.id, guess))).toEqual(
+            Option.some("DNIED"),
+          );
+          expect(yield* refusal(confirmDeletion(db, other.id, token))).toEqual(
+            Option.some("DNIED"),
+          );
+          expect(yield* userExists(db, owner.id)).toBe(true);
+          expect(yield* userExists(db, other.id)).toBe(true);
+        }),
+      ),
+    );
 
-  it.effect("refuses the mailed token once it is older than 1 hour", () =>
-    withUsers("delete_expired", ([user]) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        const token = yield* requestDeletion(db, user);
-        yield* db.all(
-          db.connection
-            .updateTable("app_private.user_secrets")
-            .set({ delete_account_token_generated: sql`now() - interval '1 hour 1 minute'` })
-            .where("user_id", "=", user.id),
-        );
+    it.effect("refuses the mailed token once it is older than 1 hour", () =>
+      withUsers("delete_expired", ([user]) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          const token = yield* requestDeletion(db, user);
+          yield* db.all(
+            db.connection
+              .updateTable("app_private.user_secrets")
+              .set({ delete_account_token_generated: sql`now() - interval '1 hour 1 minute'` })
+              .where("user_id", "=", user.id),
+          );
 
-        expect(yield* refusal(confirmDeletion(db, user.id, token))).toEqual(Option.some("DNIED"));
-        expect(yield* userExists(db, user.id)).toBe(true);
-      }),
-    ),
-  );
-});
+          expect(yield* refusal(confirmDeletion(db, user.id, token))).toEqual(Option.some("DNIED"));
+          expect(yield* userExists(db, user.id)).toBe(true);
+        }),
+      ),
+    );
+  },
+);
 
 type TestUser = { readonly id: string; readonly email: string };
 

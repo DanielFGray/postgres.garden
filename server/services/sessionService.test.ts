@@ -62,7 +62,7 @@ layer(
   SessionService.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
   ),
-  { timeout: "30 seconds" },
+  { excludeTestServices: true, timeout: "30 seconds" },
 )("SessionService", (it) => {
   it.effect("mints a session the database and the cache agree on", () =>
     Effect.gen(function* () {

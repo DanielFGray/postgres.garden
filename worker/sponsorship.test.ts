@@ -6,41 +6,41 @@ import { type DatabaseError, PgRootDB } from "../server/db.js";
 import { randomSuffix } from "../server/testSupport.js";
 import { Sponsorship, SponsorshipEvent } from "./sponsorship.js";
 
-layer(Layer.provideMerge(Sponsorship.layer, PgRootDB.layer), { timeout: "30 seconds" })(
-  "Sponsorship",
-  (it) => {
-    it.effect("makes a GitHub sponsor a sponsor, and a user again when it ends", () =>
-      withSponsor("user", (login, role) =>
-        Effect.gen(function* () {
-          const sponsorship = yield* Sponsorship;
-          yield* sponsorship.apply(yield* event("created", login));
-          expect(yield* role).toBe("sponsor");
-          yield* sponsorship.apply(yield* event("edited", login));
-          expect(yield* role).toBe("sponsor");
-          yield* sponsorship.apply(yield* event("cancelled", login));
-          expect(yield* role).toBe("user");
-        }),
-      ),
-    );
-
-    it.effect("skips an event that names no sponsor", () =>
+layer(Layer.provideMerge(Sponsorship.layer, PgRootDB.layer), {
+  excludeTestServices: true,
+  timeout: "30 seconds",
+})("Sponsorship", (it) => {
+  it.effect("makes a GitHub sponsor a sponsor, and a user again when it ends", () =>
+    withSponsor("user", (login, role) =>
       Effect.gen(function* () {
-        yield* (yield* Sponsorship).apply(yield* event("created", null));
+        const sponsorship = yield* Sponsorship;
+        yield* sponsorship.apply(yield* event("created", login));
+        expect(yield* role).toBe("sponsor");
+        yield* sponsorship.apply(yield* event("edited", login));
+        expect(yield* role).toBe("sponsor");
+        yield* sponsorship.apply(yield* event("cancelled", login));
+        expect(yield* role).toBe("user");
       }),
-    );
+    ),
+  );
 
-    it.effect("leaves an admin who sponsors an admin", () =>
-      withSponsor("admin", (login, role) =>
-        Effect.gen(function* () {
-          const sponsorship = yield* Sponsorship;
-          yield* sponsorship.apply(yield* event("created", login));
-          yield* sponsorship.apply(yield* event("cancelled", login));
-          expect(yield* role).toBe("admin");
-        }),
-      ),
-    );
-  },
-);
+  it.effect("skips an event that names no sponsor", () =>
+    Effect.gen(function* () {
+      yield* (yield* Sponsorship).apply(yield* event("created", null));
+    }),
+  );
+
+  it.effect("leaves an admin who sponsors an admin", () =>
+    withSponsor("admin", (login, role) =>
+      Effect.gen(function* () {
+        const sponsorship = yield* Sponsorship;
+        yield* sponsorship.apply(yield* event("created", login));
+        yield* sponsorship.apply(yield* event("cancelled", login));
+        expect(yield* role).toBe("admin");
+      }),
+    ),
+  );
+});
 
 /** A sponsorship event as GitHub sends it, decoded as the worker decodes it. */
 const event = (action: string, login: string | null) =>

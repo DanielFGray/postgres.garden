@@ -1,5 +1,6 @@
 import { expect, it, suite } from "@effect/vitest";
 import { Effect, Layer, Schema as S } from "effect";
+import { HttpClientRequest } from "effect/http";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -40,14 +41,13 @@ const ProbeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
     .handle("save", () => Effect.void),
 );
 
-const request = (path: string, init?: RequestInit) =>
+const request = (probe: HttpClientRequest.HttpClientRequest) =>
   requestProbe(
     HttpApiBuilder.layer(ProbeApi).pipe(
       Layer.provide(ProbeHandlers),
       Layer.provide(FailureBoundaryLive),
     ),
-    path,
-    init,
+    probe,
   );
 
 const ResponseBody = S.fromJsonString(S.Json);
@@ -56,7 +56,7 @@ const parseBody = S.decodeUnknownEffect(ResponseBody);
 suite("FailureBoundary", () => {
   it.live("answers a defect with a 500 that carries the trace id of its logged cause", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request("/defect");
+      const { status, body, lines } = yield* request(HttpClientRequest.get("/defect"));
       expect(lines).toHaveLength(1);
       const [line] = lines;
       expect(line?.message).toEqual(["Unexpected failure"]);
@@ -73,7 +73,7 @@ suite("FailureBoundary", () => {
 
   it.live("passes a declared error through unlogged", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request("/locked");
+      const { status, body, lines } = yield* request(HttpClientRequest.get("/locked"));
       expect(status).toBe(423);
       expect(yield* parseBody(body)).toEqual({ _tag: "Locked", message: "account locked" });
       expect(lines).toEqual([]);
@@ -82,11 +82,11 @@ suite("FailureBoundary", () => {
 
   it.live("answers a payload its schema rejects with 400 invalid_input naming each value", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request("/save", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: '{"count":"many"}',
-      });
+      const { status, body, lines } = yield* request(
+        HttpClientRequest.post("/save").pipe(
+          HttpClientRequest.bodyText('{"count":"many"}', "application/json"),
+        ),
+      );
       expect(status).toBe(400);
       expect(yield* parseBody(body)).toEqual({
         _tag: "InvalidOperation",

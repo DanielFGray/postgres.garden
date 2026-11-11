@@ -209,265 +209,263 @@ const withAnonymousPlayground = <A, E, R>(
     );
   });
 
-layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), { timeout: "30 seconds" })(
-  "an anonymous playground's edit key",
-  (it) => {
-    it.effect("stores the key's digest and keeps the name the author sent", () =>
-      withAnonymousPlayground(({ hash, key, keyHash }) =>
-        Effect.gen(function* () {
-          const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
-
-          expect(row.user_id).toBeNull();
-          expect(row.name).toMatch(/^anon-/);
-          // The digest is what the row holds. The key itself exists only in
-          // this test and, in the real flow, in the answer to the author.
-          expect(row.edit_key_hash?.equals(keyHash)).toBe(true);
-          expect(row.edit_key_hash?.toString("hex")).not.toContain(key);
-          // An unclaimed playground is pruned, so the author has to be told
-          // when it goes.
-          expect(row.expires_at).toBeInstanceOf(Date);
-        }),
-      ),
-    );
-
-    it.effect("commits to the same playground when the key is presented again", () =>
-      withAnonymousPlayground(({ hash, keyHash }) =>
-        Effect.gen(function* () {
-          const second = yield* asVisitor((db) =>
-            save(db, {
-              message: "second",
-              content: "select 2",
-              hash,
-              editKeyHash: keyHash,
-            }),
-          ).pipe(anonymous);
-
-          // The link the author holds stays the playground they are editing.
-          expect(second.playground_hash).toBe(hash);
-          expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(2);
-        }),
-      ),
-    );
-
-    it.effect("refuses a commit with the wrong key, and one with none", () =>
-      withAnonymousPlayground(({ hash }) =>
-        Effect.gen(function* () {
-          const otherKeyHash = yield* Secrets.use((secrets) =>
-            Effect.flatMap(secrets.generate, (secret) => secrets.digest(secret)),
-          );
-
-          const wrong = yield* Effect.flip(
-            asVisitor((db) =>
-              save(db, { message: "no", content: "select 3", hash, editKeyHash: otherKeyHash }),
-            ).pipe(anonymous),
-          );
-          expect((yield* refusal(wrong)).code).toBe("DNIED");
-
-          const none = yield* Effect.flip(
-            asVisitor((db) => save(db, { message: "no", content: "select 3", hash })).pipe(
-              anonymous,
-            ),
-          );
-          expect((yield* refusal(none)).code).toBe("DNIED");
-
-          expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(1);
-        }),
-      ),
-    );
-
-    it.effect("refuses to start a playground that nobody could come back to", () =>
+layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
+  excludeTestServices: true,
+  timeout: "30 seconds",
+})("an anonymous playground's edit key", (it) => {
+  it.effect("stores the key's digest and keeps the name the author sent", () =>
+    withAnonymousPlayground(({ hash, key, keyHash }) =>
       Effect.gen(function* () {
-        const error = yield* Effect.flip(
-          asVisitor((db) => save(db, { message: "orphan", content: "select 1" })).pipe(anonymous),
+        const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
+
+        expect(row.user_id).toBeNull();
+        expect(row.name).toMatch(/^anon-/);
+        // The digest is what the row holds. The key itself exists only in
+        // this test and, in the real flow, in the answer to the author.
+        expect(row.edit_key_hash?.equals(keyHash)).toBe(true);
+        expect(row.edit_key_hash?.toString("hex")).not.toContain(key);
+        // An unclaimed playground is pruned, so the author has to be told
+        // when it goes.
+        expect(row.expires_at).toBeInstanceOf(Date);
+      }),
+    ),
+  );
+
+  it.effect("commits to the same playground when the key is presented again", () =>
+    withAnonymousPlayground(({ hash, keyHash }) =>
+      Effect.gen(function* () {
+        const second = yield* asVisitor((db) =>
+          save(db, {
+            message: "second",
+            content: "select 2",
+            hash,
+            editKeyHash: keyHash,
+          }),
+        ).pipe(anonymous);
+
+        // The link the author holds stays the playground they are editing.
+        expect(second.playground_hash).toBe(hash);
+        expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(2);
+      }),
+    ),
+  );
+
+  it.effect("refuses a commit with the wrong key, and one with none", () =>
+    withAnonymousPlayground(({ hash }) =>
+      Effect.gen(function* () {
+        const otherKeyHash = yield* Secrets.use((secrets) =>
+          Effect.flatMap(secrets.generate, (secret) => secrets.digest(secret)),
         );
 
-        const { code, message } = yield* refusal(error);
-        expect(code).toBe("MODAT");
-        expect(message).toContain("An anonymous playground needs an edit key");
-      }),
-    );
-
-    it.effect("lets the key holder change what the playground says about itself", () =>
-      withAnonymousPlayground(({ hash, keyHash }) =>
-        Effect.gen(function* () {
-          yield* PgRootDB.use((db) =>
-            db.all(
-              db.connection
-                .updateTable("app_public.playgrounds")
-                .set({ description: "as created" })
-                .where("hash", "=", hash),
-            ),
-          );
-
-          const updated = yield* asVisitor((db) =>
-            updateMetadata(db, hash, { name: "renamed", privacy: "public" }, keyHash),
-          ).pipe(anonymous);
-
-          expect(updated.name).toBe("renamed");
-          expect(updated.privacy).toBe("public");
-          // The patch said nothing about the description, so it still stands.
-          expect(updated.description).toBe("as created");
-
-          const cleared = yield* asVisitor((db) =>
-            updateMetadata(db, hash, { description: null }, keyHash),
-          ).pipe(anonymous);
-
-          expect(cleared.description).toBeNull();
-          expect(cleared.name).toBe("renamed");
-        }),
-      ),
-    );
-
-    it.effect("refuses a metadata change with the wrong key, and one with none", () =>
-      withAnonymousPlayground(({ hash }) =>
-        Effect.gen(function* () {
-          const wrongKey = yield* Secrets.use((secrets) => secrets.generate);
-          const wrongHash = yield* Secrets.use((secrets) => secrets.digest(wrongKey));
-
-          // No row answers both of these: a playground someone cannot write to
-          // is one they cannot tell from a playground that is not there.
-          const wrong = yield* Effect.flip(
-            asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, wrongHash)).pipe(
-              anonymous,
-            ),
-          );
-          expect(wrong._tag).toBe("NoSuchElementError");
-
-          const none = yield* Effect.flip(
-            asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, null)).pipe(anonymous),
-          );
-          expect(none._tag).toBe("NoSuchElementError");
-
-          const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
-          expect(row.name).not.toBe("stolen");
-        }),
-      ),
-    );
-
-    it.effect("refuses a save larger than a playground with no account may hold", () =>
-      Effect.gen(function* () {
-        const keyHash = yield* Secrets.use((secrets) => secrets.digest("too-big"));
-        const error = yield* Effect.flip(
+        const wrong = yield* Effect.flip(
           asVisitor((db) =>
-            save(db, {
-              message: "oversized",
-              // The cap is on the stored commit, which is this content plus the
-              // JSON around it.
-              content: "x".repeat(1024 * 1024),
-              editKeyHash: keyHash,
-            }),
+            save(db, { message: "no", content: "select 3", hash, editKeyHash: otherKeyHash }),
           ).pipe(anonymous),
         );
+        expect((yield* refusal(wrong)).code).toBe("DNIED");
 
-        const { code, message } = yield* refusal(error);
-        expect(code).toBe("DNIED");
-        expect(message).toContain("Storage limit exceeded");
+        const none = yield* Effect.flip(
+          asVisitor((db) => save(db, { message: "no", content: "select 3", hash })).pipe(anonymous),
+        );
+        expect((yield* refusal(none)).code).toBe("DNIED");
+
+        expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(1);
       }),
-    );
+    ),
+  );
 
-    it.effect("hands the playground to the account that presents the key", () =>
+  it.effect("refuses to start a playground that nobody could come back to", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        asVisitor((db) => save(db, { message: "orphan", content: "select 1" })).pipe(anonymous),
+      );
+
+      const { code, message } = yield* refusal(error);
+      expect(code).toBe("MODAT");
+      expect(message).toContain("An anonymous playground needs an edit key");
+    }),
+  );
+
+  it.effect("lets the key holder change what the playground says about itself", () =>
+    withAnonymousPlayground(({ hash, keyHash }) =>
       Effect.gen(function* () {
-        const suffix = yield* randomSuffix;
-        const user = yield* PgRootDB.use((db) => createUser(db, `claim_${suffix}`));
-        const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
+        yield* PgRootDB.use((db) =>
+          db.all(
+            db.connection
+              .updateTable("app_public.playgrounds")
+              .set({ description: "as created" })
+              .where("hash", "=", hash),
+          ),
+        );
 
-        yield* Effect.ensuring(
-          withAnonymousPlayground(({ hash, keyHash }) =>
-            Effect.gen(function* () {
-              yield* PgRootDB.use((db) =>
-                db.all(
-                  db.connection.insertInto("app_private.sessions").values({
-                    id: sessionId,
-                    user_id: user.id,
-                    expires_at: expiry,
-                  }),
-                ),
-              );
-              const asUser = Effect.provideService(CurrentSession, {
-                user: {
-                  id: user.id,
-                  username: `claim_${suffix}`,
-                  role: "user",
-                  is_verified: true,
-                },
-                session: {
+        const updated = yield* asVisitor((db) =>
+          updateMetadata(db, hash, { name: "renamed", privacy: "public" }, keyHash),
+        ).pipe(anonymous);
+
+        expect(updated.name).toBe("renamed");
+        expect(updated.privacy).toBe("public");
+        // The patch said nothing about the description, so it still stands.
+        expect(updated.description).toBe("as created");
+
+        const cleared = yield* asVisitor((db) =>
+          updateMetadata(db, hash, { description: null }, keyHash),
+        ).pipe(anonymous);
+
+        expect(cleared.description).toBeNull();
+        expect(cleared.name).toBe("renamed");
+      }),
+    ),
+  );
+
+  it.effect("refuses a metadata change with the wrong key, and one with none", () =>
+    withAnonymousPlayground(({ hash }) =>
+      Effect.gen(function* () {
+        const wrongKey = yield* Secrets.use((secrets) => secrets.generate);
+        const wrongHash = yield* Secrets.use((secrets) => secrets.digest(wrongKey));
+
+        // No row answers both of these: a playground someone cannot write to
+        // is one they cannot tell from a playground that is not there.
+        const wrong = yield* Effect.flip(
+          asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, wrongHash)).pipe(
+            anonymous,
+          ),
+        );
+        expect(wrong._tag).toBe("NoSuchElementError");
+
+        const none = yield* Effect.flip(
+          asVisitor((db) => updateMetadata(db, hash, { name: "stolen" }, null)).pipe(anonymous),
+        );
+        expect(none._tag).toBe("NoSuchElementError");
+
+        const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
+        expect(row.name).not.toBe("stolen");
+      }),
+    ),
+  );
+
+  it.effect("refuses a save larger than a playground with no account may hold", () =>
+    Effect.gen(function* () {
+      const keyHash = yield* Secrets.use((secrets) => secrets.digest("too-big"));
+      const error = yield* Effect.flip(
+        asVisitor((db) =>
+          save(db, {
+            message: "oversized",
+            // The cap is on the stored commit, which is this content plus the
+            // JSON around it.
+            content: "x".repeat(1024 * 1024),
+            editKeyHash: keyHash,
+          }),
+        ).pipe(anonymous),
+      );
+
+      const { code, message } = yield* refusal(error);
+      expect(code).toBe("DNIED");
+      expect(message).toContain("Storage limit exceeded");
+    }),
+  );
+
+  it.effect("hands the playground to the account that presents the key", () =>
+    Effect.gen(function* () {
+      const suffix = yield* randomSuffix;
+      const user = yield* PgRootDB.use((db) => createUser(db, `claim_${suffix}`));
+      const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
+
+      yield* Effect.ensuring(
+        withAnonymousPlayground(({ hash, keyHash }) =>
+          Effect.gen(function* () {
+            yield* PgRootDB.use((db) =>
+              db.all(
+                db.connection.insertInto("app_private.sessions").values({
                   id: sessionId,
-                  cookie_id: `claim_${suffix}`,
                   user_id: user.id,
                   expires_at: expiry,
-                },
-              } satisfies SessionData);
+                }),
+              ),
+            );
+            const asUser = Effect.provideService(CurrentSession, {
+              user: {
+                id: user.id,
+                username: `claim_${suffix}`,
+                role: "user",
+                is_verified: true,
+              },
+              session: {
+                id: sessionId,
+                cookie_id: `claim_${suffix}`,
+                user_id: user.id,
+                expires_at: expiry,
+              },
+            } satisfies SessionData);
 
-              const claimed = yield* asVisitor((db) => claim(db, hash, keyHash)).pipe(asUser);
+            const claimed = yield* asVisitor((db) => claim(db, hash, keyHash)).pipe(asUser);
 
-              expect(claimed.user_id).toBe(user.id);
-              // The key stops being the way in, and the row stops expiring.
-              expect(claimed.edit_key_hash).toBeNull();
-              expect(claimed.expires_at).toBeNull();
+            expect(claimed.user_id).toBe(user.id);
+            // The key stops being the way in, and the row stops expiring.
+            expect(claimed.edit_key_hash).toBeNull();
+            expect(claimed.expires_at).toBeNull();
 
-              // The owner's own save needs no key from here on.
-              const third = yield* asVisitor((db) =>
-                save(db, { message: "mine now", content: "select 4", hash }),
-              ).pipe(asUser);
-              expect(third.playground_hash).toBe(hash);
-            }),
-          ),
-          PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
-        );
-      }),
-    );
+            // The owner's own save needs no key from here on.
+            const third = yield* asVisitor((db) =>
+              save(db, { message: "mine now", content: "select 4", hash }),
+            ).pipe(asUser);
+            expect(third.playground_hash).toBe(hash);
+          }),
+        ),
+        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+      );
+    }),
+  );
 
-    it.effect("refuses a claim without the key", () =>
-      Effect.gen(function* () {
-        const suffix = yield* randomSuffix;
-        const user = yield* PgRootDB.use((db) => createUser(db, `noclaim_${suffix}`));
-        const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
+  it.effect("refuses a claim without the key", () =>
+    Effect.gen(function* () {
+      const suffix = yield* randomSuffix;
+      const user = yield* PgRootDB.use((db) => createUser(db, `noclaim_${suffix}`));
+      const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
-        yield* Effect.ensuring(
-          withAnonymousPlayground(({ hash }) =>
-            Effect.gen(function* () {
-              yield* PgRootDB.use((db) =>
-                db.all(
-                  db.connection.insertInto("app_private.sessions").values({
+      yield* Effect.ensuring(
+        withAnonymousPlayground(({ hash }) =>
+          Effect.gen(function* () {
+            yield* PgRootDB.use((db) =>
+              db.all(
+                db.connection.insertInto("app_private.sessions").values({
+                  id: sessionId,
+                  user_id: user.id,
+                  expires_at: expiry,
+                }),
+              ),
+            );
+            const otherKeyHash = yield* Secrets.use((secrets) =>
+              Effect.flatMap(secrets.generate, (secret) => secrets.digest(secret)),
+            );
+
+            const error = yield* Effect.flip(
+              asVisitor((db) => claim(db, hash, otherKeyHash)).pipe(
+                Effect.provideService(CurrentSession, {
+                  user: {
+                    id: user.id,
+                    username: `noclaim_${suffix}`,
+                    role: "user",
+                    is_verified: true,
+                  },
+                  session: {
                     id: sessionId,
+                    cookie_id: `noclaim_${suffix}`,
                     user_id: user.id,
                     expires_at: expiry,
-                  }),
-                ),
-              );
-              const otherKeyHash = yield* Secrets.use((secrets) =>
-                Effect.flatMap(secrets.generate, (secret) => secrets.digest(secret)),
-              );
+                  },
+                } satisfies SessionData),
+              ),
+            );
 
-              const error = yield* Effect.flip(
-                asVisitor((db) => claim(db, hash, otherKeyHash)).pipe(
-                  Effect.provideService(CurrentSession, {
-                    user: {
-                      id: user.id,
-                      username: `noclaim_${suffix}`,
-                      role: "user",
-                      is_verified: true,
-                    },
-                    session: {
-                      id: sessionId,
-                      cookie_id: `noclaim_${suffix}`,
-                      user_id: user.id,
-                      expires_at: expiry,
-                    },
-                  } satisfies SessionData),
-                ),
-              );
-
-              expect((yield* refusal(error)).code).toBe("DNIED");
-              expect((yield* PgRootDB.use((db) => readPlayground(db, hash))).user_id).toBeNull();
-            }),
-          ),
-          PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
-        );
-      }),
-    );
-  },
-);
+            expect((yield* refusal(error)).code).toBe("DNIED");
+            expect((yield* PgRootDB.use((db) => readPlayground(db, hash))).user_id).toBeNull();
+          }),
+        ),
+        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+      );
+    }),
+  );
+});
 
 /**
  * The same flow through the service the handlers call, which is where the key
@@ -478,7 +476,7 @@ layer(
   PlaygroundService.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer)),
   ),
-  { timeout: "30 seconds" },
+  { excludeTestServices: true, timeout: "30 seconds" },
 )("saving without an account", (it) => {
   it.effect("answers a key, then takes that key as proof of a later save", () =>
     Effect.gen(function* () {

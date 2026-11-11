@@ -1,14 +1,14 @@
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it, layer } from "@effect/vitest";
 import { ConfigProvider, Effect, Layer, Random } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
 import { RateLimitMiddleware } from "../shared/api/rateLimit.js";
 import { PgGardenApi } from "../shared/httpApi.js";
-import { DatabaseLive, PgRootDB } from "./db.js";
+import { PgRootDB } from "./db.js";
 import { TooManyRequests } from "../shared/errors.js";
 import { RateLimitMiddlewareLive, rules } from "./rateLimit.js";
 import { RateLimiterMemory } from "./services/rateLimiter.js";
-import { makeTestHttpClientLive, origin } from "./test/apiHarness.js";
+import { makeTestApi } from "./test/apiHarness.js";
 import { RateLimiterStoreFails, RateLimiterStoreSilent } from "./test/rateLimiterStores.js";
 
 describe("rate-limit rules", () => {
@@ -22,8 +22,8 @@ describe("rate-limit rules", () => {
   });
 });
 
-describe("rate limits", { timeout: 30_000 }, () => {
-  it.live("login answers 429 after the address limit; another address is not affected", () =>
+layer(limitedApi(), { excludeTestServices: true, timeout: "30 seconds" })("rate limits", (it) => {
+  it.effect("login answers 429 after the address limit; another address is not affected", () =>
     Effect.gen(function* () {
       const [ipA, ipB] = yield* testAddresses;
 
@@ -37,12 +37,14 @@ describe("rate limits", { timeout: 30_000 }, () => {
       expect(body.retryAfterSeconds).toBeGreaterThanOrEqual(1);
 
       expect((yield* login(ipB)).status).toBe(401);
-    }).pipe(Effect.provide(limitedClient())),
+    }),
   );
 
-  it.live("a user rule counts per signed-in user, not per address", () =>
+  it.effect("a user rule counts per signed-in user, not per address", () =>
     Effect.gen(function* () {
-      const ip = yield* testAddress;
+      // TEST-NET-2: the login test above counts against TEST-NET-3 in the same
+      // in-memory limiter.
+      const ip = `198.51.100.${yield* Random.nextIntBetween(1, 254)}`;
       const suffix = yield* Random.nextIntBetween(0, 0xffffff);
       const [userA, userB] = [`test_rl_a_${suffix}`, `test_rl_b_${suffix}`];
       yield* Effect.addFinalizer(() => deleteUsers([userA, userB]));
@@ -59,31 +61,36 @@ describe("rate limits", { timeout: 30_000 }, () => {
 
       const otherUser = yield* addEmail(cookieB, `b0_${userB}@example.com`, ip);
       expect(otherUser.status).toBe(200);
-    }).pipe(Effect.scoped, Effect.provide([limitedClient(), DatabaseLive])),
+    }).pipe(Effect.scoped),
   );
-
-  for (const [state, limiter] of [
-    ["fails", RateLimiterStoreFails],
-    ["never answers", RateLimiterStoreSilent],
-  ] as const) {
-    it.live(`login passes and forgot-password is refused when the store ${state}`, () =>
-      Effect.gen(function* () {
-        const ip = yield* testAddress;
-
-        expect((yield* login(ip)).status).toBe(401);
-
-        const refused = yield* post("/api/forgotPassword", { email: "nobody@example.com" }, ip);
-        expect(refused.status).toBe(429);
-        const body = yield* HttpClientResponse.schemaBodyJson(TooManyRequests)(refused);
-        expect(body.retryAfterSeconds).toBe(60);
-      }).pipe(Effect.provide(limitedClient(limiter))),
-    );
-  }
 });
 
+for (const [state, limiter] of [
+  ["fails", RateLimiterStoreFails],
+  ["never answers", RateLimiterStoreSilent],
+] as const) {
+  layer(limitedApi(limiter), { excludeTestServices: true, timeout: "30 seconds" })(
+    `rate limits when the store ${state}`,
+    (it) => {
+      it.effect("login passes and forgot-password is refused", () =>
+        Effect.gen(function* () {
+          const ip = yield* testAddress;
+
+          expect((yield* login(ip)).status).toBe(401);
+
+          const refused = yield* post("/api/forgotPassword", { email: "nobody@example.com" }, ip);
+          expect(refused.status).toBe(429);
+          const body = yield* HttpClientResponse.schemaBodyJson(TooManyRequests)(refused);
+          expect(body.retryAfterSeconds).toBe(60);
+        }),
+      );
+    },
+  );
+}
+
 /** The API with enforcing limits that count against `limiter`, keyed by `x-real-ip`. */
-const limitedClient = (limiter: Layer.Layer<RateLimiter> = RateLimiterMemory) =>
-  makeTestHttpClientLive({
+function limitedApi(limiter: Layer.Layer<RateLimiter> = RateLimiterMemory) {
+  return makeTestApi({
     rateLimit: RateLimitMiddlewareLive.pipe(
       Layer.provide(limiter),
       Layer.provide(
@@ -91,6 +98,7 @@ const limitedClient = (limiter: Layer.Layer<RateLimiter> = RateLimiterMemory) =>
       ),
     ),
   });
+}
 
 /**
  * Two different addresses in TEST-NET-3, so a run never counts against a real
@@ -109,7 +117,7 @@ const post = Effect.fnUntraced(function* (
   cookie = "",
 ) {
   const client = yield* HttpClient.HttpClient;
-  const request = yield* HttpClientRequest.post(`${origin}${path}`).pipe(
+  const request = yield* HttpClientRequest.post(path).pipe(
     HttpClientRequest.setHeaders({ "x-real-ip": ip, cookie }),
     HttpClientRequest.bodyJson(body),
   );
@@ -126,7 +134,7 @@ const addEmail = (cookie: string, email: string, ip: string) =>
 const signIn = Effect.fnUntraced(function* (username: string) {
   const client = yield* HttpClient.HttpClient;
   const response = yield* client.execute(
-    HttpClientRequest.get(`${origin}/api/testing/login`, {
+    HttpClientRequest.get("/api/testing/login", {
       urlParams: { username, verified: "true" },
     }),
   );

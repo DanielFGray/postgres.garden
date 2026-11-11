@@ -10,58 +10,61 @@ import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
  * the token's hash. No worker runs against the test database, so the job stays
  * in the table to be read.
  */
-layer(DatabaseLive, { timeout: "30 seconds" })("app_private.reset_password", (it) => {
-  it.effect("accepts the mailed token alone, once, and stores only its hash", () =>
-    withPendingReset("reset_valid", ({ user, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        const pending = yield* userSecrets(db, user.id);
-        expect(pending.reset_password_token_hash).toBe(yield* sha256(db, token));
+layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
+  "app_private.reset_password",
+  (it) => {
+    it.effect("accepts the mailed token alone, once, and stores only its hash", () =>
+      withPendingReset("reset_valid", ({ user, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          const pending = yield* userSecrets(db, user.id);
+          expect(pending.reset_password_token_hash).toBe(yield* sha256(db, token));
 
-        expect(yield* resetPassword(db, token)).toBe(true);
-        const after = yield* userSecrets(db, user.id);
-        expect(after.password_hash).not.toBe(pending.password_hash);
-        expect(after.reset_password_token_hash).toBeNull();
+          expect(yield* resetPassword(db, token)).toBe(true);
+          const after = yield* userSecrets(db, user.id);
+          expect(after.password_hash).not.toBe(pending.password_hash);
+          expect(after.reset_password_token_hash).toBeNull();
 
-        expect(yield* resetPassword(db, token)).toBeNull();
-      }),
-    ),
-  );
+          expect(yield* resetPassword(db, token)).toBeNull();
+        }),
+      ),
+    );
 
-  it.effect("rejects a token that matches no pending reset", () =>
-    withPendingReset("reset_guess", ({ user, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        const before = yield* userSecrets(db, user.id);
-        const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
+    it.effect("rejects a token that matches no pending reset", () =>
+      withPendingReset("reset_guess", ({ user, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          const before = yield* userSecrets(db, user.id);
+          const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
 
-        expect(yield* resetPassword(db, guess)).toBeNull();
-        expect(yield* resetPassword(db, "not-hex")).toBeNull();
-        expect(yield* userSecrets(db, user.id)).toEqual(before);
-      }),
-    ),
-  );
+          expect(yield* resetPassword(db, guess)).toBeNull();
+          expect(yield* resetPassword(db, "not-hex")).toBeNull();
+          expect(yield* userSecrets(db, user.id)).toEqual(before);
+        }),
+      ),
+    );
 
-  it.effect("rejects the mailed token once it is older than 1 hour", () =>
-    withPendingReset("reset_expired", ({ user, token }) =>
-      Effect.gen(function* () {
-        const db = yield* PgRootDB;
-        yield* db.all(
-          db.connection
-            .updateTable("app_private.user_secrets")
-            .set({ reset_password_token_generated: sql`now() - interval '1 hour 1 minute'` })
-            .where("user_id", "=", user.id),
-        );
-        const before = yield* userSecrets(db, user.id);
+    it.effect("rejects the mailed token once it is older than 1 hour", () =>
+      withPendingReset("reset_expired", ({ user, token }) =>
+        Effect.gen(function* () {
+          const db = yield* PgRootDB;
+          yield* db.all(
+            db.connection
+              .updateTable("app_private.user_secrets")
+              .set({ reset_password_token_generated: sql`now() - interval '1 hour 1 minute'` })
+              .where("user_id", "=", user.id),
+          );
+          const before = yield* userSecrets(db, user.id);
 
-        expect(yield* resetPassword(db, token)).toBeNull();
-        const after = yield* userSecrets(db, user.id);
-        expect(after.password_hash).toBe(before.password_hash);
-        expect(after.failed_reset_password_attempts).toBe(1);
-      }),
-    ),
-  );
-});
+          expect(yield* resetPassword(db, token)).toBeNull();
+          const after = yield* userSecrets(db, user.id);
+          expect(after.password_hash).toBe(before.password_hash);
+          expect(after.failed_reset_password_attempts).toBe(1);
+        }),
+      ),
+    );
+  },
+);
 
 /**
  * Runs `test` with a new user whose reset is pending, and the token that

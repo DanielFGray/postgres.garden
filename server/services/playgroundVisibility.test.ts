@@ -29,184 +29,187 @@ const sortHashes = (hashes: ReadonlyArray<string>) =>
 const fixtureHashes = (rows: ReadonlyArray<{ hash: string }>, fixtures: ReadonlySet<string>) =>
   playgroundHashes(rows.filter(({ hash }) => fixtures.has(hash)));
 
-layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
-  it.effect("applies visibility rules to browse, search, and profiles", () =>
-    Effect.gen(function* () {
-      const sessionService = yield* SessionService;
-      const playgroundService = yield* PlaygroundService;
-      const suffix = yield* randomSuffix;
-      const ownerUsername = `visibility_owner_${suffix}`;
-      const otherUsername = `visibility_other_${suffix}`;
-      // Sponsors, because these cases need a playground at every privacy level
-      // and private is a sponsor entitlement.
-      const users = yield* PgRootDB.use((rootDb) =>
-        Effect.all([
-          createUser(rootDb, ownerUsername, "sponsor"),
-          createUser(rootDb, otherUsername, "sponsor"),
-        ]),
-      );
-      const [owner, other] = users;
-      const ownerHashes = yield* PgRootDB.use((rootDb) =>
-        insertPlaygrounds(rootDb, owner.id, "owner", suffix),
-      );
-      const otherHashes = yield* PgRootDB.use((rootDb) =>
-        insertPlaygrounds(rootDb, other.id, "other", suffix),
-      );
-      const hashes = { owner: ownerHashes, other: otherHashes };
-      const fixtures = new Set(Object.values(hashes).flatMap((group) => Object.values(group)));
+layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
+  "Playground visibility",
+  (it) => {
+    it.effect("applies visibility rules to browse, search, and profiles", () =>
+      Effect.gen(function* () {
+        const sessionService = yield* SessionService;
+        const playgroundService = yield* PlaygroundService;
+        const suffix = yield* randomSuffix;
+        const ownerUsername = `visibility_owner_${suffix}`;
+        const otherUsername = `visibility_other_${suffix}`;
+        // Sponsors, because these cases need a playground at every privacy level
+        // and private is a sponsor entitlement.
+        const users = yield* PgRootDB.use((rootDb) =>
+          Effect.all([
+            createUser(rootDb, ownerUsername, "sponsor"),
+            createUser(rootDb, otherUsername, "sponsor"),
+          ]),
+        );
+        const [owner, other] = users;
+        const ownerHashes = yield* PgRootDB.use((rootDb) =>
+          insertPlaygrounds(rootDb, owner.id, "owner", suffix),
+        );
+        const otherHashes = yield* PgRootDB.use((rootDb) =>
+          insertPlaygrounds(rootDb, other.id, "other", suffix),
+        );
+        const hashes = { owner: ownerHashes, other: otherHashes };
+        const fixtures = new Set(Object.values(hashes).flatMap((group) => Object.values(group)));
 
-      yield* Effect.ensuring(
-        Effect.gen(function* () {
-          const ownerToken = yield* sessionService.createSession(owner.id);
-          const otherToken = yield* sessionService.createSession(other.id);
-          const ownerSession = yield* sessionService.validateSessionToken(ownerToken.token);
-          const otherSession = yield* sessionService.validateSessionToken(otherToken.token);
-          if (!ownerSession.session || !otherSession.session) {
-            return yield* Effect.die(new Error("Failed to create test sessions"));
-          }
+        yield* Effect.ensuring(
+          Effect.gen(function* () {
+            const ownerToken = yield* sessionService.createSession(owner.id);
+            const otherToken = yield* sessionService.createSession(other.id);
+            const ownerSession = yield* sessionService.validateSessionToken(ownerToken.token);
+            const otherSession = yield* sessionService.validateSessionToken(otherToken.token);
+            if (!ownerSession.session || !otherSession.session) {
+              return yield* Effect.die(new Error("Failed to create test sessions"));
+            }
 
-          const anonymous = yield* listAll(
-            playgroundService,
-            anonymousSession,
-            ownerUsername,
-            fixtures,
-          );
-          const ownerView = yield* listAll(
-            playgroundService,
-            ownerSession,
-            ownerUsername,
-            fixtures,
-          );
-          const otherView = yield* listAll(
-            playgroundService,
-            otherSession,
-            ownerUsername,
-            fixtures,
-          );
+            const anonymous = yield* listAll(
+              playgroundService,
+              anonymousSession,
+              ownerUsername,
+              fixtures,
+            );
+            const ownerView = yield* listAll(
+              playgroundService,
+              ownerSession,
+              ownerUsername,
+              fixtures,
+            );
+            const otherView = yield* listAll(
+              playgroundService,
+              otherSession,
+              ownerUsername,
+              fixtures,
+            );
 
-          expect(anonymous).toEqual({
-            list: sortHashes([hashes.owner.public, hashes.other.public]),
-            search: sortHashes([hashes.owner.public, hashes.other.public]),
-            profile: sortHashes([hashes.owner.public]),
-          });
-          expect(ownerView).toEqual({
-            list: sortHashes([hashes.owner.public, hashes.other.public]),
-            search: sortHashes([
-              hashes.owner.private,
-              hashes.owner.secret,
-              hashes.owner.public,
-              hashes.other.public,
-            ]),
-            profile: sortHashes([hashes.owner.private, hashes.owner.secret, hashes.owner.public]),
-          });
-          expect(otherView).toEqual({
-            list: sortHashes([hashes.owner.public, hashes.other.public]),
-            search: sortHashes([
-              hashes.owner.public,
-              hashes.other.private,
-              hashes.other.secret,
-              hashes.other.public,
-            ]),
-            profile: sortHashes([hashes.owner.public]),
-          });
-        }),
-        PgRootDB.use((rootDb) =>
-          Effect.all([deleteUser(rootDb, owner.id), deleteUser(rootDb, other.id)]),
-        ).pipe(Effect.asVoid, Effect.orDie),
-      );
-    }),
-  );
+            expect(anonymous).toEqual({
+              list: sortHashes([hashes.owner.public, hashes.other.public]),
+              search: sortHashes([hashes.owner.public, hashes.other.public]),
+              profile: sortHashes([hashes.owner.public]),
+            });
+            expect(ownerView).toEqual({
+              list: sortHashes([hashes.owner.public, hashes.other.public]),
+              search: sortHashes([
+                hashes.owner.private,
+                hashes.owner.secret,
+                hashes.owner.public,
+                hashes.other.public,
+              ]),
+              profile: sortHashes([hashes.owner.private, hashes.owner.secret, hashes.owner.public]),
+            });
+            expect(otherView).toEqual({
+              list: sortHashes([hashes.owner.public, hashes.other.public]),
+              search: sortHashes([
+                hashes.owner.public,
+                hashes.other.private,
+                hashes.other.secret,
+                hashes.other.public,
+              ]),
+              profile: sortHashes([hashes.owner.public]),
+            });
+          }),
+          PgRootDB.use((rootDb) =>
+            Effect.all([deleteUser(rootDb, owner.id), deleteUser(rootDb, other.id)]),
+          ).pipe(Effect.asVoid, Effect.orDie),
+        );
+      }),
+    );
 
-  // Playgrounds may have no owner, so the browse query left-joins users. The
-  // list contract used to require a username, which made every anonymous
-  // playground a 500 on /api/playgrounds.
-  it.effect("lists an anonymous playground with a null user", () =>
-    Effect.gen(function* () {
-      const playgroundService = yield* PlaygroundService;
-      const hash = `anon_public_${yield* randomSuffix}`;
+    // Playgrounds may have no owner, so the browse query left-joins users. The
+    // list contract used to require a username, which made every anonymous
+    // playground a 500 on /api/playgrounds.
+    it.effect("lists an anonymous playground with a null user", () =>
+      Effect.gen(function* () {
+        const playgroundService = yield* PlaygroundService;
+        const hash = `anon_public_${yield* randomSuffix}`;
 
-      yield* PgRootDB.use((rootDb) =>
-        rootDb.all(
-          rootDb.connection
-            .insertInto("app_public.playgrounds")
-            .values({ hash, user_id: null, privacy: "public", name: hash }),
-        ),
-      );
-
-      yield* Effect.ensuring(
-        Effect.gen(function* () {
-          const rows = yield* playgroundService.list({});
-          const row = rows.find((candidate) => candidate.hash === hash);
-          expect(row).toBeDefined();
-          expect(row?.user).toBeNull();
-        }).pipe(withAuthContext, Effect.provideService(CurrentSession, anonymousSession)),
-        PgRootDB.use((rootDb) =>
-          rootDb.all(
-            rootDb.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash),
-          ),
-        ).pipe(Effect.asVoid, Effect.orDie),
-      );
-    }),
-  );
-
-  // Private is a paid entitlement. It cannot be enforced by RLS, because every
-  // write path reaches the table through a SECURITY DEFINER function that
-  // bypasses it, so a trigger is the only choke point. These cases write
-  // directly as the table owner, which is the weakest position the rule has
-  // to hold from.
-  it.effect("rejects private playgrounds without a sponsor account", () =>
-    Effect.gen(function* () {
-      const suffix = yield* randomSuffix;
-      const free = yield* PgRootDB.use((rootDb) =>
-        createUser(rootDb, `privacy_free_${suffix}`, "user"),
-      );
-      const sponsor = yield* PgRootDB.use((rootDb) =>
-        createUser(rootDb, `privacy_sponsor_${suffix}`, "sponsor"),
-      );
-
-      const insertPrivate = (userId: string | null, hash: string) =>
-        PgRootDB.use((rootDb) =>
+        yield* PgRootDB.use((rootDb) =>
           rootDb.all(
             rootDb.connection
               .insertInto("app_public.playgrounds")
-              .values({ hash, user_id: userId, privacy: "private", name: hash }),
+              .values({ hash, user_id: null, privacy: "public", name: hash }),
           ),
         );
 
-      yield* Effect.ensuring(
-        Effect.gen(function* () {
-          yield* expectDenied(insertPrivate(free.id, `free_private_${suffix}`));
-          yield* expectDenied(insertPrivate(null, `anon_private_${suffix}`));
+        yield* Effect.ensuring(
+          Effect.gen(function* () {
+            const rows = yield* playgroundService.list({});
+            const row = rows.find((candidate) => candidate.hash === hash);
+            expect(row).toBeDefined();
+            expect(row?.user).toBeNull();
+          }).pipe(withAuthContext, Effect.provideService(CurrentSession, anonymousSession)),
+          PgRootDB.use((rootDb) =>
+            rootDb.all(
+              rootDb.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash),
+            ),
+          ).pipe(Effect.asVoid, Effect.orDie),
+        );
+      }),
+    );
 
-          // A sponsor may hold one, and may not keep it after a downgrade.
-          const sponsorHash = `sponsor_private_${suffix}`;
-          yield* insertPrivate(sponsor.id, sponsorHash);
-          yield* PgRootDB.use((rootDb) =>
+    // Private is a paid entitlement. It cannot be enforced by RLS, because every
+    // write path reaches the table through a SECURITY DEFINER function that
+    // bypasses it, so a trigger is the only choke point. These cases write
+    // directly as the table owner, which is the weakest position the rule has
+    // to hold from.
+    it.effect("rejects private playgrounds without a sponsor account", () =>
+      Effect.gen(function* () {
+        const suffix = yield* randomSuffix;
+        const free = yield* PgRootDB.use((rootDb) =>
+          createUser(rootDb, `privacy_free_${suffix}`, "user"),
+        );
+        const sponsor = yield* PgRootDB.use((rootDb) =>
+          createUser(rootDb, `privacy_sponsor_${suffix}`, "sponsor"),
+        );
+
+        const insertPrivate = (userId: string | null, hash: string) =>
+          PgRootDB.use((rootDb) =>
             rootDb.all(
               rootDb.connection
-                .updateTable("app_public.users")
-                .set({ role: "user" })
-                .where("id", "=", sponsor.id),
+                .insertInto("app_public.playgrounds")
+                .values({ hash, user_id: userId, privacy: "private", name: hash }),
             ),
           );
-          yield* expectDenied(
-            PgRootDB.use((rootDb) =>
+
+        yield* Effect.ensuring(
+          Effect.gen(function* () {
+            yield* expectDenied(insertPrivate(free.id, `free_private_${suffix}`));
+            yield* expectDenied(insertPrivate(null, `anon_private_${suffix}`));
+
+            // A sponsor may hold one, and may not keep it after a downgrade.
+            const sponsorHash = `sponsor_private_${suffix}`;
+            yield* insertPrivate(sponsor.id, sponsorHash);
+            yield* PgRootDB.use((rootDb) =>
               rootDb.all(
                 rootDb.connection
-                  .updateTable("app_public.playgrounds")
-                  .set({ privacy: "private" })
-                  .where("hash", "=", sponsorHash),
+                  .updateTable("app_public.users")
+                  .set({ role: "user" })
+                  .where("id", "=", sponsor.id),
               ),
-            ),
-          );
-        }),
-        PgRootDB.use((rootDb) =>
-          Effect.all([deleteUser(rootDb, free.id), deleteUser(rootDb, sponsor.id)]),
-        ).pipe(Effect.asVoid, Effect.orDie),
-      );
-    }),
-  );
-});
+            );
+            yield* expectDenied(
+              PgRootDB.use((rootDb) =>
+                rootDb.all(
+                  rootDb.connection
+                    .updateTable("app_public.playgrounds")
+                    .set({ privacy: "private" })
+                    .where("hash", "=", sponsorHash),
+                ),
+              ),
+            );
+          }),
+          PgRootDB.use((rootDb) =>
+            Effect.all([deleteUser(rootDb, free.id), deleteUser(rootDb, sponsor.id)]),
+          ).pipe(Effect.asVoid, Effect.orDie),
+        );
+      }),
+    );
+  },
+);
 
 /**
  * Assert an effect fails with the DNIED error code the entitlement trigger raises.

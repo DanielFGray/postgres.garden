@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
-import { Array, Effect, Option, Ref } from "effect";
+import { Array, Effect, Option, Queue, Ref } from "effect";
 import * as S from "effect/Schema";
 import { RelayOrigin, relayReply } from "./relay";
 import {
@@ -89,11 +89,12 @@ const connect = Effect.fnUntraced(function* (respond: (seen: Seen) => Response) 
       for (const subscriber of subscribers) subscriber(structuredClone(encoded));
     }).pipe(Effect.provide(stubServer), Effect.provideService(RelayOrigin, origin), Effect.orDie);
 
-  const context = yield* Effect.context<never>();
+  // The extension host starts its own work when a message arrives: `post`
+  // only queues the message, and a fiber of this test handles it.
+  const inbox = yield* Queue.unbounded<RelayRequestEncoded>();
+  yield* Effect.forkChild(Effect.forever(Effect.flatMap(Queue.take(inbox), runHost)));
   const channel: RelayChannel<RelayRequestEncoded> = {
-    // The one place this test runs an effect: it stands in for the extension
-    // host, which really does start its own work when a message arrives.
-    post: (message) => void Effect.runPromiseWith(context)(runHost(structuredClone(message))),
+    post: (message) => void Queue.offerUnsafe(inbox, structuredClone(message)),
     subscribe: (handler) => subscribers.push(handler),
   };
 
