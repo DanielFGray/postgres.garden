@@ -253,6 +253,7 @@
     "nodemailer": "^10.5.0",
     "npm-run-all": "^4.1.5",
     "pg": "^8.23.1",
+    "pg-error-enum": "^2.1.0",
     "pg-introspection": "^1.0.2",
     "postgres-semicolons": "^0.1.2",
     "redis": "^6.3.0",

@@ -12,14 +12,7 @@ import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
-import {
-  DatabaseLive,
-  type DatabaseError,
-  unwrapPgError,
-  PgRootDB,
-  type DbHandle,
-  type PublicDB,
-} from "../db.js";
+import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle, type PublicDB } from "../db.js";
 import { Secrets } from "../secrets.js";
 import { PlaygroundService } from "./playgroundService.js";
 import { withAuthContext } from "../requestDatabase.js";
@@ -179,11 +172,8 @@ const dropPlayground = (db: DbHandle, hash: string) =>
       ),
     );
 
-/** The pg error behind a failed query: its code, and the message the database wrote. */
-const refusal = (error: DatabaseError) =>
-  unwrapPgError(error).pipe(
-    Effect.map((pgError) => ({ code: pgError?.code, message: pgError?.message ?? "" })),
-  );
+/** What Postgres reported about a refused query: its code, and the message the database wrote. */
+const refusal = (error: DatabaseError) => Effect.fromOption(error.report);
 
 /** Nobody is signed in, so `app_public.current_user_id()` resolves to null. */
 const anonymous = Effect.provideService(CurrentSession, { user: null, session: null });

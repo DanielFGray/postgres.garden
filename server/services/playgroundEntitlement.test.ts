@@ -14,7 +14,7 @@ import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
-import { DatabaseLive, type DatabaseError, unwrapPgError, PgRootDB, type DbHandle } from "../db.js";
+import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
 import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
@@ -71,11 +71,8 @@ const dropPlayground = (db: DbHandle, hash: string) =>
       ),
     );
 
-/** The pg error behind a failed query: its code, and the message the database wrote. */
-const refusal = (error: DatabaseError) =>
-  unwrapPgError(error).pipe(
-    Effect.map((pgError) => ({ code: pgError?.code, message: pgError?.message ?? "" })),
-  );
+/** What Postgres reported about a refused query: its code, and the message the database wrote. */
+const refusal = (error: DatabaseError) => Effect.fromOption(error.report);
 
 layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), { timeout: "30 seconds" })(
   "the private-playground entitlement",

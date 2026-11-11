@@ -1,7 +1,6 @@
-import { Array as Arr, Context, Effect, Layer, Match, Schema as S } from "effect";
-import pg from "pg";
+import { Array as Arr, Context, Effect, Layer, Match, Option, Schema as S } from "effect";
 import { sql } from "kysely";
-import { PgRootDB, unwrapPgError } from "../db.js";
+import { PgRootDB, type PostgresReport } from "../db.js";
 import type { AppPublicUsers } from "../../generated/db.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
@@ -61,24 +60,23 @@ export class DuplicateAccountError extends S.TaggedError<
   message: S.String,
 }) {}
 
-const mapRegisterPgError = (
-  dbErr: pg.DatabaseError,
-): MissingDataError | WeakPasswordError | DuplicateAccountError | undefined =>
-  Match.value(dbErr.code).pipe(
-    Match.when(
-      "MODAT",
-      () =>
+const mapRegisterReport = (
+  report: PostgresReport,
+): Option.Option<MissingDataError | WeakPasswordError | DuplicateAccountError> =>
+  Match.value(report.code).pipe(
+    Match.when("MODAT", () =>
+      Option.some<MissingDataError | WeakPasswordError | DuplicateAccountError>(
         new MissingDataError({
-          message: dbErr.message,
-          field: dbErr.message.toLowerCase().includes("email") ? "email" : "password",
+          message: report.message,
+          field: report.message.toLowerCase().includes("email") ? "email" : "password",
         }),
+      ),
     ),
-    Match.when("WEAKP", () => new WeakPasswordError({ message: dbErr.message })),
-    Match.when(
-      "23505",
-      () => new DuplicateAccountError({ message: "Username or email already exists" }),
+    Match.when("WEAKP", () => Option.some(new WeakPasswordError({ message: report.message }))),
+    Match.when("23505", () =>
+      Option.some(new DuplicateAccountError({ message: "Username or email already exists" })),
     ),
-    Match.orElse(() => undefined),
+    Match.orElse(() => Option.none()),
   );
 
 /**
@@ -154,14 +152,15 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
             );
           return { user, token, expiresAt };
         },
-        Effect.catch((e) =>
-          unwrapPgError(e).pipe(
-            Effect.flatMap((dbErr) => {
-              const mapped = dbErr ? mapRegisterPgError(dbErr) : undefined;
-              return mapped ? Effect.fail(mapped) : Effect.die(e);
+        Effect.catchTags({
+          DatabaseError: (e) =>
+            Option.match(Option.flatMap(e.report, mapRegisterReport), {
+              onNone: () => Effect.die(e),
+              onSome: Effect.fail,
             }),
-          ),
-        ),
+          // The session cache write failed: no answer the client can act on.
+          RedisError: Effect.die,
+        }),
         Effect.tap((result) => signedIn("register", result)),
         Effect.map(({ user }) => user),
         Effect.tapErrorTag("DuplicateAccount", () =>
@@ -208,17 +207,18 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
             );
           return { user, token, expiresAt };
         },
-        Effect.catchIf(
-          (e) => !S.is(InvalidCredentialsError)(e),
-          (e) =>
-            unwrapPgError(e).pipe(
-              Effect.flatMap((dbErr) =>
-                dbErr?.code === "LOCKD"
-                  ? Effect.fail(new AccountLockedError({ message: dbErr.message }))
-                  : Effect.die(e),
-              ),
+        Effect.catchTags({
+          DatabaseError: (e) =>
+            Option.match(
+              Option.filter(e.report, (report) => report.code === "LOCKD"),
+              {
+                onNone: () => Effect.die(e),
+                onSome: (report) =>
+                  Effect.fail(new AccountLockedError({ message: report.message })),
+              },
             ),
-        ),
+          RedisError: Effect.die,
+        }),
         Effect.tap((result) => signedIn("login", result)),
         Effect.map(({ user }) => user),
         Effect.tapErrorTag("InvalidCredentials", () =>

@@ -14,7 +14,7 @@ import {
 import * as arctic from "arctic";
 import { sql } from "kysely";
 import { rootUrl } from "../config.js";
-import { PgRootDB, unwrapPgError } from "../db.js";
+import { PgRootDB } from "../db.js";
 import { SessionService } from "./sessionService.js";
 import { Cookies } from "./cookies.js";
 import { AccountAlreadyLinkedError } from "./authService.js";
@@ -315,18 +315,19 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
                 .selectAll(),
             )
             .pipe(
-              Effect.catch((e) =>
-                unwrapPgError(e).pipe(
-                  Effect.flatMap((dbErr) => {
-                    const mapped =
-                      dbErr?.code === "TAKEN"
-                        ? new AccountAlreadyLinkedError({
-                            message: dbErr.message,
-                            service: "github",
-                          })
-                        : undefined;
-                    return mapped ? Effect.fail(mapped) : Effect.die(e);
-                  }),
+              Effect.catchTag("DatabaseError", (e) =>
+                Option.match(
+                  Option.filter(e.report, (report) => report.code === "TAKEN"),
+                  {
+                    onNone: () => Effect.die(e),
+                    onSome: (report) =>
+                      Effect.fail(
+                        new AccountAlreadyLinkedError({
+                          message: report.message,
+                          service: "github",
+                        }),
+                      ),
+                  },
                 ),
               ),
               Effect.head,

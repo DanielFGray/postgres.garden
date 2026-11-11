@@ -1,7 +1,7 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Layer, Random } from "effect";
+import { Effect, Layer, Option, Random } from "effect";
 import { sql } from "kysely";
-import { DatabaseLive, unwrapPgError, PgRootDB, type DbHandle } from "../db.js";
+import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { PlaygroundService } from "./playgroundService.js";
@@ -212,11 +212,12 @@ layer(TestLayer, { timeout: "30 seconds" })("Playground visibility", (it) => {
  * Assert an effect fails with the DNIED error code the entitlement trigger raises.
  * Flipping makes success the failure, so a write that goes through fails the test.
  */
-const expectDenied = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+const expectDenied = <A, R>(effect: Effect.Effect<A, DatabaseError, R>) =>
   effect.pipe(
     Effect.flip,
-    Effect.flatMap(unwrapPgError),
-    Effect.map((dbErr) => expect(dbErr?.code).toBe("DNIED")),
+    Effect.map((error) =>
+      expect(Option.map(error.report, (report) => report.code)).toEqual(Option.some("DNIED")),
+    ),
   );
 
 const createUser = (db: DbHandle, username: string, role: "user" | "sponsor") =>

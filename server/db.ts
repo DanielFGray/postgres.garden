@@ -22,16 +22,39 @@ import type {
 
 export type { DB, User, Organization, Playground, Commit };
 
-/** A query or transaction step failed. `cause` is usually the `pg.DatabaseError`. */
+export { PostgresError } from "pg-error-enum";
+
+/** What Postgres reports about a statement it refused. */
+export const PostgresReport = Schema.Struct({
+  /** The SQLSTATE: a standard code, or a custom one our SQL functions raise. */
+  code: Schema.String,
+  message: Schema.String,
+  detail: Schema.OptionFromOptional(Schema.String),
+  hint: Schema.OptionFromOptional(Schema.String),
+  constraint: Schema.OptionFromOptional(Schema.String),
+});
+export type PostgresReport = typeof PostgresReport.Type;
+
+/**
+ * A failed database call. `report` is none when the failure did not come from
+ * Postgres (a lost connection, a driver error). `message` is for the log only:
+ * a defect's log line shows the error's message and cause, so the message
+ * holds every part of the report and the span that ran the query.
+ */
 export class DatabaseError extends Schema.TaggedError<
   DatabaseError,
   { readonly brand: unique symbol }
 >()("DatabaseError", {
+  message: Schema.String,
+  report: Schema.Option(PostgresReport),
   cause: Schema.Unknown,
 }) {}
 
-/** Pass as the `catch` of `Effect.tryPromise` around any Kysely `execute()`. */
-export const toDatabaseError = (cause: unknown) => new DatabaseError({ cause });
+/** `query` names the span the query ran in, such as `Users.login`. */
+export const toDatabaseError = (cause: unknown, query: Option.Option<string> = Option.none()) => {
+  const report = Schema.decodeUnknownOption(PostgresReport)(cause);
+  return new DatabaseError({ message: logMessage(report, query, cause), report, cause });
+};
 
 /** A Kysely query builder, or any value whose `execute()` returns a Promise. */
 export type Query<A> = { execute(): Promise<A> };
@@ -109,14 +132,57 @@ function makeHandle<Schema>(kysely: Kysely<Schema>): DbHandle<Schema> {
   return { connection: kysely, raw, all, one, maybe, transaction };
 }
 
-/** Runs a query and maps its failure to `DatabaseError`. */
-// Every query gets its own span. The OTLP tracer exports these, and they stand
-// in for the Postgres auto-instrumentation the Node SDK used to provide.
+/**
+ * Runs a query in its own `db.query` span, and maps its failure to
+ * `DatabaseError`. The enclosing span (a service method) names the query in
+ * the error.
+ */
 function all<A>(query: Query<A>) {
-  return Effect.tryPromise({ try: () => query.execute(), catch: toDatabaseError }).pipe(
-    Effect.withSpan("db.query"),
+  return Effect.flatMap(Effect.option(Effect.currentSpan), (enclosing) =>
+    Effect.tryPromise({
+      try: () => query.execute(),
+      catch: (cause) =>
+        toDatabaseError(
+          cause,
+          Option.map(enclosing, (span) => span.name),
+        ),
+    }).pipe(Effect.withSpan("db.query")),
   );
 }
+
+function logMessage(
+  report: Option.Option<PostgresReport>,
+  query: Option.Option<string>,
+  cause: unknown,
+) {
+  return Arr.getSomes([
+    Option.some(
+      Option.match(report, {
+        onNone: () =>
+          Option.match(Schema.decodeUnknownOption(DriverFailure)(cause), {
+            onNone: () => "Database call failed",
+            onSome: (failure) => `Database call failed: ${failure.message}`,
+          }),
+        onSome: ({ code, message }) => `[${code}] ${message}`,
+      }),
+    ),
+    Option.map(query, (name) => `query: ${name}`),
+    Option.map(
+      Option.flatMap(report, (r) => r.detail),
+      (detail) => `detail: ${detail}`,
+    ),
+    Option.map(
+      Option.flatMap(report, (r) => r.hint),
+      (hint) => `hint: ${hint}`,
+    ),
+    Option.map(
+      Option.flatMap(report, (r) => r.constraint),
+      (constraint) => `constraint: ${constraint}`,
+    ),
+  ]).join("; ");
+}
+
+const DriverFailure = Schema.Struct({ message: Schema.String });
 
 const expectedOneRow = new Error("expected one row");
 
@@ -182,35 +248,19 @@ const CUSTOM_ERROR_CODES: readonly string[] = [
   "OWNER", // Organization owner constraint
 ];
 
-const PgDatabaseError = Schema.instanceOf(pg.DatabaseError);
-
-// A failed query reaches the handlers either as the raw pg error or wrapped in `DatabaseError`.
-const PgErrorSource = Schema.Union([
-  PgDatabaseError,
-  Schema.TaggedStruct("DatabaseError", { cause: PgDatabaseError }),
-]);
-
-/**
- * The `pg.DatabaseError` behind a failed query, or `undefined` for any other failure.
- * A non-pg failure is the normal case for most catch sites, so the decode failure is
- * recovered here rather than surfaced.
- */
-export const unwrapPgError = (error: unknown) =>
-  Schema.decodeUnknownEffect(PgErrorSource)(error).pipe(
-    Effect.map((source) => (source instanceof pg.DatabaseError ? source : source.cause)),
-    Effect.orElseSucceed((): pg.DatabaseError | undefined => undefined),
-  );
-
 /**
  * Maps a failed query to an HTTP status and a message the client may see. A known
  * constraint violation answers 400 with the database's message. Any other failure
  * is logged and answers 500 with `fallbackMessage`.
  */
 export const handleDbError = Effect.fnUntraced(function* (cause: unknown, fallbackMessage: string) {
-  const dbError = yield* unwrapPgError(cause);
-  if (dbError?.code && CUSTOM_ERROR_CODES.includes(dbError.code)) {
-    yield* Effect.annotateCurrentSpan("db.error_code", dbError.code);
-    return { code: 400, error: dbError.message };
+  const known = Option.filter(
+    Schema.is(DatabaseError)(cause) ? cause.report : Option.none(),
+    (report) => CUSTOM_ERROR_CODES.includes(report.code),
+  );
+  if (Option.isSome(known)) {
+    yield* Effect.annotateCurrentSpan("db.error_code", known.value.code);
+    return { code: 400, error: known.value.message };
   }
   yield* Effect.logError("Database error", cause);
   return { code: 500, error: fallbackMessage };

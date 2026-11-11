@@ -201,6 +201,7 @@
         "nodemailer": "^10.5.0",
         "npm-run-all": "^4.1.5",
         "pg": "^8.23.1",
+        "pg-error-enum": "^2.1.0",
         "pg-introspection": "^1.0.2",
         "postgres-semicolons": "^0.1.2",
         "redis": "^6.3.0",
@@ -2275,6 +2276,8 @@
     "pg-cloudflare": ["pg-cloudflare@1.4.1", "", {}, "sha512-6PQbsFWZcp9EmJEwy5cGQ2La+AMWpP46lgbb8X+U/XsHIUweYDNCpeuKck5RxL2MdVFi7krbbEi5nX4Zh7JhrQ=="],
 
     "pg-connection-string": ["pg-connection-string@2.14.1", "", {}, "sha512-qR3kGNPBLpCNtz0evbKA0Y/MRFXwSSdT+pTJvYp/bXTcReZbvX1kzF0IyTc1QnxqF7AZbOeBhNL8R5mYQZV/MA=="],
+
+    "pg-error-enum": ["pg-error-enum@2.1.0", "", {}, "sha512-v9Rl2/+I3a2lQ1tYaoRAoSyr3vcAsXliO1k0BGaUxAYGerB4/wy5/0F/E6lzvUhrpoRJIjBX7xz/+d+1Epzwyw=="],
 
     "pg-int8": ["pg-int8@1.0.1", "", {}, "sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw=="],
 
