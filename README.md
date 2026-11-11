@@ -81,6 +81,8 @@ server/             Bun + Effect HTTP backend
   rateLimit.ts      Per-caller limits on the auth and email endpoints
   db.ts             Kysely pools: the owner and authenticator handles
   requestDatabase.ts  One visitor transaction per request, with RLS context
+  databaseErrors.ts   The HTTP answer to each Postgres code a query can fail with
+  failureBoundary.ts  Logs each unexpected failure once and answers 500 with its trace id
 shared/             Code the browser and the server share
   httpApi.ts        The API contract; one group per feature in api/
 src/

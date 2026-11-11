@@ -73,7 +73,7 @@ test.describe("workbench basics", () => {
     await auth.locator('[data-pw="register-submit-button"]').click();
 
     await expect(auth.locator('[data-pw="register-error"]')).toContainText(
-      /username or email already exists/i,
+      /username is already taken/i,
     );
   });
 
@@ -346,8 +346,7 @@ test.describe("workbench basics", () => {
     // the deletion to have finished.
     const deletion = page.waitForResponse(
       (response) =>
-        new URL(response.url()).pathname === "/api/me" &&
-        response.request().method() === "DELETE",
+        new URL(response.url()).pathname === "/api/me" && response.request().method() === "DELETE",
       { timeout: 15_000 },
     );
     await settings.locator('[data-pw="account-delete-confirm-button"]').click();

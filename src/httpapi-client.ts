@@ -8,13 +8,13 @@ import * as S from "effect/Schema";
 import { PgGardenApi } from "../shared/httpApi";
 import { editKeyHeaders } from "./shared/editKey";
 import {
-  ApiError,
   Conflict,
+  Forbidden,
   InternalError,
   InvalidOperation,
   Locked,
   NotFound,
-  ServerError,
+  ServiceUnavailable,
   TooManyRequests,
   Unauthorized,
 } from "../shared/errors";
@@ -110,8 +110,8 @@ export class ApiRequestError extends S.TaggedError<
 
 /** Everything a call through the generated client can fail with. */
 export type ClientFailure =
-  | ApiError
   | Conflict
+  | Forbidden
   | HttpApiError.HttpApiSchemaError
   | HttpClientError.HttpClientError
   | InternalError
@@ -119,7 +119,7 @@ export type ClientFailure =
   | Locked
   | NotFound
   | Schema.SchemaError
-  | ServerError
+  | ServiceUnavailable
   | TooManyRequests
   | Unauthorized;
 
@@ -135,20 +135,26 @@ const CurrentRequestTelemetry = Context.Reference<Option.Option<RequestTelemetry
 );
 
 const toApiRequestError = Match.type<ClientFailure>().pipe(
-  Match.tag("ApiError", (error) => new ApiRequestError({ status: 400, message: error.error })),
-  Match.tag("Unauthorized", (error) => new ApiRequestError({ status: 401, message: error.error })),
-  Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.error })),
-  Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.error })),
-  Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.error })),
-  Match.tag(
-    "TooManyRequests",
-    (error) => new ApiRequestError({ status: 429, message: error.error }),
-  ),
   Match.tag(
     "InvalidOperation",
     (error) => new ApiRequestError({ status: 400, message: error.message }),
   ),
-  Match.tag("ServerError", (error) => new ApiRequestError({ status: 500, message: error.error })),
+  Match.tag(
+    "Unauthorized",
+    (error) => new ApiRequestError({ status: 401, message: error.message }),
+  ),
+  Match.tag("Forbidden", (error) => new ApiRequestError({ status: 403, message: error.message })),
+  Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.message })),
+  Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.message })),
+  Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.message })),
+  Match.tag(
+    "TooManyRequests",
+    (error) => new ApiRequestError({ status: 429, message: error.message }),
+  ),
+  Match.tag(
+    "ServiceUnavailable",
+    (error) => new ApiRequestError({ status: 503, message: error.message }),
+  ),
   // The trace id is how a user report finds the logged cause, so the user sees it.
   Match.tag(
     "InternalError",

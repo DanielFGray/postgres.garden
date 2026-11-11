@@ -50,10 +50,14 @@ const pathSegment = (segment: PropertyKey | { readonly key: PropertyKey }) => {
 const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * Runs in its own span: a child of the request span shares its trace id, and a
+ * Logs an unexpected failure once, with its cause and trace id, and fails with
+ * the InternalError that carries the id. Routes that answer their own failures
+ * (the GitHub popup) use it too, so every defect has one log line.
+ *
+ * It runs in its own span: a child of the request span shares its trace id, and a
  * request that tracing skips still gets an id that its log line carries.
  */
-const reportUnexpected = <E>(cause: Cause.Cause<E>) =>
+export const reportUnexpected = <E>(cause: Cause.Cause<E>) =>
   Effect.useSpan("FailureBoundary.report", (span) =>
     Effect.logError("Unexpected failure", cause).pipe(
       Effect.annotateLogs({ traceId: span.traceId }),

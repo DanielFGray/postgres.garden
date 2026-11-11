@@ -1,6 +1,6 @@
 import { HttpApiMiddleware } from "effect/http-api";
 
-import { InternalError, InvalidOperation } from "../errors.js";
+import { DatabaseRefusals, InternalError, InvalidOperation } from "../errors.js";
 
 /**
  * Wraps every endpoint of the contract, and declares the errors every endpoint
@@ -11,8 +11,10 @@ import { InternalError, InvalidOperation } from "../errors.js";
  *   to the logged cause.
  * - `InvalidOperation`: a request that fails its endpoint's schema, naming each
  *   rejected value.
+ * - `DatabaseRefusals`: any query can be refused, and handlers answer the
+ *   refusal through server/databaseErrors.ts.
  */
 export class FailureBoundary extends HttpApiMiddleware.Service<FailureBoundary>()(
   "FailureBoundary",
-  { error: [InternalError, InvalidOperation] },
+  { error: [InternalError, InvalidOperation, ...DatabaseRefusals] },
 ) {}

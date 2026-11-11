@@ -1,6 +1,6 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { ApiError, NotFound, ServerError, Unauthorized } from "../errors.js";
+import { NotFound, Unauthorized } from "../errors.js";
 import { Playground, Privacy } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 
@@ -142,14 +142,12 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
       params: { username: S.String },
       query: queryPagination,
       success: S.Array(PlaygroundListItem),
-      error: [ApiError, ServerError],
     }),
   )
   .add(
     HttpApiEndpoint.get("playgrounds", "/playgrounds", {
       query: queryPagination,
       success: S.Array(PlaygroundListItemWithUser),
-      error: [ApiError, ServerError],
     }),
   )
   .add(
@@ -165,14 +163,13 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
       success: CreatePlaygroundResult,
       // A caller with no account may start a playground: the answer carries the
       // key that holds it, so there is nothing to be unauthorised for.
-      error: [ApiError, ServerError],
     }),
   )
   .add(
     HttpApiEndpoint.get("playgroundByHash", "/playgrounds/:hash", {
       params: { hash: S.String },
       success: PlaygroundDetail,
-      error: [NotFound, ApiError, ServerError],
+      error: NotFound,
     }),
   )
   .add(
@@ -180,7 +177,7 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
       params: { hash: S.String },
       payload: S.Struct({ name: S.optional(S.NullOr(S.String)) }),
       success: ForkPlaygroundResult,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
@@ -195,7 +192,7 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
       // An account is one way to hold a playground and the key is the other,
       // so this takes no session of its own: a caller with neither matches no
       // row and is told the playground is not there.
-      error: [NotFound, ApiError, ServerError],
+      error: NotFound,
     }),
   )
   .add(
@@ -207,28 +204,27 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
         activeFile: S.optional(S.NullOr(S.String)),
       }),
       success: CreateCommitResult,
-      error: [NotFound, ApiError, ServerError],
+      error: NotFound,
     }),
   )
   .add(
     HttpApiEndpoint.post("claimPlayground", "/playgrounds/:hash/claim", {
       params: { hash: S.String },
       success: PlaygroundRow,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
     HttpApiEndpoint.get("listCommits", "/playgrounds/:hash/commits", {
       params: { hash: S.String },
       success: S.Array(CommitListItem),
-      error: [ApiError, ServerError],
     }),
   )
   .add(
     HttpApiEndpoint.get("getCommit", "/playgrounds/:hash/commits/:commit_id", {
       params: { hash: S.String, commit_id: S.String },
       success: CommitDetail,
-      error: [NotFound, ApiError, ServerError],
+      error: NotFound,
     }),
   )
   .add(
@@ -236,28 +232,27 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
       params: { hash: S.String, commit_id: S.String },
       query: S.Struct({ limit: S.optional(S.FiniteFromString) }),
       success: CommitHistoryResponse,
-      error: [ApiError, ServerError],
     }),
   )
   .add(
     HttpApiEndpoint.get("getCommitDiff", "/playgrounds/:hash/commits/:commit_id/diff", {
       params: { hash: S.String, commit_id: S.String },
       success: CommitDiffResponse,
-      error: [NotFound, ApiError, ServerError],
+      error: NotFound,
     }),
   )
   .add(
     HttpApiEndpoint.post("togglePlaygroundStar", "/playgrounds/:hash/star", {
       params: { hash: S.String },
       success: ToggleStarResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
     HttpApiEndpoint.delete("deletePlayground", "/playgrounds/:hash", {
       params: { hash: S.String },
       success: DeletePlaygroundResponse,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound],
     }),
   )
   .add(
@@ -268,7 +263,6 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
         offset: S.optional(S.FiniteFromString),
       }),
       success: S.Array(PlaygroundListItemWithUser),
-      error: [ApiError, ServerError],
     }),
   )
   .middleware(SessionMiddleware)

@@ -16,10 +16,6 @@ const webhookReceived = Metric.counter("webhook.received", {
   description: "Number of webhooks received",
 });
 
-const httpErrors = Metric.counter("http.errors", {
-  description: "HTTP errors by route, status, and kind",
-});
-
 export const recordAuthAttempt = (attributes: {
   readonly method: string;
   readonly action: string;
@@ -34,9 +30,3 @@ export const recordWebhook = (attributes: {
   readonly event: string;
   readonly verified: string;
 }) => Metric.update(Metric.withAttributes(webhookReceived, attributes), 1);
-
-export const recordHttpError = (attributes: {
-  readonly route: string;
-  readonly status: string;
-  readonly kind: string;
-}) => Metric.update(Metric.withAttributes(httpErrors, attributes), 1);

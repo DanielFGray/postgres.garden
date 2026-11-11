@@ -1,7 +1,9 @@
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { withDbError, withDbErrorOrMissing, requireSession } from "./http.js";
+import { NotFound } from "../../shared/errors.js";
+import { toHttpError } from "../databaseErrors.js";
+import { requireSession } from "./http.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
 import { UserService } from "../services/userService.js";
@@ -10,144 +12,129 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
   Effect.gen(function* () {
     const users = yield* UserService;
     return handlers.handleAll({
-      me: ({ request }) =>
+      me: () =>
         Effect.gen(function* () {
           const { session } = yield* CurrentSession;
           if (!session) return { user: null };
-          const profile = yield* withDbError(
-            "Failed to fetch profile",
-            users.getProfile.pipe(withAuthContext),
-            request.headers,
+          const profile = yield* users.getProfile.pipe(
+            withAuthContext,
+            Effect.catchTag("DatabaseError", toHttpError),
           );
           return { user: profile };
         }),
-      deleteMe: ({ query, request }) =>
+      deleteMe: ({ query }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.deleteMe", request.headers);
-          const success = yield* withDbError(
-            "Account deletion failed",
-            users.requestAccountDeletion(query.token).pipe(withAuthContext),
-            request.headers,
-          );
+          yield* requireSession;
+          const success = yield* users
+            .requestAccountDeletion(query.token)
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
           return { success };
         }),
-      patchMe: ({ payload, request }) =>
+      patchMe: ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.patchMe", request.headers);
-          return yield* withDbErrorOrMissing(
-            "Failed to update profile",
-            users.updateProfile(payload).pipe(withAuthContext),
-            "User not found",
-            request.headers,
+          yield* requireSession;
+          return yield* users.updateProfile(payload).pipe(
+            withAuthContext,
+            Effect.catchTags({
+              NoSuchElementError: () => Effect.fail(new NotFound({ message: "User not found" })),
+              DatabaseError: toHttpError,
+            }),
           );
         }),
-      meEmails: ({ request }) =>
+      meEmails: () =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.meEmails", request.headers);
-          return yield* withDbError(
-            "Failed to fetch emails",
-            users.listEmails.pipe(withAuthContext),
-            request.headers,
+          yield* requireSession;
+          return yield* users.listEmails.pipe(
+            withAuthContext,
+            Effect.catchTag("DatabaseError", toHttpError),
           );
         }),
-      createMeEmail: ({ payload, request }) =>
+      createMeEmail: ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.createMeEmail", request.headers);
-          return yield* withDbError(
-            "Failed to add email",
-            users.addEmail(payload.email).pipe(withAuthContext),
-            request.headers,
+          yield* requireSession;
+          return yield* users
+            .addEmail(payload.email)
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+        }),
+      deleteMeEmail: ({ params }) =>
+        Effect.gen(function* () {
+          yield* requireSession;
+          return yield* users.deleteEmail(params.id).pipe(
+            withAuthContext,
+            Effect.catchTags({
+              NoSuchElementError: () => Effect.fail(new NotFound({ message: "Email not found" })),
+              DatabaseError: toHttpError,
+            }),
           );
         }),
-      deleteMeEmail: ({ params, request }) =>
+      meAuthentications: () =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.deleteMeEmail", request.headers);
-          return yield* withDbErrorOrMissing(
-            "Failed to delete email",
-            users.deleteEmail(params.id).pipe(withAuthContext),
-            "Email not found",
-            request.headers,
+          yield* requireSession;
+          return yield* users.listAuthentications.pipe(
+            withAuthContext,
+            Effect.catchTag("DatabaseError", toHttpError),
           );
         }),
-      meAuthentications: ({ request }) =>
+      deleteMeAuthentication: ({ params }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.meAuthentications", request.headers);
-          return yield* withDbError(
-            "Failed to fetch authentications",
-            users.listAuthentications.pipe(withAuthContext),
-            request.headers,
+          yield* requireSession;
+          return yield* users.unlinkAuthentication(params.id).pipe(
+            Effect.map((result) => ({ id: result.id })),
+            withAuthContext,
+            Effect.catchTags({
+              NoSuchElementError: () =>
+                Effect.fail(new NotFound({ message: "Authentication not found" })),
+              DatabaseError: toHttpError,
+            }),
           );
         }),
-      deleteMeAuthentication: ({ params, request }) =>
+      meHasPassword: () =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.deleteMeAuthentication", request.headers);
-          return yield* withDbErrorOrMissing(
-            "Failed to delete authentication",
-            users.unlinkAuthentication(params.id).pipe(
-              Effect.map((result) => ({ id: result.id })),
-              withAuthContext,
-            ),
-            "Authentication not found",
-            request.headers,
+          yield* requireSession;
+          return yield* users.hasPassword.pipe(
+            Effect.map((result) => ({ has_password: result.has_password })),
+            withAuthContext,
+            Effect.catchTags({
+              NoSuchElementError: () => Effect.fail(new NotFound({ message: "User not found" })),
+              DatabaseError: toHttpError,
+            }),
           );
         }),
-      meHasPassword: ({ request }) =>
+      forgotPassword: ({ payload }) =>
+        users
+          .forgotPassword(payload.email)
+          .pipe(
+            Effect.as({ success: true as const }),
+            Effect.catchTag("DatabaseError", toHttpError),
+          ),
+      resetPassword: ({ payload }) =>
+        users
+          .resetPassword(payload.userId, payload.token, payload.password)
+          .pipe(Effect.catchTag("DatabaseError", toHttpError)),
+      changePassword: ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.meHasPassword", request.headers);
-          return yield* withDbErrorOrMissing(
-            "Failed to check password",
-            users.hasPassword.pipe(
-              Effect.map((result) => ({ has_password: result.has_password })),
-              withAuthContext,
-            ),
-            "User not found",
-            request.headers,
-          );
+          yield* requireSession;
+          return yield* users
+            .changePassword(payload.oldPassword, payload.newPassword)
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
-      forgotPassword: ({ payload, request }) =>
-        withDbError(
-          "Failed to send password reset",
-          users.forgotPassword(payload.email).pipe(Effect.as({ success: true as const })),
-          request.headers,
-        ),
-      resetPassword: ({ payload, request }) =>
-        withDbError(
-          "Failed to reset password",
-          users.resetPassword(payload.userId, payload.token, payload.password),
-          request.headers,
-        ),
-      changePassword: ({ payload, request }) =>
+      verifyEmail: ({ payload }) =>
+        users
+          .verifyEmail(payload.emailId, payload.token)
+          .pipe(Effect.catchTag("DatabaseError", toHttpError)),
+      makeEmailPrimary: ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.changePassword", request.headers);
-          return yield* withDbError(
-            "Failed to change password",
-            users.changePassword(payload.oldPassword, payload.newPassword).pipe(withAuthContext),
-            request.headers,
-          );
+          yield* requireSession;
+          return yield* users
+            .makeEmailPrimary(payload.emailId)
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
-      verifyEmail: ({ payload, request }) =>
-        withDbError(
-          "Failed to verify email",
-          users.verifyEmail(payload.emailId, payload.token),
-          request.headers,
-        ),
-      makeEmailPrimary: ({ payload, request }) =>
+      resendEmailVerificationCode: ({ payload }) =>
         Effect.gen(function* () {
-          yield* requireSession("apiUsers.makeEmailPrimary", request.headers);
-          return yield* withDbError(
-            "Failed to update primary email",
-            users.makeEmailPrimary(payload.emailId).pipe(withAuthContext),
-            request.headers,
-          );
-        }),
-      resendEmailVerificationCode: ({ payload, request }) =>
-        Effect.gen(function* () {
-          yield* requireSession("apiUsers.resendEmailVerificationCode", request.headers);
-          return yield* withDbError(
-            "Failed to resend verification",
-            users.resendEmailVerificationCode(payload.emailId).pipe(withAuthContext),
-            request.headers,
-          );
+          yield* requireSession;
+          return yield* users
+            .resendEmailVerificationCode(payload.emailId)
+            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
     });
   }),

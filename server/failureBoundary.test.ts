@@ -36,7 +36,7 @@ const ProbeApi = HttpApi.make("probe")
 const ProbeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
   handlers
     .handle("defect", () => Effect.die(new Error('relation "secret_table" does not exist')))
-    .handle("locked", () => Effect.fail(new Locked({ error: "account locked" })))
+    .handle("locked", () => Effect.fail(new Locked({ message: "account locked" })))
     .handle("save", () => Effect.void),
 );
 
@@ -75,7 +75,7 @@ suite("FailureBoundary", () => {
     Effect.gen(function* () {
       const { status, body, lines } = yield* request("/locked");
       expect(status).toBe(423);
-      expect(yield* parseBody(body)).toEqual({ _tag: "Locked", error: "account locked" });
+      expect(yield* parseBody(body)).toEqual({ _tag: "Locked", message: "account locked" });
       expect(lines).toEqual([]);
     }),
   );

@@ -17,7 +17,6 @@ import { rootUrl } from "../config.js";
 import { PgRootDB } from "../db.js";
 import { SessionService } from "./sessionService.js";
 import { Cookies } from "./cookies.js";
-import { AccountAlreadyLinkedError } from "./authService.js";
 import { UserRole as UserRoleSchema } from "../../shared/schemas.js";
 
 type UserRole = "user" | "sponsor" | "admin";
@@ -117,8 +116,11 @@ class OAuthCallbackError extends S.TaggedError<
   OAuthCallbackError,
   { readonly brand: unique symbol }
 >()("OAuthCallbackError", {
+  /** Shown to the user in the popup, so it never carries GitHub's or the client's own text. */
   message: S.String,
   isBadCode: S.Boolean,
+  /** What went wrong underneath, for the log only. */
+  cause: S.optional(S.Unknown),
 }) {}
 
 const callbackError = (message: string) =>
@@ -144,11 +146,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
       client.get(url, { headers: { Authorization: `Bearer ${token}` } }).pipe(
         Effect.flatMap((response) => response.json),
         Effect.mapError(
-          (err) =>
-            new OAuthCallbackError({
-              message: `${errorPrefix}: ${err instanceof Error ? err.message : String(err)}`,
-              isBadCode: false,
-            }),
+          (cause) => new OAuthCallbackError({ message: errorPrefix, isBadCode: false, cause }),
         ),
       );
 
@@ -230,7 +228,8 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
             try: () => provider.validateAuthorizationCode(code),
             catch: (err) =>
               new OAuthCallbackError({
-                message: err instanceof Error ? err.message : String(err),
+                message: "GitHub could not confirm this sign-in.",
+                cause: err,
                 isBadCode:
                   err instanceof arctic.OAuth2RequestError &&
                   err.message === "bad_verification_code",
@@ -315,21 +314,6 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
                 .selectAll(),
             )
             .pipe(
-              Effect.catchTag("DatabaseError", (e) =>
-                Option.match(
-                  Option.filter(e.report, (report) => report.code === "TAKEN"),
-                  {
-                    onNone: () => Effect.die(e),
-                    onSome: (report) =>
-                      Effect.fail(
-                        new AccountAlreadyLinkedError({
-                          message: report.message,
-                          service: "github",
-                        }),
-                      ),
-                  },
-                ),
-              ),
               Effect.head,
               Effect.catchTag("NoSuchElementError", () =>
                 callbackError("Failed to link or register user"),
@@ -343,11 +327,12 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
           // 6. Create session if no existing session
           const setCookie = currentUserId
             ? undefined
-            : yield* sessions
-                .createSession(userId)
-                .pipe(
-                  Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
-                );
+            : yield* sessions.createSession(userId).pipe(
+                Effect.map(({ token, expiresAt }) => cookies.sessionHeader(token, expiresAt)),
+                // The user row was just written and Valkey holds the session: either
+                // failing leaves nothing the popup can tell the user to fix.
+                Effect.catchTags({ NoSuchElementError: Effect.die, RedisError: Effect.die }),
+              );
 
           return {
             user: { id: userId, username, role: userRole },

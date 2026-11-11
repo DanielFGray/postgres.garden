@@ -1,6 +1,6 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { ApiError, NotFound, ServerError, Unauthorized } from "../errors.js";
+import { NotFound, Unauthorized } from "../errors.js";
 import { SuccessResponse, User, UserAuthentication, UserEmail } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";
@@ -17,14 +17,13 @@ export const UsersGroup = HttpApiGroup.make("apiUsers")
   .add(
     HttpApiEndpoint.get("me", "/me", {
       success: S.Struct({ user: S.NullOr(User) }),
-      error: [ApiError, ServerError],
     }),
   )
   .add(
     HttpApiEndpoint.delete("deleteMe", "/me", {
       query: S.Struct({ token: S.optional(S.String) }),
       success: SuccessResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .add(
@@ -36,88 +35,85 @@ export const UsersGroup = HttpApiGroup.make("apiUsers")
         avatar_url: S.optional(S.NullOr(S.String)),
       }),
       success: User,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound],
     }),
   )
   .add(
     HttpApiEndpoint.get("meEmails", "/me/emails", {
       success: S.Array(UserEmailResponse),
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
     HttpApiEndpoint.post("createMeEmail", "/me/emails", {
       payload: S.Struct({ email: S.String }),
       success: UserEmailResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.delete("deleteMeEmail", "/me/emails/:id", {
       params: { id: S.String },
       success: UserEmailResponse,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound],
     }),
   )
   .add(
     HttpApiEndpoint.get("meAuthentications", "/me/authentications", {
       success: S.Array(UserAuthenticationResponse),
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
     HttpApiEndpoint.delete("deleteMeAuthentication", "/me/authentications/:id", {
       params: { id: S.String },
       success: S.Struct({ id: S.String }),
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound],
     }),
   )
   .add(
     HttpApiEndpoint.get("meHasPassword", "/me/has-password", {
       success: HasPasswordResponse,
-      error: [Unauthorized, NotFound, ApiError, ServerError],
+      error: [Unauthorized, NotFound],
     }),
   )
   .add(
     HttpApiEndpoint.post("forgotPassword", "/forgotPassword", {
       payload: S.Struct({ email: S.String }),
       success: SuccessResponse,
-      error: [ApiError, ServerError],
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("resetPassword", "/resetPassword", {
       payload: S.Struct({ userId: S.String, token: S.String, password: S.String }),
       success: SuccessResponse,
-      error: [ApiError, ServerError],
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("changePassword", "/changePassword", {
       payload: S.Struct({ oldPassword: S.String, newPassword: S.String }),
       success: SuccessResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("verifyEmail", "/verifyEmail", {
       payload: S.Struct({ emailId: S.String, token: S.String }),
       success: SuccessResponse,
-      error: [ApiError, ServerError],
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("makeEmailPrimary", "/makeEmailPrimary", {
       payload: S.Struct({ emailId: S.String }),
       success: UserEmailResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }),
   )
   .add(
     HttpApiEndpoint.post("resendEmailVerificationCode", "/resendEmailVerificationCode", {
       payload: S.Struct({ emailId: S.String }),
       success: SuccessResponse,
-      error: [Unauthorized, ApiError, ServerError],
+      error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .middleware(SessionMiddleware)

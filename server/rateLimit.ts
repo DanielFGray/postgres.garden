@@ -119,7 +119,7 @@ const deny = (rule: Rule, error: RateLimiterError) =>
       const retryAfterSeconds = Math.max(1, Math.ceil(Duration.toSeconds(exceeded.retryAfter)));
       return Effect.fail(
         new TooManyRequests({
-          error: `Too many attempts. Try again in ${Duration.format(Duration.seconds(retryAfterSeconds))}.`,
+          message: `Too many attempts. Try again in ${Duration.format(Duration.seconds(retryAfterSeconds))}.`,
           retryAfterSeconds,
         }),
       );
@@ -134,7 +134,7 @@ const storeDown = (rule: Rule, reason: string) =>
       rule.whenStoreDown === "allow"
         ? Effect.void
         : Effect.fail(
-            new TooManyRequests({ error: "Try again in a minute.", retryAfterSeconds: 60 }),
+            new TooManyRequests({ message: "Try again in a minute.", retryAfterSeconds: 60 }),
           ),
     ),
   );

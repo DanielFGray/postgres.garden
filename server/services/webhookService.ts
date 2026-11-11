@@ -34,7 +34,8 @@ export class WebhookService extends Context.Service<WebhookService>()("WebhookSe
         const request = yield* HttpServerRequest.HttpServerRequest;
         const event = request.headers["x-github-event"] ?? null;
         const signature = request.headers["x-hub-signature-256"] ?? null;
-        const body = yield* request.text;
+        // A body that cannot be read means the delivery broke off; no answer reaches GitHub.
+        const body = yield* request.text.pipe(Effect.orDie);
         const record = (verified: "true" | "false") =>
           recordWebhook({ provider: "github", event: event ?? "unknown", verified });
 

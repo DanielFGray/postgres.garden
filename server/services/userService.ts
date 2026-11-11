@@ -18,31 +18,25 @@ export class UserService extends Context.Service<UserService>()("UserService", {
       requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
         if (!token) {
           return yield* RequestDatabase.use((db) =>
-            db.all(
+            db.one(
               db.connection.selectNoFrom((eb) =>
                 eb
                   .fn<boolean>("app_public.request_account_deletion", [])
                   .as("request_account_deletion"),
               ),
             ),
-          ).pipe(
-            Effect.head,
-            Effect.map((rows) => rows?.request_account_deletion === true),
-          );
+          ).pipe(Effect.map((row) => row.request_account_deletion === true));
         }
 
         return yield* RequestDatabase.use((db) =>
-          db.all(
+          db.one(
             db.connection.selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_public.confirm_account_deletion", [eb.val(token)])
                 .as("confirm_account_deletion"),
             ),
           ),
-        ).pipe(
-          Effect.head,
-          Effect.map((rows) => rows?.confirm_account_deletion === true),
-        );
+        ).pipe(Effect.map((row) => row.confirm_account_deletion === true));
       }),
 
       getProfile: RequestDatabase.use((db) =>
@@ -84,10 +78,10 @@ export class UserService extends Context.Service<UserService>()("UserService", {
 
       addEmail: (email: string) =>
         RequestDatabase.use((db) =>
-          db.all(
+          db.one(
             db.connection.insertInto("app_public.user_emails").values({ email }).returningAll(),
           ),
-        ).pipe(Effect.head),
+        ),
 
       deleteEmail: (id: string) =>
         RequestDatabase.use((db) =>
@@ -140,7 +134,7 @@ export class UserService extends Context.Service<UserService>()("UserService", {
 
       resetPassword: (userId: string, token: string, password: string) =>
         root
-          .all(
+          .one(
             root.connection.selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_private.reset_password", [
@@ -151,14 +145,11 @@ export class UserService extends Context.Service<UserService>()("UserService", {
                 .as("reset_password"),
             ),
           )
-          .pipe(
-            Effect.head,
-            Effect.map((rows) => ({ success: rows?.reset_password === true })),
-          ),
+          .pipe(Effect.map((row) => ({ success: row.reset_password === true }))),
 
       changePassword: (oldPassword: string, newPassword: string) =>
         RequestDatabase.use((db) =>
-          db.all(
+          db.one(
             db.connection.selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_public.change_password", [
@@ -168,28 +159,22 @@ export class UserService extends Context.Service<UserService>()("UserService", {
                 .as("change_password"),
             ),
           ),
-        ).pipe(
-          Effect.head,
-          Effect.map((rows) => ({ success: rows?.change_password === true })),
-        ),
+        ).pipe(Effect.map((row) => ({ success: row.change_password === true }))),
 
       verifyEmail: (emailId: string, token: string) =>
         root
-          .all(
+          .one(
             root.connection.selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
                 .as("verify_email"),
             ),
           )
-          .pipe(
-            Effect.head,
-            Effect.map((rows) => ({ success: rows?.verify_email === true })),
-          ),
+          .pipe(Effect.map((row) => ({ success: row.verify_email === true }))),
 
       makeEmailPrimary: (emailId: string) =>
         RequestDatabase.use((db) =>
-          db.all(
+          db.one(
             db.connection
               .selectFrom((eb) =>
                 eb
@@ -200,16 +185,11 @@ export class UserService extends Context.Service<UserService>()("UserService", {
               )
               .selectAll(),
           ),
-        ).pipe(
-          Effect.head,
-          Effect.catchTag("NoSuchElementError", () =>
-            Effect.die(new Error("Failed to make email primary")),
-          ),
         ),
 
       resendEmailVerificationCode: (emailId: string) =>
         RequestDatabase.use((db) =>
-          db.all(
+          db.one(
             db.connection.selectNoFrom((eb) =>
               eb
                 .fn<boolean>("app_public.resend_email_verification_code", [sql`${emailId}::uuid`])
@@ -217,9 +197,8 @@ export class UserService extends Context.Service<UserService>()("UserService", {
             ),
           ),
         ).pipe(
-          Effect.head,
           Effect.map((row) => ({
-            success: row?.resend_email_verification_code === true,
+            success: row.resend_email_verification_code === true,
           })),
         ),
     } as const;

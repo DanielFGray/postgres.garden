@@ -9,6 +9,7 @@ import type { AppPublicPlaygrounds } from "../../generated/db.js";
 import { Secrets } from "../secrets.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
 import type { Privacy } from "../../shared/schemas.js";
+import { CommitDetail } from "../../shared/api/playgrounds.js";
 
 export interface ListPlaygroundsQuery {
   readonly offset?: number | null;
@@ -70,12 +71,20 @@ interface CommitResultRow {
   readonly created_at: Date;
 }
 
-/** The files of one save, in the form the commit functions store. */
+/** The files of one save, as the JSON text the commit functions store. */
+const CommitData = S.fromJsonString(
+  S.Struct({
+    files: CommitDetail.fields.files,
+    activeFile: S.optional(CommitDetail.fields.activeFile),
+  }),
+);
+
+/**
+ * The request schema already decoded these values, so encoding them cannot
+ * fail on data; a failure is a defect.
+ */
 const encodeCommitData = (body: CommitPayload) =>
-  S.encodeEffect(S.fromJsonString(S.Unknown))({
-    files: body.files,
-    activeFile: body.activeFile,
-  });
+  S.encodeEffect(CommitData)({ files: body.files, activeFile: body.activeFile }).pipe(Effect.orDie);
 
 /**
  * Add a commit to a playground. The function refuses a playground the caller

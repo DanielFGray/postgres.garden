@@ -5,7 +5,6 @@
  */
 import { Context } from "effect";
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
-import { ServerError } from "./errors.js";
 import type { UserRole } from "./schemas.js";
 
 export const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "session" });
@@ -43,5 +42,4 @@ export class SessionMiddleware extends HttpApiMiddleware.Service<
   }
 >()("SessionMiddleware", {
   security: { session: sessionCookie },
-  error: ServerError,
 }) {}

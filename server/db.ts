@@ -230,38 +230,3 @@ function settle<A, E, Schema>(trx: ControlledTransaction<Schema>, exit: Exit.Exi
         Effect.orDie,
       );
 }
-
-const CUSTOM_ERROR_CODES: readonly string[] = [
-  "LOCKD", // Account/process locked
-  "WEAKP", // Weak password
-  "LOGIN", // Authentication required
-  "DNIED", // Access denied
-  "CREDS", // Invalid credentials
-  "MODAT", // Missing/mandatory data
-  "TAKEN", // Already taken/linked
-  "EMTKN", // Email taken
-  "CDLEA", // Cannot delete last email address
-  "VRFY1", // Verification required (email not verified)
-  "VRFY2", // Verification required (user account not verified)
-  "ISMBR", // Already a member
-  "NTFND", // Not found
-  "OWNER", // Organization owner constraint
-];
-
-/**
- * Maps a failed query to an HTTP status and a message the client may see. A known
- * constraint violation answers 400 with the database's message. Any other failure
- * is logged and answers 500 with `fallbackMessage`.
- */
-export const handleDbError = Effect.fnUntraced(function* (cause: unknown, fallbackMessage: string) {
-  const known = Option.filter(
-    Schema.is(DatabaseError)(cause) ? cause.report : Option.none(),
-    (report) => CUSTOM_ERROR_CODES.includes(report.code),
-  );
-  if (Option.isSome(known)) {
-    yield* Effect.annotateCurrentSpan("db.error_code", known.value.code);
-    return { code: 400, error: known.value.message };
-  }
-  yield* Effect.logError("Database error", cause);
-  return { code: 500, error: fallbackMessage };
-});

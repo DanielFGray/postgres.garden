@@ -1,6 +1,6 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { ApiError, Conflict, Locked, ServerError, Unauthorized } from "../errors.js";
+import { Unauthorized } from "../errors.js";
 import { SuccessResponse, User } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";
@@ -20,14 +20,13 @@ export const AuthGroup = HttpApiGroup.make("auth")
     HttpApiEndpoint.post("register", "/register", {
       payload: S.Struct({ username: S.String, email: S.String, password: S.String }),
       success: User,
-      error: [ApiError, Conflict],
     }).middleware(RateLimitMiddleware),
   )
   .add(
     HttpApiEndpoint.post("login", "/login", {
       payload: S.Struct({ id: S.String, password: S.String }),
       success: User,
-      error: [Unauthorized, Locked],
+      error: Unauthorized,
     }).middleware(RateLimitMiddleware),
   )
   .add(
@@ -38,7 +37,6 @@ export const AuthGroup = HttpApiGroup.make("auth")
   .add(
     HttpApiEndpoint.post("logout", "/logout", {
       success: SuccessResponse,
-      error: [ApiError, ServerError],
     }),
   )
   .add(
