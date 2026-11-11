@@ -10,6 +10,8 @@ import { editKeyHeaders } from "./shared/editKey";
 import {
   ApiError,
   Conflict,
+  InternalError,
+  InvalidOperation,
   Locked,
   NotFound,
   ServerError,
@@ -112,6 +114,8 @@ export type ClientFailure =
   | Conflict
   | HttpApiError.HttpApiSchemaError
   | HttpClientError.HttpClientError
+  | InternalError
+  | InvalidOperation
   | Locked
   | NotFound
   | Schema.SchemaError
@@ -140,7 +144,20 @@ const toApiRequestError = Match.type<ClientFailure>().pipe(
     "TooManyRequests",
     (error) => new ApiRequestError({ status: 429, message: error.error }),
   ),
+  Match.tag(
+    "InvalidOperation",
+    (error) => new ApiRequestError({ status: 400, message: error.message }),
+  ),
   Match.tag("ServerError", (error) => new ApiRequestError({ status: 500, message: error.error })),
+  // The trace id is how a user report finds the logged cause, so the user sees it.
+  Match.tag(
+    "InternalError",
+    (error) =>
+      new ApiRequestError({
+        status: 500,
+        message: `${error.message} Reference: ${error.traceId}`,
+      }),
+  ),
   Match.tag(
     "HttpClientError",
     (error) => new ApiRequestError({ status: 0, message: error.message }),

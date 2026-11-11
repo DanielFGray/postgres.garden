@@ -10,6 +10,7 @@
  */
 import { HttpApi } from "effect/http-api";
 import { AuthGroup } from "./api/auth.js";
+import { FailureBoundary } from "./api/failureBoundary.js";
 import { PlaygroundsGroup } from "./api/playgrounds.js";
 import { SystemGroup } from "./api/system.js";
 import { UsersGroup } from "./api/users.js";
@@ -82,4 +83,6 @@ export class PgGardenApi extends HttpApi.make("PgGardenApi")
   .add(AuthGroup)
   .add(UsersGroup)
   .add(PlaygroundsGroup)
-  .add(WebhooksGroup) {}
+  .add(WebhooksGroup)
+  // Added last, so it wraps every other middleware too.
+  .middleware(FailureBoundary) {}

@@ -9,6 +9,7 @@ import { SystemApiGroupLive } from "./api/system.js";
 import { UsersApiGroupLive } from "./api/users.js";
 import { WebhooksApiGroupLive } from "./api/webhooks.js";
 import { isProduction } from "./config.js";
+import { FailureBoundaryLive } from "./failureBoundary.js";
 import { DatabaseLive } from "./db.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
@@ -64,7 +65,10 @@ export const AppLayer = Layer.mergeAll(
   SessionService.layer,
 ).pipe(Layer.provideMerge(DatabaseLive));
 
-const HttpApiLive = HttpApiHandlers.pipe(Layer.provide(SessionMiddlewareLive));
+const HttpApiLive = HttpApiHandlers.pipe(
+  Layer.provide(SessionMiddlewareLive),
+  Layer.provide(FailureBoundaryLive),
+);
 
 /**
  * The workbench runs cross-origin isolated, so every response carries COOP and
