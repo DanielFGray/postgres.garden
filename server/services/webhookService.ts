@@ -1,7 +1,7 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Schema as S } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { sql } from "kysely";
-import { rootQuerier } from "../db.js";
+import { PgRootDB } from "../db.js";
 import { recordWebhook } from "../metrics.js";
 
 class WebhookNotConfiguredError extends S.TaggedError<
@@ -28,7 +28,7 @@ class WebhookVerificationError extends S.TaggedError<
 export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
   make: Effect.gen(function* () {
     const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
-    const asRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     return {
       handleGitHubSponsor: Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
@@ -74,8 +74,8 @@ export class WebhookService extends Context.Service<WebhookService>()("WebhookSe
             return { ok: true as const };
           }
 
-          yield* asRoot((rootDb) =>
-            rootDb.selectNoFrom((eb) =>
+          yield* root.all(
+            root.connection.selectNoFrom((eb) =>
               eb
                 .fn("graphile_worker.add_job", [eb.val("sponsor_webhook"), sql`${body}::json`])
                 .as("add_job"),

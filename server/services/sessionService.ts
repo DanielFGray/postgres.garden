@@ -2,7 +2,7 @@ import { NodeCrypto } from "@effect/platform-node";
 import { Config, Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Redis } from "effect/persistence/Redis";
-import { rootQuerier, runQuery } from "../db.js";
+import { PgRootDB } from "../db.js";
 import type { SessionData } from "../../shared/session.js";
 import { UserRole } from "../../shared/schemas.js";
 import { Secrets, constantTimeEqual } from "../secrets.js";
@@ -48,7 +48,7 @@ const decodeCachedSession = S.decodeUnknownEffect(CachedSession);
 
 export class SessionService extends Context.Service<SessionService>()("SessionService", {
   make: Effect.gen(function* () {
-    const runRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     const secureRandom = yield* SecureRandom.SecureRandom;
     const secrets = yield* Secrets;
     const redis = yield* Redis;
@@ -70,18 +70,20 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         // same row, so it either commits first - the read then finds nothing,
         // which the callers answer as an authentication failure - or it waits
         // for this transaction and cascades the new session away afterwards.
-        const user = yield* runRoot((rootDb) =>
+        const user = yield* root.transaction((trx) =>
           Effect.gen(function* () {
-            const found = yield* runQuery(
-              rootDb
-                .selectFrom("app_public.users")
-                .select(["id", "username", "role", "is_verified"])
-                .where("id", "=", userId)
-                .forKeyShare(),
-            ).pipe(Effect.head);
+            const found = yield* trx
+              .all(
+                trx.connection
+                  .selectFrom("app_public.users")
+                  .select(["id", "username", "role", "is_verified"])
+                  .where("id", "=", userId)
+                  .forKeyShare(),
+              )
+              .pipe(Effect.head);
 
-            yield* runQuery(
-              rootDb.insertInto("app_private.sessions").values({
+            yield* trx.all(
+              trx.connection.insertInto("app_private.sessions").values({
                 id: sessionUuid,
                 user_id: found.id,
                 expires_at: expiresAt,
@@ -154,14 +156,14 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
         // row is still there and unexpired so revocation takes effect
         // immediately instead of waiting up to SESSION_TTL_MS for the cache
         // to expire.
-        const dbSession = yield* runRoot((rootDb) =>
-          runQuery(
-            rootDb
+        const dbSession = yield* root
+          .all(
+            root.connection
               .selectFrom("app_private.sessions")
               .select(["expires_at"])
               .where("id", "=", cached.session_uuid),
-          ).pipe(Effect.head, Effect.option),
-        );
+          )
+          .pipe(Effect.head, Effect.option);
         if (
           dbSession._tag === "None" ||
           dbSession.value.expires_at == null ||
@@ -193,8 +195,8 @@ export class SessionService extends Context.Service<SessionService>()("SessionSe
           .pipe(Effect.flatMap(decodeField));
         yield* redis.send("DEL", key);
         if (sessionUuid) {
-          yield* runRoot((rootDb) =>
-            runQuery(rootDb.deleteFrom("app_private.sessions").where("id", "=", sessionUuid)),
+          yield* root.all(
+            root.connection.deleteFrom("app_private.sessions").where("id", "=", sessionUuid),
           );
         }
       }),

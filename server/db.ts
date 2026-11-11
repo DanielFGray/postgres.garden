@@ -1,4 +1,5 @@
 import {
+  Array as Arr,
   Config,
   Context,
   Effect,
@@ -10,7 +11,7 @@ import {
   Schema,
   Semaphore,
 } from "effect";
-import { Kysely, PostgresDialect, sql, type ControlledTransaction } from "kysely";
+import { Kysely, PostgresDialect, sql, type ControlledTransaction, type RawBuilder } from "kysely";
 import * as pg from "pg";
 
 import { CurrentSession } from "../shared/session.js";
@@ -54,13 +55,37 @@ export const runQuery = <A>(query: Query<A>) =>
 const toEffect = <A, E, R>(step: Step<A, E, R>): Effect.Effect<A, E | DatabaseError, R> =>
   Effect.isEffect(step) ? step : runQuery(step);
 
+/** A connection typed to the tables its role can reach, with the ways to run a query on it. */
+export type DbHandle<Schema = DB> = {
+  /** The connection to build queries against: the pool, or an open transaction. */
+  readonly connection: Kysely<Schema>;
+  /** Wraps a raw `sql` template so `all`, `one` and `maybe` run it on this connection. */
+  readonly raw: <A>(query: RawBuilder<A>) => Query<ReadonlyArray<A>>;
+  /** Runs a query and returns its result. */
+  readonly all: <A>(query: Query<A>) => Effect.Effect<A, DatabaseError>;
+  /** Runs a query and returns its sole row. No row is a defect: use it where the row must exist. */
+  readonly one: <A>(query: Query<ReadonlyArray<A>>) => Effect.Effect<A, DatabaseError>;
+  /** Runs a query and returns its first row, if any. */
+  readonly maybe: <A>(
+    query: Query<ReadonlyArray<A>>,
+  ) => Effect.Effect<Option.Option<A>, DatabaseError>;
+  /**
+   * Runs `use` in one transaction on one pooled connection: it commits when
+   * `use` succeeds and rolls back when it fails or is interrupted. Call it on a
+   * pool handle only; Kysely cannot start a transaction inside another.
+   */
+  readonly transaction: <A, E, R>(
+    use: (trx: DbHandle<Schema>) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | DatabaseError, R>;
+};
+
 /**
  * A Kysely instance over a `pg` pool. The pool connects lazily, on the first
  * query. int8 columns arrive as `bigint` rather than strings; the parser is
  * the pool's own, so other pg clients in the process keep their defaults.
  */
-const connect = (connectionString: string): KyselyDB =>
-  new Kysely<DB>({
+const connect = <Schema>(connectionString: string): Kysely<Schema> =>
+  new Kysely<Schema>({
     dialect: new PostgresDialect({
       pool: new pg.Pool({
         connectionString,
@@ -76,14 +101,14 @@ const connect = (connectionString: string): KyselyDB =>
  * Runs `use` in one transaction on one pooled connection. The transaction
  * commits when `use` succeeds and rolls back when it fails or is interrupted.
  */
-const startTransaction = (db: KyselyDB) =>
+const startTransaction = <Schema>(db: Kysely<Schema>) =>
   Effect.tryPromise({ try: () => db.startTransaction().execute(), catch: toDatabaseError });
 
 /**
  * Commits a transaction whose scope succeeded and rolls it back otherwise. A
  * failed rollback leaves the connection in an unknown state, so it is a defect.
  */
-const settle = <A, E>(trx: ControlledTransaction<DB>, exit: Exit.Exit<A, E>) =>
+const settle = <A, E, Schema>(trx: ControlledTransaction<Schema>, exit: Exit.Exit<A, E>) =>
   Exit.isSuccess(exit)
     ? Effect.tryPromise({ try: () => trx.commit().execute(), catch: toDatabaseError })
     : Effect.tryPromise({
@@ -212,37 +237,14 @@ export const sessionQuerier = Effect.map(
 );
 
 /**
- * Resolves the root pool once and hands back a function that runs a query as
- * the owning role, in one transaction, bypassing RLS. See `visitorQuerier`
- * for why a `Context.Service` should prefer this over `asRoot`.
- */
-export const rootQuerier = Effect.gen(function* () {
-  const db = yield* PgRootDB;
-  return <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
-    transact(db, (trx) => toEffect(use(trx)));
-});
-
-/**
- * Run a query as the owning role, in one transaction, bypassing RLS.
- *
- * The two pools log in as different Postgres roles and hold separate
- * connections, so this transaction is independent of an enclosing `asVisitor`.
- * It is not a savepoint: if the outer boundary rolls back, this one stays
- * committed. It must not nest inside another boundary: the outer transaction can
- * hold a lock this one waits on.
- */
-export const asRoot = <A, E = never, R = never>(use: (db: KyselyDB) => Step<A, E, R>) =>
-  Effect.flatMap(rootQuerier, (run) => run(use));
-
-/**
  * Runs `effect` as one request. Every `asVisitor` inside it shares one
  * authenticator transaction, opened by the first call that needs it, so a
  * request that never queries as the visitor opens nothing. The transaction
  * commits when `effect` succeeds and rolls back when it fails or is interrupted.
  *
- * Only the authenticator pool is shared. `asRoot` keeps its own transaction,
- * so owner-pool writes such as lockout counters do not roll back with a
- * request that fails later.
+ * Only the authenticator pool is shared. `PgRootDB` runs on its own
+ * connections, so owner-pool writes such as lockout counters do not roll back
+ * with a request that fails later.
  */
 export const withRequestTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
@@ -265,12 +267,31 @@ interface VisitorPool {
   readonly role: string;
 }
 
-const openPool = Effect.fnUntraced(function* (urlKey: string) {
+const openPool = Effect.fnUntraced(function* <Schema>(urlKey: string) {
   const url = yield* Config.Redacted(urlKey);
-  const db = connect(Redacted.value(url));
+  const db = connect<Schema>(Redacted.value(url));
   yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
   return db;
 });
+
+const expectedOneRow = new Error("expected one row");
+
+const takeOne = <A>(rows: ReadonlyArray<A>): Effect.Effect<A> =>
+  Option.match(Arr.head(rows), {
+    onNone: () => Effect.die(expectedOneRow),
+    onSome: Effect.succeed,
+  });
+
+function makeHandle<Schema>(kysely: Kysely<Schema>): DbHandle<Schema> {
+  const raw = <A>(query: RawBuilder<A>): Query<ReadonlyArray<A>> => ({
+    execute: () => query.execute(kysely).then((result) => result.rows),
+  });
+  const one = <A>(query: Query<ReadonlyArray<A>>) => runQuery(query).pipe(Effect.flatMap(takeOne));
+  const maybe = <A>(query: Query<ReadonlyArray<A>>) => runQuery(query).pipe(Effect.map(Arr.head));
+  const transaction = <A, E, R>(use: (trx: DbHandle<Schema>) => Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(startTransaction(kysely), (trx) => use(makeHandle(trx)), settle);
+  return { connection: kysely, raw, all: runQuery, one, maybe, transaction };
+}
 
 class PgAuthDB extends Context.Service<PgAuthDB, VisitorPool>()("PgAuthDB") {
   static readonly layer = Layer.effect(
@@ -283,8 +304,17 @@ class PgAuthDB extends Context.Service<PgAuthDB, VisitorPool>()("PgAuthDB") {
   );
 }
 
-class PgRootDB extends Context.Service<PgRootDB, KyselyDB>()("PgRootDB") {
-  static readonly layer = Layer.effect(this, openPool("DATABASE_URL"));
+/**
+ * The owning role, which bypasses row-level security. Each `all` runs on the
+ * pool and commits on its own; work that must commit or roll back together uses
+ * `transaction`. Its connections are not the visitor pool's, so a root write
+ * inside a request stays committed when the request's transaction rolls back.
+ */
+export class PgRootDB extends Context.Service<PgRootDB, DbHandle>()("PgRootDB") {
+  static readonly layer = Layer.effect(
+    this,
+    openPool<DB>("DATABASE_URL").pipe(Effect.map(makeHandle)),
+  );
 }
 
 /** The authenticator transaction a request shares. `opened` is empty until the first `asVisitor` opens it. */
@@ -298,11 +328,10 @@ class RequestTransaction extends Context.Service<RequestTransaction, RequestSlot
 ) {}
 
 /**
- * What `asVisitor`/`asRoot` need in context. Exported as types only: the tags
- * themselves stay private, so a pool cannot be provided or read from outside.
+ * What `asVisitor` needs in context. Exported as a type only: the visitor
+ * pool's tag stays private, so it cannot be provided or read from outside.
  */
 export type VisitorContext = PgAuthDB | CurrentSession;
-export type RootContext = PgRootDB;
 
 export const DatabaseLive = Layer.mergeAll(PgAuthDB.layer, PgRootDB.layer);
 

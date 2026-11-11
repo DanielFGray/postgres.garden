@@ -1,7 +1,7 @@
 import { Context, Duration, Effect, Layer, Schedule, Schema as S } from "effect";
 import { Redis } from "effect/persistence/Redis";
 import { sql } from "kysely";
-import { rootQuerier, visitorQuerier, type KyselyDB } from "./db.js";
+import { PgRootDB, visitorQuerier, type KyselyDB } from "./db.js";
 
 /** A service the server cannot work without did not answer. */
 export class DependencyUnavailable extends S.TaggedError<
@@ -20,11 +20,11 @@ export class DependencyUnavailable extends S.TaggedError<
  */
 export class Readiness extends Context.Service<Readiness>()("Readiness", {
   make: Effect.gen(function* () {
-    const asRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     const asVisitor = yield* visitorQuerier;
     const redis = yield* Redis;
     const probes = [
-      probe("postgres (owner pool)", asRoot(ping)),
+      probe("postgres (owner pool)", root.all(ping(root.connection))),
       probe("postgres (visitor pool)", asVisitor(undefined, ping)),
       probe("valkey", redis.send("PING")),
     ];

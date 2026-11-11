@@ -1,7 +1,7 @@
 import { Array as Arr, Context, Effect, Layer, Match, Schema as S } from "effect";
 import pg from "pg";
 import { sql } from "kysely";
-import { rootQuerier, runQuery, unwrapPgError } from "../db.js";
+import { PgRootDB, unwrapPgError } from "../db.js";
 import type { AppPublicUsers } from "../../generated/db.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
@@ -89,7 +89,7 @@ const mapRegisterPgError = (
  */
 export class AuthService extends Context.Service<AuthService>()("AuthService", {
   make: Effect.gen(function* () {
-    const runRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     const sessionService = yield* SessionService;
     const cookies = yield* Cookies;
 
@@ -120,9 +120,9 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
           name?: string | null;
           avatarUrl?: string | null;
         }) {
-          const user = yield* runRoot((rootDb) =>
-            runQuery(
-              rootDb
+          const user = yield* root
+            .all(
+              root.connection
                 .selectFrom(
                   sql<AppPublicUsers>`
                           app_private.really_create_user(
@@ -137,13 +137,13 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
                 .selectAll()
                 // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
                 .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-            ).pipe(
+            )
+            .pipe(
               Effect.head,
               Effect.catchTag("NoSuchElementError", () =>
                 Effect.die(new Error("really_create_user returned no rows")),
               ),
-            ),
-          );
+            );
 
           const { token, expiresAt } = yield* sessionService
             .createSession(user.id)
@@ -178,9 +178,9 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
           // records the failed attempt and then returns null, and a failure here would
           // roll that write back, so the lockout counter would never grow. Database
           // errors such as LOCKD must still fail, so the row is taken with `Arr.head`.
-          const found = yield* runRoot((rootDb) =>
-            runQuery(
-              rootDb
+          const found = yield* root
+            .all(
+              root.connection
                 .selectFrom((eb) =>
                   eb
                     .fn<AppPublicUsers>("app_private.login", [sql`${id}::citext`, eb.val(password)])
@@ -189,8 +189,8 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
                 .selectAll()
                 // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
                 .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-            ).pipe(Effect.map(Arr.head)),
-          );
+            )
+            .pipe(Effect.map(Arr.head));
           const user = yield* Effect.fromOption(found).pipe(
             Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new InvalidCredentialsError({ message: "Invalid username or password" })),

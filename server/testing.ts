@@ -15,7 +15,7 @@ import type { DB, AppPublicUsers as User } from "../generated/db.js";
 import { SessionService, sessionKeyOf } from "./services/sessionService.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
-import { rootQuerier, runQuery } from "./db.js";
+import { PgRootDB } from "./db.js";
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),
@@ -53,13 +53,13 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
     if (yield* isProduction) {
       return yield* Effect.die("testing routes must not run in production");
     }
-    const runRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     const sessions = yield* SessionService;
     const cookies = yield* Cookies;
     const redis = yield* Redis;
     const sessionKey = yield* sessionKeyOf;
     const rateLimitPrefix = yield* rateLimitKeyPrefix();
-    const root = yield* rootUrl;
+    const siteUrl = yield* rootUrl;
 
     /**
      * Creates a user through `really_create_user`, then opens a session for it.
@@ -75,9 +75,9 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
       const username = input.username ?? `testuser_${randomValue.toString(36).slice(2, 10)}`;
       const email = input.email ?? `${username}@example.com`;
 
-      const user = yield* runRoot((db) =>
-        runQuery(
-          db
+      const user = yield* root
+        .all(
+          root.connection
             .selectFrom(
               sql<User>`app_private.really_create_user(
                 username => ${username}::citext,
@@ -89,29 +89,29 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
             .selectAll()
             // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
             .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-        ).pipe(Effect.head),
-      );
+        )
+        .pipe(Effect.head);
 
       const session = yield* sessions.createSession(user.id);
       return { user, session };
     });
 
     const userSecrets = (username: string) =>
-      runRoot((db) =>
-        runQuery(
-          db
+      root
+        .all(
+          root.connection
             .selectFrom("app_private.user_secrets")
             .selectAll()
             .where("user_id", "=", (eb: ExpressionBuilder<DB, "app_private.user_secrets">) =>
               eb.selectFrom("app_public.users").select("id").where("username", "=", username),
             ),
-        ).pipe(Effect.head),
-      );
+        )
+        .pipe(Effect.head);
 
     const emailSecrets = (email: string) =>
-      runRoot((db) =>
-        runQuery(
-          db
+      root
+        .all(
+          root.connection
             .selectFrom("app_private.user_email_secrets")
             .selectAll()
             .where(
@@ -125,15 +125,17 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
                   .orderBy("id", "desc")
                   .limit(1),
             ),
-        ).pipe(Effect.head),
-      );
+        )
+        .pipe(Effect.head);
 
     const sessionRedirect = (
       session: { readonly token: string; readonly expiresAt: Date },
       redirectTo: string | undefined,
     ) => {
       const target = redirectTo ?? "/";
-      const location = target.startsWith("http") ? target : new URL(target, `${root}/`).toString();
+      const location = target.startsWith("http")
+        ? target
+        : new URL(target, `${siteUrl}/`).toString();
       return HttpServerResponse.redirect(location, {
         headers: { "set-cookie": cookies.sessionHeader(session.token, session.expiresAt) },
       });
@@ -148,9 +150,9 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
     const success = HttpServerResponse.jsonUnsafe({ success: true });
 
     return {
-      clearTestUsers: runRoot((db) =>
-        runQuery(db.deleteFrom("app_public.users").where("username", "like", "test%")),
-      ).pipe(Effect.andThen(deleteKeys(sessionKey("*"))), Effect.as(success)),
+      clearTestUsers: root
+        .all(root.connection.deleteFrom("app_public.users").where("username", "like", "test%"))
+        .pipe(Effect.andThen(deleteKeys(sessionKey("*"))), Effect.as(success)),
 
       /**
        * Deletes every rate-limit count. The e2e suite runs from one address, so
@@ -175,9 +177,9 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
         }).pipe(Effect.map(({ session }) => sessionRedirect(session, body.redirectTo))),
 
       loginPost: Effect.fnUntraced(function* (body: typeof LoginPostBody.Type) {
-        const user = yield* runRoot((db) =>
-          runQuery(
-            db
+        const user = yield* root
+          .all(
+            root.connection
               .selectFrom((eb) =>
                 eb
                   .fn<User>("app_private.login", [sql`${body.id}::citext`, eb.val(body.password)])
@@ -186,8 +188,8 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
               .selectAll()
               // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
               .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-          ).pipe(Effect.head),
-        );
+          )
+          .pipe(Effect.head);
         const session = yield* sessions.createSession(user.id);
         return sessionRedirect(session, body.redirectTo);
       }),
@@ -215,14 +217,14 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
         emailSecrets(email).pipe(Effect.map((row) => HttpServerResponse.jsonUnsafe(row))),
 
       verifyUser: (username: string) =>
-        runRoot((db) =>
-          runQuery(
-            db
+        root
+          .all(
+            root.connection
               .updateTable("app_public.users")
               .set({ is_verified: true })
               .where("username", "=", username),
-          ),
-        ).pipe(Effect.as(success)),
+          )
+          .pipe(Effect.as(success)),
     } as const;
   }),
 }) {

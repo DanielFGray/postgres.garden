@@ -3,18 +3,20 @@ import { expect, layer } from "@effect/vitest";
 import { Effect, Layer, Schema as S } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Redis } from "effect/persistence/Redis";
-import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
+import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
 import { createUser, deleteUser, randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { SessionService, sessionKeyOf } from "./sessionService.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
-const sessionRows = (db: KyselyDB, userId: string) =>
-  runQuery(db.selectFrom("app_private.sessions").selectAll().where("user_id", "=", userId));
+const sessionRows = (db: DbHandle, userId: string) =>
+  db.all(
+    db.connection.selectFrom("app_private.sessions").selectAll().where("user_id", "=", userId),
+  );
 
-const deleteSessionRow = (db: KyselyDB, sessionUuid: string) =>
-  runQuery(db.deleteFrom("app_private.sessions").where("id", "=", sessionUuid));
+const deleteSessionRow = (db: DbHandle, sessionUuid: string) =>
+  db.all(db.connection.deleteFrom("app_private.sessions").where("id", "=", sessionUuid));
 
 const Hash = S.Record(S.String, S.String);
 
@@ -66,7 +68,7 @@ layer(
     Effect.gen(function* () {
       const sessions = yield* SessionService;
       const suffix = yield* randomSuffix;
-      const user = yield* asRoot((rootDb) => createUser(rootDb, `session_mint_${suffix}`));
+      const user = yield* PgRootDB.use((rootDb) => createUser(rootDb, `session_mint_${suffix}`));
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
@@ -80,7 +82,7 @@ layer(
           expect(hash["role"]).toBe("user");
           expect(hash["is_verified"]).toBe("1");
 
-          const rows = yield* asRoot((rootDb) => sessionRows(rootDb, user.id));
+          const rows = yield* PgRootDB.use((rootDb) => sessionRows(rootDb, user.id));
           expect(rows).toHaveLength(1);
           expect(rows[0]?.id).toBe(hash["session_uuid"]);
 
@@ -95,7 +97,7 @@ layer(
 
           yield* dropHash(minted.id);
         }),
-        asRoot((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        PgRootDB.use((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );
@@ -108,7 +110,7 @@ layer(
       const error = yield* Effect.flip(sessions.createSession(absent));
       expect(error._tag).toBe("NoSuchElementError");
 
-      const rows = yield* asRoot((rootDb) => sessionRows(rootDb, absent));
+      const rows = yield* PgRootDB.use((rootDb) => sessionRows(rootDb, absent));
       expect(rows).toHaveLength(0);
       // The hash is written after the insert, so a call that never inserted
       // leaves no cached session for a cookie it never issued.
@@ -182,7 +184,7 @@ layer(
     Effect.gen(function* () {
       const sessions = yield* SessionService;
       const suffix = yield* randomSuffix;
-      const user = yield* asRoot((rootDb) => createUser(rootDb, `session_revoked_${suffix}`));
+      const user = yield* PgRootDB.use((rootDb) => createUser(rootDb, `session_revoked_${suffix}`));
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
@@ -193,7 +195,7 @@ layer(
 
           // Password reset and account deletion revoke by deleting the row,
           // not by touching the cache.
-          yield* asRoot((rootDb) => deleteSessionRow(rootDb, String(sessionUuid)));
+          yield* PgRootDB.use((rootDb) => deleteSessionRow(rootDb, String(sessionUuid)));
 
           expect(yield* sessions.validateSessionToken(minted.token)).toEqual({
             user: null,
@@ -203,7 +205,7 @@ layer(
           // cache's 30-day expiry, so the hash is gone too.
           expect(yield* readHash(minted.id)).toEqual({});
         }),
-        asRoot((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        PgRootDB.use((rootDb) => deleteUser(rootDb, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );

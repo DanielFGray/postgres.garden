@@ -1,7 +1,7 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
-import { asRoot, DatabaseLive, runQuery, type KyselyDB } from "../db.js";
+import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { SessionService } from "./sessionService.js";
 import { TestValkeyLive } from "../test/valkey.js";
@@ -13,8 +13,8 @@ import { PageData } from "./pageData.js";
  */
 const fixedInstant = DateTime.toDate(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"));
 
-const insertPlayground = (db: KyselyDB, hash: string) =>
-  runQuery(db.insertInto("app_public.playgrounds").values({ hash, privacy: "public" }));
+const insertPlayground = (db: DbHandle, hash: string) =>
+  db.all(db.connection.insertInto("app_public.playgrounds").values({ hash, privacy: "public" }));
 
 /**
  * What a seeded commit holds in its jsonb column: the shape the app writes, or
@@ -32,42 +32,55 @@ type SeededCommitData =
  * share a timestamp.
  */
 const insertCommit = (
-  db: KyselyDB,
+  db: DbHandle,
   hash: string,
   message: string,
   data: SeededCommitData,
   createdAt: Date,
 ) =>
-  runQuery(
-    db
-      .insertInto("app_public.playground_commits")
-      .values({
-        playground_hash: hash,
-        message,
-        data: JSON.stringify(data),
-        created_at: createdAt,
-      })
-      .returning("id"),
-  ).pipe(Effect.head);
+  db
+    .all(
+      db.connection
+        .insertInto("app_public.playground_commits")
+        .values({
+          playground_hash: hash,
+          message,
+          data: JSON.stringify(data),
+          created_at: createdAt,
+        })
+        .returning("id"),
+    )
+    .pipe(Effect.head);
 
-const setHead = (db: KyselyDB, hash: string, commitId: string) =>
-  runQuery(
-    db
+const setHead = (db: DbHandle, hash: string, commitId: string) =>
+  db.all(
+    db.connection
       .updateTable("app_public.playgrounds")
       .set({ head_commit_id: commitId })
       .where("hash", "=", hash),
   );
 
 /** Clears the head first: the commits cannot go while a playground names one. */
-const dropPlayground = (db: KyselyDB, hash: string) =>
-  runQuery(
-    db.updateTable("app_public.playgrounds").set({ head_commit_id: null }).where("hash", "=", hash),
-  ).pipe(
-    Effect.andThen(
-      runQuery(db.deleteFrom("app_public.playground_commits").where("playground_hash", "=", hash)),
-    ),
-    Effect.andThen(runQuery(db.deleteFrom("app_public.playgrounds").where("hash", "=", hash))),
-  );
+const dropPlayground = (db: DbHandle, hash: string) =>
+  db
+    .all(
+      db.connection
+        .updateTable("app_public.playgrounds")
+        .set({ head_commit_id: null })
+        .where("hash", "=", hash),
+    )
+    .pipe(
+      Effect.andThen(
+        db.all(
+          db.connection
+            .deleteFrom("app_public.playground_commits")
+            .where("playground_hash", "=", hash),
+        ),
+      ),
+      Effect.andThen(
+        db.all(db.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
+      ),
+    );
 
 /** Nobody is signed in: these playgrounds are public, so RLS lets them through. */
 const headCommit = (hash: string) => PageData.use((pages) => pages.headCommit(hash, undefined));
@@ -79,10 +92,10 @@ const withPlayground = <A, E, R>(use: (hash: string) => Effect.Effect<A, E, R>) 
   Effect.gen(function* () {
     const suffix = yield* randomSuffix;
     const hash = `pgtest${suffix}`;
-    yield* asRoot((db) => insertPlayground(db, hash));
+    yield* PgRootDB.use((db) => insertPlayground(db, hash));
     return yield* Effect.ensuring(
       use(hash),
-      asRoot((db) => dropPlayground(db, hash)).pipe(Effect.asVoid, Effect.orDie),
+      PgRootDB.use((db) => dropPlayground(db, hash)).pipe(Effect.asVoid, Effect.orDie),
     );
   });
 
@@ -98,7 +111,7 @@ layer(
       Effect.gen(function* () {
         // One timestamp for both commits: ordering by the clock cannot tell
         // them apart, which is why the head is a column and not a maximum.
-        const first = yield* asRoot((db) =>
+        const first = yield* PgRootDB.use((db) =>
           insertCommit(
             db,
             hash,
@@ -107,7 +120,7 @@ layer(
             fixedInstant,
           ),
         );
-        const second = yield* asRoot((db) =>
+        const second = yield* PgRootDB.use((db) =>
           insertCommit(
             db,
             hash,
@@ -116,7 +129,7 @@ layer(
             fixedInstant,
           ),
         );
-        yield* asRoot((db) => setHead(db, hash, first.id));
+        yield* PgRootDB.use((db) => setHead(db, hash, first.id));
 
         const commit = yield* headCommit(hash);
 
@@ -131,7 +144,7 @@ layer(
   it.effect("answers null for a playground with no head commit", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        yield* asRoot((db) => insertCommit(db, hash, "orphan", { files: [] }, fixedInstant));
+        yield* PgRootDB.use((db) => insertCommit(db, hash, "orphan", { files: [] }, fixedInstant));
 
         const commit = yield* headCommit(hash);
 
@@ -153,10 +166,10 @@ layer(
   it.effect("fails rather than reporting an empty workspace for data that is not a file list", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* asRoot((db) =>
+        const head = yield* PgRootDB.use((db) =>
           insertCommit(db, hash, "malformed", { files: "not-an-array" }, fixedInstant),
         );
-        yield* asRoot((db) => setHead(db, hash, head.id));
+        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 
         const error = yield* Effect.flip(headCommit(hash));
         // A commit whose jsonb does not describe a file list is a broken
@@ -169,10 +182,10 @@ layer(
   it.effect("serves the page without a commit, and says why, when the commit is broken", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* asRoot((db) =>
+        const head = yield* PgRootDB.use((db) =>
           insertCommit(db, hash, "malformed", { files: "not-an-array" }, fixedInstant),
         );
-        yield* asRoot((db) => setHead(db, hash, head.id));
+        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
           PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),
@@ -193,7 +206,7 @@ layer(
   it.effect("serves a readable head commit as the page's initial data", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* asRoot((db) =>
+        const head = yield* PgRootDB.use((db) =>
           insertCommit(
             db,
             hash,
@@ -202,7 +215,7 @@ layer(
             fixedInstant,
           ),
         );
-        yield* asRoot((db) => setHead(db, hash, head.id));
+        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
           PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),

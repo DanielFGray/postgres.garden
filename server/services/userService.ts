@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { type Selectable, sql } from "kysely";
-import { rootQuerier, sessionQuerier } from "../db.js";
+import { PgRootDB, sessionQuerier } from "../db.js";
 import type { AppPublicUserEmails as UserEmail } from "../../generated/db.js";
 
 export interface UpdateProfileInput {
@@ -13,7 +13,7 @@ export interface UpdateProfileInput {
 export class UserService extends Context.Service<UserService>()("UserService", {
   make: Effect.gen(function* () {
     const asVisitor = yield* sessionQuerier;
-    const asRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     return {
       requestAccountDeletion: Effect.fnUntraced(function* (token: string | undefined) {
         if (!token) {
@@ -105,29 +105,33 @@ export class UserService extends Context.Service<UserService>()("UserService", {
       ).pipe(Effect.head),
 
       forgotPassword: (email: string) =>
-        asRoot((rootDb) =>
-          rootDb.selectNoFrom((eb) =>
-            eb
-              .fn<void>("app_public.forgot_password", [sql`${email}::citext`])
-              .as("forgot_password"),
-          ),
-        ).pipe(Effect.asVoid),
+        root
+          .all(
+            root.connection.selectNoFrom((eb) =>
+              eb
+                .fn<void>("app_public.forgot_password", [sql`${email}::citext`])
+                .as("forgot_password"),
+            ),
+          )
+          .pipe(Effect.asVoid),
 
       resetPassword: (userId: string, token: string, password: string) =>
-        asRoot((rootDb) =>
-          rootDb.selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_private.reset_password", [
-                sql`${userId}::uuid`,
-                eb.val(token),
-                eb.val(password),
-              ])
-              .as("reset_password"),
+        root
+          .all(
+            root.connection.selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_private.reset_password", [
+                  sql`${userId}::uuid`,
+                  eb.val(token),
+                  eb.val(password),
+                ])
+                .as("reset_password"),
+            ),
+          )
+          .pipe(
+            Effect.head,
+            Effect.map((rows) => ({ success: rows?.reset_password === true })),
           ),
-        ).pipe(
-          Effect.head,
-          Effect.map((rows) => ({ success: rows?.reset_password === true })),
-        ),
 
       changePassword: (oldPassword: string, newPassword: string) =>
         asVisitor((authDb) =>
@@ -142,16 +146,18 @@ export class UserService extends Context.Service<UserService>()("UserService", {
         ),
 
       verifyEmail: (emailId: string, token: string) =>
-        asRoot((rootDb) =>
-          rootDb.selectNoFrom((eb) =>
-            eb
-              .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
-              .as("verify_email"),
+        root
+          .all(
+            root.connection.selectNoFrom((eb) =>
+              eb
+                .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
+                .as("verify_email"),
+            ),
+          )
+          .pipe(
+            Effect.head,
+            Effect.map((rows) => ({ success: rows?.verify_email === true })),
           ),
-        ).pipe(
-          Effect.head,
-          Effect.map((rows) => ({ success: rows?.verify_email === true })),
-        ),
 
       makeEmailPrimary: (emailId: string) =>
         asVisitor((authDb) =>

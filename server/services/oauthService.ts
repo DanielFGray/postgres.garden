@@ -14,10 +14,11 @@ import {
 import * as arctic from "arctic";
 import { sql } from "kysely";
 import { rootUrl } from "../config.js";
-import { rootQuerier, unwrapPgError } from "../db.js";
+import { PgRootDB, unwrapPgError } from "../db.js";
 import { SessionService } from "./sessionService.js";
 import { Cookies } from "./cookies.js";
 import { AccountAlreadyLinkedError } from "./authService.js";
+import { UserRole as UserRoleSchema } from "../../shared/schemas.js";
 
 type UserRole = "user" | "sponsor" | "admin";
 
@@ -26,6 +27,29 @@ const GitHubUserSchema = S.Struct({
   email: S.NullishOr(S.String),
   avatar_url: S.NullishOr(S.String),
   name: S.NullishOr(S.String),
+});
+
+/** What link_or_register_user stores as the GitHub profile of the account. */
+const LinkedProfile = S.Struct({
+  ...GitHubUserSchema.fields,
+  email: S.String,
+  role: S.optional(UserRoleSchema),
+});
+
+/**
+ * GitHub's token response, as arctic holds it, stored as the authentication's
+ * details. Only `access_token` is required: `tokens.accessToken()` has already
+ * read it, and the other fields depend on the app's token settings.
+ */
+const GitHubTokens = S.Struct({
+  data: S.Struct({
+    access_token: S.String,
+    token_type: S.optional(S.String),
+    scope: S.optional(S.String),
+    expires_in: S.optional(S.Finite),
+    refresh_token: S.optional(S.String),
+    refresh_token_expires_in: S.optional(S.Finite),
+  }),
 });
 
 const GitHubEmailsSchema = S.Array(
@@ -112,7 +136,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     );
     const callbackUrl = `${yield* rootUrl}/auth/github/callback`;
     const cookies = yield* Cookies;
-    const asRoot = yield* rootQuerier;
+    const root = yield* PgRootDB;
     const sessions = yield* SessionService;
     const client = yield* HttpClient.HttpClient;
 
@@ -261,40 +285,55 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
             }),
           );
 
+          const profileJson = yield* S.encodeEffect(S.fromJsonString(LinkedProfile))(profile).pipe(
+            Effect.orDie,
+          );
+          const tokensJson = yield* S.decodeUnknownEffect(GitHubTokens)(tokens).pipe(
+            mapDecodeError("Invalid GitHub token response"),
+            Effect.flatMap((decoded) =>
+              S.encodeEffect(S.fromJsonString(GitHubTokens))(decoded).pipe(Effect.orDie),
+            ),
+          );
+
           // 5. Link or register user
-          const linkedUser = yield* asRoot((rootDb) =>
-            rootDb
-              .selectFrom(
-                sql<{
-                  id: string;
-                  username: string;
-                  role: string;
-                }>`app_private.link_or_register_user(
+          const linkedUser = yield* root
+            .all(
+              root.connection
+                .selectFrom(
+                  sql<{
+                    id: string;
+                    username: string;
+                    role: string;
+                  }>`app_private.link_or_register_user(
           f_user_id => ${currentUserId ?? null},
           f_service => ${"github"},
           f_identifier => ${userInfo.login},
-          f_profile => ${JSON.stringify(profile)}::json,
-          f_auth_details => ${JSON.stringify(tokens)}::json
+          f_profile => ${profileJson}::json,
+          f_auth_details => ${tokensJson}::json
                         )`.as("linked_user"),
-              )
-              .selectAll(),
-          ).pipe(
-            Effect.catch((e) =>
-              unwrapPgError(e).pipe(
-                Effect.flatMap((dbErr) => {
-                  const mapped =
-                    dbErr?.code === "TAKEN"
-                      ? new AccountAlreadyLinkedError({ message: dbErr.message, service: "github" })
-                      : undefined;
-                  return mapped ? Effect.fail(mapped) : Effect.die(e);
-                }),
+                )
+                .selectAll(),
+            )
+            .pipe(
+              Effect.catch((e) =>
+                unwrapPgError(e).pipe(
+                  Effect.flatMap((dbErr) => {
+                    const mapped =
+                      dbErr?.code === "TAKEN"
+                        ? new AccountAlreadyLinkedError({
+                            message: dbErr.message,
+                            service: "github",
+                          })
+                        : undefined;
+                    return mapped ? Effect.fail(mapped) : Effect.die(e);
+                  }),
+                ),
               ),
-            ),
-            Effect.head,
-            Effect.catchTag("NoSuchElementError", () =>
-              callbackError("Failed to link or register user"),
-            ),
-          );
+              Effect.head,
+              Effect.catchTag("NoSuchElementError", () =>
+                callbackError("Failed to link or register user"),
+              ),
+            );
 
           const userId = linkedUser.id;
           const username = linkedUser.username || userInfo.login;
