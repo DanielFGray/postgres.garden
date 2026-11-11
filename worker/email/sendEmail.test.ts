@@ -156,21 +156,6 @@ describe("queued email delivery", () => {
       expect(delivered[4]?.to).toEqual(["one@example.invalid", "two@example.invalid"]);
     }),
   );
-
-  it.live("rejects an invalid queued payload before delivery", () =>
-    Effect.gen(function* () {
-      const { layer, sent } = yield* Mailer.makeCapture;
-      const error = yield* sendEmail({
-        ...verification,
-        variables: { token: "missing-link" },
-      }).pipe(
-        Effect.provide(Layer.mergeAll(layer, RateLimiterMemory, BunServices.layer)),
-        Effect.flip,
-      );
-      expect(error._tag).toBe("SchemaError");
-      expect(yield* Ref.get(sent)).toHaveLength(0);
-    }),
-  );
 });
 
 describe("mail provider selection", () => {

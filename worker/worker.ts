@@ -1,10 +1,29 @@
-import { Cause, Config, Context, Effect, Layer, Redacted, Ref, Schema } from "effect";
+import {
+  Cause,
+  Config,
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Record,
+  Redacted,
+  Ref,
+  Schema,
+} from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import * as Path from "effect/Path";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
-import { getTasks, type JobHelpers, run, type Runner, type Task } from "graphile-worker";
+import { getTasks, type JobHelpers, Logger, run, type Runner, type Task } from "graphile-worker";
+import {
+  AccountMail,
+  AuditEvent,
+  DeleteAccount,
+  ForgotPassword,
+  ForgotPasswordUnregistered,
+  SendVerification,
+} from "./accountMail.js";
 import { Mailer } from "./email/mailer.js";
-import { sendEmail } from "./email/sendEmail.js";
+import { QueuedEmail, sendEmail } from "./email/sendEmail.js";
 import { DependencyUnavailable } from "../server/ready.js";
 
 class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: unique symbol }>()(
@@ -53,7 +72,7 @@ export class Worker extends Context.Service<Worker>()("Worker", {
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(AccountMail.layer));
 }
 
 /**
@@ -73,24 +92,61 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
   );
   const services = yield* Effect.context<FileSystem | Path.Path | RateLimiter>();
   const context = Context.merge(services, mailer);
+  const mail = yield* AccountMail;
+  const logger = new Logger(
+    (scope) => (level, message) =>
+      Option.match(Record.get(graphileLevels, level), {
+        onNone: () => undefined,
+        onSome: (log) => Effect.runSyncWith(context)(log(message).pipe(Effect.annotateLogs(scope))),
+      }),
+  );
   const loadedTasks = yield* Effect.acquireRelease(
     Effect.tryPromise({
-      try: () => getTasks({}, path.resolve("worker/tasks")),
+      try: () => getTasks({ logger }, path.resolve("worker/tasks")),
       catch: (cause) => new WorkerError({ message: "Could not load worker tasks", cause }),
     }),
     (loaded) => Effect.sync(() => loaded.release()),
   );
-  // Graphile owns retry scheduling. A rejected delivery must reject this callback.
-  const deliver: Task = (payload, helpers) =>
-    Effect.runPromiseWith(context)(traced(sendEmail(payload), helpers), {
-      signal: helpers.abortSignal,
-    });
+  // Graphile owns retry scheduling: a failed job rejects its callback, and a
+  // job stops when graphile aborts it.
+  //
+  // The payload is decoded with `schema` first. The code that queues a job is
+  // its payload's only producer, so a payload that does not decode is a bug
+  // there, and the job fails.
+  const task =
+    <S extends Schema.Decoder<unknown>, E>(
+      schema: S,
+      job: (payload: S["Type"], helpers: JobHelpers) => Effect.Effect<void, E, JobServices>,
+    ): Task =>
+    (payload, helpers) =>
+      Effect.runPromiseWith(context)(
+        traced(
+          Effect.flatMap(Schema.decodeUnknownEffect(schema)(payload), (decodedPayload) =>
+            job(decodedPayload, helpers),
+          ),
+          helpers,
+        ),
+        { signal: helpers.abortSignal },
+      );
+  const taskList = {
+    ...loadedTasks.tasks,
+    send_email: task(QueuedEmail, sendEmail),
+    user__audit: task(AuditEvent, (event, helpers) => mail.audit(event, helpers.job.created_at)),
+    user__forgot_password: task(ForgotPassword, mail.forgotPassword),
+    user__forgot_password_unregistered_email: task(
+      ForgotPasswordUnregistered,
+      mail.forgotPasswordUnregistered,
+    ),
+    user__send_delete_account_email: task(DeleteAccount, mail.sendDeleteAccount),
+    user_emails__send_verification: task(SendVerification, mail.sendVerification),
+  };
   const runner = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () =>
         run({
           connectionString: Redacted.value(connection),
-          taskList: { ...loadedTasks.tasks, send_email: deliver },
+          taskList,
+          logger,
           crontabFile: path.resolve("worker/crontab"),
           // The Effect runtime owns SIGINT and SIGTERM, and stops the runner
           // when it closes this layer's scope.
@@ -137,13 +193,15 @@ const stop = Effect.fnUntraced(function* (runner: Runner, stopped: Ref.Ref<boole
   yield* Ref.set(stopped, true);
 });
 
+type JobServices = FileSystem | Path.Path | RateLimiter | Mailer;
+
 /**
  * Runs one job in its Worker.job span. This is the worker's failure boundary:
  * a failure is logged here, once, inside the span, so the line carries the
  * trace id. A stop is not a failure, so an interrupt alone is not logged.
  *
- * Only the Effect tasks run through it; the JavaScript task files in
- * `worker/tasks` run outside Effect and make no span.
+ * The JavaScript task files in `worker/tasks` run outside Effect and make no
+ * span.
  */
 const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobHelpers) =>
   job.pipe(
@@ -159,3 +217,17 @@ const traced = <A, E, R>(job: Effect.Effect<A, E, R>, helpers: JobHelpers) =>
       },
     }),
   );
+
+/**
+ * Graphile's log levels, as Effect log calls. Debug has no entry, so graphile's
+ * debug lines are dropped, as its default logger drops them: one of them
+ * prints the pool options, connection string included.
+ *
+ * Only graphile's scope (worker, task and job ids) annotates a line. Its
+ * per-line metadata holds the whole job row, whose payload can carry tokens.
+ */
+const graphileLevels: Record.ReadonlyRecord<string, (message: string) => Effect.Effect<void>> = {
+  error: Effect.logError,
+  warning: Effect.logWarning,
+  info: Effect.logInfo,
+};

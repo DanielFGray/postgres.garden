@@ -64,14 +64,13 @@ export class EmailRenderError extends Schema.TaggedError<
 }) {}
 
 /**
- * Decode one queued job, render its MJML template, and require delivery from
+ * Render one queued job's MJML template, and require delivery from
  * Mailer. SMTP rejection fails the job so graphile-worker retries it.
  * A recipient over the per-address cap is dropped with a warning, and the job
  * still succeeds: a failed job would be retried and the mail sent later anyway.
  * When the cap cannot be checked, the job fails so that graphile-worker retries it.
  */
-export const sendEmail = Effect.fn("sendEmail")(function* (input: unknown) {
-  const job = yield* Schema.decodeUnknownEffect(QueuedEmail)(input);
+export const sendEmail = Effect.fn("sendEmail")(function* (job: QueuedEmail) {
   const recipients = yield* withinCap(job);
   if (!Arr.isReadonlyArrayNonEmpty(recipients)) return;
   const fs = yield* FileSystem;
