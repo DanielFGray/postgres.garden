@@ -9,8 +9,9 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import { Kysely, PostgresDialect, type ControlledTransaction, type RawBuilder } from "kysely";
+import { Kysely, PostgresDialect, sql, type ControlledTransaction, type RawBuilder } from "kysely";
 import * as pg from "pg";
+import { waitFor } from "./dependencies.js";
 
 import type {
   DB,
@@ -91,6 +92,12 @@ const openPool = Effect.fnUntraced(function* <Schema>(urlKey: string) {
   const url = yield* Config.Redacted(urlKey);
   const db = connect<Schema>(Redacted.value(url));
   yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
+  // The pool connects on first use, so a first query proves Postgres answers.
+  // The retries reuse this one pool.
+  yield* Effect.tryPromise({
+    try: () => sql`select 1`.execute(db),
+    catch: (cause) => toDatabaseError(cause),
+  }).pipe(waitFor(`postgres (${urlKey})`));
   return db;
 });
 

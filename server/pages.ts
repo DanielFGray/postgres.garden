@@ -42,7 +42,8 @@ export class Pages extends Context.Service<
  * Routes for the browser app. The static file routes are more specific than
  * the catch-all, so the router picks them first. A path the API declares
  * answers 404 rather than the page shell, whatever the method: the GitHub
- * OAuth routes, `/webhooks` and `/healthz` sit beside the page routes. Page responses are not
+ * OAuth routes and `/webhooks` sit beside the page routes, as does `/healthz`, which
+ * is not in the API contract (server/health.ts). Page responses are not
  * logged, for the same reason they are not traced (see `PagesUntraced`).
  */
 export const PagesRoutesLive = Layer.unwrap(
@@ -70,7 +71,11 @@ export const PagesRoutesLive = Layer.unwrap(
 
 /**
  * Server-side HTTP tracing covers the API only. A page load fetches hundreds of
- * Vite modules in development, and their spans would bury the API spans.
+ * Vite modules in development, and their spans would bury the API spans. The
+ * health probe is not in the API contract either, so it is not traced: the
+ * platform probes every few seconds, and a failing probe's Error line already
+ * carries its cause. The tracer reads this rule before routing, so `ServerLive`
+ * provides it to the serve layer (server/runtime.ts).
  */
 export const PagesUntraced = Layer.succeed(
   HttpMiddleware.TracerDisabledWhen,

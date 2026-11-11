@@ -5,15 +5,15 @@ import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../shared/httpApi.js";
 import { AuthApiGroupLive } from "./api/auth.js";
 import { PlaygroundsApiGroupLive } from "./api/playgrounds.js";
-import { SystemApiGroupLive } from "./api/system.js";
 import { UsersApiGroupLive } from "./api/users.js";
 import { WebhooksApiGroupLive } from "./api/webhooks.js";
 import { isProduction } from "./config.js";
 import { FailureBoundaryLive } from "./failureBoundary.js";
 import { DatabaseLive } from "./db.js";
+import { ValkeyReady } from "./dependencies.js";
+import { HealthLive } from "./health.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
-import { Readiness } from "./ready.js";
 import { RateLimiterValkey } from "./services/rateLimiter.js";
 import { AuthService } from "./services/authService.js";
 import { OAuthPopup } from "./services/oauthPopup.js";
@@ -47,7 +47,6 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
   Layer.provide(UsersApiGroupLive),
   Layer.provide(PlaygroundsApiGroupLive),
   Layer.provide(WebhooksApiGroupLive),
-  Layer.provide(SystemApiGroupLive),
 );
 
 /**
@@ -111,25 +110,27 @@ const ListenerLive = Layer.unwrap(
 );
 
 /**
- * Everything the routes use, built before the server listens. Nothing is
- * served until Postgres and Valkey answer: a container that comes up beside
- * its database would otherwise spend its first seconds answering 500 to real
- * traffic, and the platform's health check would pass throughout.
+ * Everything the routes use, built before the server listens.
+ *
+ * Layer.provide builds the provided layer first, so the build runs from the
+ * bottom of the pipe up: the tracer, then the wait for the hard dependencies
+ * (both Postgres pools and Valkey, together; server/dependencies.ts), then the
+ * services and the worker. Until every dependency answers, the port stays
+ * closed and no job runs. The worker starts its runner in the background, so
+ * the listener does not wait for graphile-worker's migrations.
  */
-const ServicesLive = Layer.mergeAll(
-  Pages.layer,
-  TracingLayer,
-  PagesUntraced,
-  RateLimitMiddlewareLive,
-  // Layer.provide builds the wait first, so the runner starts only once
-  // Postgres answers; it starts in the background, so the listener does not
-  // wait for graphile-worker's migrations.
-  Worker.layer.pipe(Layer.provide(Layer.effectDiscard(Readiness.use((r) => r.waitUntilReady)))),
-).pipe(
+const ServicesLive = Layer.mergeAll(Pages.layer, RateLimitMiddlewareLive, Worker.layer).pipe(
   // The API middleware and the worker count against one limiter.
   Layer.provide(RateLimiterValkey),
-  Layer.provideMerge(Readiness.layer),
   Layer.provideMerge(AppLayer),
+  // A build makes each layer once, so AppLayer reuses these pools.
+  Layer.provide(Layer.mergeAll(ValkeyReady, DatabaseLive)),
+  // HttpServer.serve runs each request in the context its layer is built in,
+  // not in the served layer's outputs. So the exporter and the rule that
+  // skips page and health spans reach `ServerLive` through these outputs, and
+  // the request's server span and everything under it use them, as do the
+  // worker and the wait.
+  Layer.provideMerge(Layer.mergeAll(TracingLayer, PagesUntraced)),
 );
 
 /**
@@ -139,7 +140,6 @@ const ServicesLive = Layer.mergeAll(
  * the listener opens, and the worker stops before the database pools close.
  * The entry point provides the Valkey client and the platform services.
  */
-export const ServerLive = HttpRouter.serve(Layer.mergeAll(ApiRoutesLive, PagesRoutesLive)).pipe(
-  Layer.provide(ListenerLive),
-  Layer.provide(ServicesLive),
-);
+export const ServerLive = HttpRouter.serve(
+  Layer.mergeAll(ApiRoutesLive, PagesRoutesLive, HealthLive),
+).pipe(Layer.provide(ListenerLive), Layer.provide(ServicesLive));

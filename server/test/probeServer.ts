@@ -1,6 +1,7 @@
-import { Cause, Context, Effect, Layer, Logger, References } from "effect";
-import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
+import { Cause, Context, Effect, Layer, Logger, References, Tracer } from "effect";
+import { HttpClient, type HttpClientRequest, HttpRouter } from "effect/http";
 
+import { PagesUntraced } from "../pages.js";
 import { TestServer } from "./apiHarness.js";
 
 /** One line the probe server logged. */
@@ -13,7 +14,9 @@ export type LogLine = {
 
 /**
  * Serves `app` for one request, and returns the response with every line
- * logged while it was answered. The server stops when the request is done.
+ * logged and every span started while it was answered. It serves as the server
+ * does (`ServerLive` in server/runtime.ts): the HTTP logger is on, and only API
+ * paths are traced. The server stops when the request is done.
  */
 export const requestProbe = Effect.fn(function* <A, E, R>(
   app: Layer.Layer<A, E, R>,
@@ -30,13 +33,24 @@ export const requestProbe = Effect.fn(function* <A, E, R>(
       });
     }),
   ]);
+  const spans: Array<Tracer.Span> = [];
+  const recordSpans = Layer.succeed(
+    Tracer.Tracer,
+    Tracer.make({
+      span(options) {
+        const span = Tracer.nativeTracer.span(options);
+        spans.push(span);
+        return span;
+      },
+    }),
+  );
   const served = yield* Layer.build(
-    HttpRouter.serve(app, { disableLogger: true, disableListenLog: true }).pipe(
-      Layer.provide(recordLines),
+    HttpRouter.serve(app, { disableListenLog: true }).pipe(
+      Layer.provide(Layer.mergeAll(recordLines, recordSpans, PagesUntraced)),
       Layer.provideMerge(TestServer),
     ),
   );
   const client = Context.get(served, HttpClient.HttpClient);
   const response = yield* client.execute(request);
-  return { status: response.status, body: yield* response.text, lines };
+  return { status: response.status, body: yield* response.text, lines, spans };
 }, Effect.scoped);

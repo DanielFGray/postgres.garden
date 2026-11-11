@@ -26,7 +26,6 @@ import { Mailer } from "./email/mailer.js";
 import { QueuedEmail, sendEmail } from "./email/sendEmail.js";
 import { ExpiredPlaygrounds, PruneExpiredPlaygrounds } from "./expiredPlaygrounds.js";
 import { Sponsorship, SponsorshipEvent } from "./sponsorship.js";
-import { DependencyUnavailable } from "../server/ready.js";
 
 class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: unique symbol }>()(
   "WorkerError",
@@ -60,17 +59,8 @@ export class Worker extends Context.Service<Worker>()("Worker", {
       Effect.forkScoped,
     );
     return {
-      /** Fails once the runner has stopped or failed to start. */
-      check: Effect.flatMap(Ref.get(stopped), (hasStopped) =>
-        hasStopped
-          ? Effect.fail(
-              new DependencyUnavailable({
-                dependency: "worker",
-                message: "the worker has stopped",
-              }),
-            )
-          : Effect.void,
-      ),
+      /** False once the runner has stopped or failed to start. */
+      isRunning: Effect.map(Ref.get(stopped), (hasStopped) => !hasStopped),
     } as const;
   }),
 }) {

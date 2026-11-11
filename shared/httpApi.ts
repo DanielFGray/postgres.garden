@@ -12,7 +12,6 @@ import { HttpApi } from "effect/http-api";
 import { AuthGroup } from "./api/auth.js";
 import { FailureBoundary } from "./api/failureBoundary.js";
 import { PlaygroundsGroup } from "./api/playgrounds.js";
-import { SystemGroup } from "./api/system.js";
 import { UsersGroup } from "./api/users.js";
 import { WebhooksGroup } from "./api/webhooks.js";
 
@@ -45,26 +44,15 @@ const groupRoutes = <
  * anything this list does not match, which is what keeps the contract the only
  * way in.
  */
-export const webviewRelayRoutes = groupRoutes([
-  SystemGroup,
-  AuthGroup,
-  UsersGroup,
-  PlaygroundsGroup,
-]);
+export const webviewRelayRoutes = groupRoutes([AuthGroup, UsersGroup, PlaygroundsGroup]);
 
-const allRoutes = groupRoutes([
-  SystemGroup,
-  AuthGroup,
-  UsersGroup,
-  PlaygroundsGroup,
-  WebhooksGroup,
-]);
+const allRoutes = groupRoutes([AuthGroup, UsersGroup, PlaygroundsGroup, WebhooksGroup]);
 
 /**
  * Whether the server answers `pathname` from the API rather than from the page
  * renderer.
  *
- * The GitHub OAuth routes, `/webhooks` and `/healthz` sit outside `/api`,
+ * The GitHub OAuth routes and `/webhooks` sit outside `/api`,
  * beside the page routes, and only the contract can tell them apart. Asking
  * the contract means an endpoint added to a group is served the moment it is
  * declared; a hand-kept list would answer the new path with the page shell and
@@ -79,7 +67,6 @@ export const isApiPath = (pathname: string): boolean =>
   allRoutes.some((route) => route.pattern.test(pathname));
 
 export class PgGardenApi extends HttpApi.make("PgGardenApi")
-  .add(SystemGroup)
   .add(AuthGroup)
   .add(UsersGroup)
   .add(PlaygroundsGroup)

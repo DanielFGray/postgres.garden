@@ -18,15 +18,15 @@ import { requestProbe } from "./test/probeServer.js";
 const ProbeApi = HttpApi.make("probe")
   .add(
     HttpApiGroup.make("probe")
-      .add(HttpApiEndpoint.get("defect", "/defect", { success: S.Void }))
+      .add(HttpApiEndpoint.get("defect", "/api/defect", { success: S.Void }))
       .add(
-        HttpApiEndpoint.get("locked", "/locked", {
+        HttpApiEndpoint.get("locked", "/api/locked", {
           success: S.Void.pipe(HttpApiSchema.status(204)),
           error: Locked,
         }),
       )
       .add(
-        HttpApiEndpoint.post("save", "/save", {
+        HttpApiEndpoint.post("save", "/api/save", {
           payload: S.Struct({ count: S.Int }),
           success: S.Void.pipe(HttpApiSchema.status(204)),
         }),
@@ -56,8 +56,9 @@ const parseBody = S.decodeUnknownEffect(ResponseBody);
 suite("FailureBoundary", () => {
   it.live("answers a defect with a 500 that carries the trace id of its logged cause", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request(HttpClientRequest.get("/defect"));
-      expect(lines).toHaveLength(1);
+      const { status, body, lines } = yield* request(HttpClientRequest.get("/api/defect"));
+      expect(lines).toHaveLength(2);
+      expect(lines[1]?.message).toEqual(["Sent HTTP response"]);
       const [line] = lines;
       expect(line?.message).toEqual(["Unexpected failure"]);
       expect(line?.cause).toContain('relation "secret_table" does not exist');
@@ -71,19 +72,19 @@ suite("FailureBoundary", () => {
     }),
   );
 
-  it.live("passes a declared error through unlogged", () =>
+  it.live("passes a declared error through with no report line", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request(HttpClientRequest.get("/locked"));
+      const { status, body, lines } = yield* request(HttpClientRequest.get("/api/locked"));
       expect(status).toBe(423);
       expect(yield* parseBody(body)).toEqual({ _tag: "Locked", message: "account locked" });
-      expect(lines).toEqual([]);
+      expect(lines.map(({ message }) => message)).toEqual([["Sent HTTP response"]]);
     }),
   );
 
   it.live("answers a payload its schema rejects with 400 invalid_input naming each value", () =>
     Effect.gen(function* () {
       const { status, body, lines } = yield* request(
-        HttpClientRequest.post("/save").pipe(
+        HttpClientRequest.post("/api/save").pipe(
           HttpClientRequest.bodyText('{"count":"many"}', "application/json"),
         ),
       );
@@ -95,7 +96,7 @@ suite("FailureBoundary", () => {
         issues: [{ path: ["payload", "count"], message: "Expected number" }],
       });
       expect(body).not.toContain("many");
-      expect(lines).toEqual([]);
+      expect(lines.map(({ message }) => message)).toEqual([["Sent HTTP response"]]);
     }),
   );
 });

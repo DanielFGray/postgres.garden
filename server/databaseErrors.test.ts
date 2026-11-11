@@ -43,7 +43,7 @@ const ProbeApi = HttpApi.make("probe")
   .add(
     HttpApiGroup.make("probe")
       .add(
-        HttpApiEndpoint.get("raise", "/raise/:name", {
+        HttpApiEndpoint.get("raise", "/api/raise/:name", {
           params: {
             name: S.Literals([
               "custom",
@@ -58,7 +58,7 @@ const ProbeApi = HttpApi.make("probe")
         }),
       )
       .add(
-        HttpApiEndpoint.get("visitorInsert", "/visitor-insert", {
+        HttpApiEndpoint.get("visitorInsert", "/api/visitor-insert", {
           success: S.Void.pipe(HttpApiSchema.status(204)),
           error: DatabaseRefusals,
         }),
@@ -122,14 +122,15 @@ const parseBody = S.decodeUnknownEffect(S.fromJsonString(S.Json));
 suite("toHttpError", () => {
   it.live("answers a custom code with the text its SQL wrote, and logs the report", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request("/raise/custom");
+      const { status, body, lines } = yield* request("/api/raise/custom");
       expect(status).toBe(403);
       expect(yield* parseBody(body)).toEqual({
         _tag: "Forbidden",
         message: "You are not allowed to do that",
         reason: "access_denied",
       });
-      expect(lines).toHaveLength(1);
+      expect(lines).toHaveLength(2);
+      expect(lines[1]?.message).toEqual(["Sent HTTP response"]);
       expect(lines[0]?.level).toBe("Info");
       expect(lines[0]?.cause).toContain(
         "[DNIED] You are not allowed to do that; query: Probe.raise",
@@ -140,7 +141,7 @@ suite("toHttpError", () => {
   const fixedAnswers = [
     {
       name: "a unique constraint users can hit, by its name",
-      path: "/raise/usernameTaken",
+      path: "/api/raise/usernameTaken",
       status: 409,
       body: {
         _tag: "Conflict",
@@ -151,14 +152,14 @@ suite("toHttpError", () => {
     },
     {
       name: "any other unique constraint",
-      path: "/raise/otherUnique",
+      path: "/api/raise/otherUnique",
       status: 409,
       body: { _tag: "Conflict", message: "That already exists.", reason: "already_exists" },
       logged: "constraint: sessions_cookie_id_key",
     },
     {
       name: "a data exception (class 22)",
-      path: "/raise/divisionByZero",
+      path: "/api/raise/divisionByZero",
       status: 400,
       body: {
         _tag: "InvalidOperation",
@@ -169,7 +170,7 @@ suite("toHttpError", () => {
     },
     {
       name: "a row that row-level security refuses",
-      path: "/visitor-insert",
+      path: "/api/visitor-insert",
       status: 403,
       body: {
         _tag: "Forbidden",
@@ -185,7 +186,8 @@ suite("toHttpError", () => {
         const { status, body, lines } = yield* request(answer.path);
         expect(status).toBe(answer.status);
         expect(yield* parseBody(body)).toEqual(answer.body);
-        expect(lines).toHaveLength(1);
+        expect(lines).toHaveLength(2);
+        expect(lines[1]?.message).toEqual(["Sent HTTP response"]);
         expect(lines[0]?.level).toBe("Warn");
         expect(lines[0]?.cause).toContain(answer.logged);
       }),
@@ -194,8 +196,9 @@ suite("toHttpError", () => {
 
   it.live("answers any other code with a 500 whose trace id finds the logged report", () =>
     Effect.gen(function* () {
-      const { status, body, lines } = yield* request("/raise/unknown");
-      expect(lines).toHaveLength(1);
+      const { status, body, lines } = yield* request("/api/raise/unknown");
+      expect(lines).toHaveLength(2);
+      expect(lines[1]?.message).toEqual(["Sent HTTP response"]);
       const [line] = lines;
       expect(line?.level).toBe("Error");
       expect(line?.message).toEqual(["Unexpected failure"]);

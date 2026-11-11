@@ -2,18 +2,14 @@
 import { createServer } from "node:http";
 
 import { NodeHttpServer } from "@effect/platform-node";
-import { type Config, Effect, Layer } from "effect";
+import { type Config, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
-import type { Redis } from "effect/persistence/Redis";
 
 import type { RateLimitMiddleware } from "../../shared/api/rateLimit.js";
-import { DatabaseLive } from "../db.js";
 import { RateLimitMiddlewarePassThrough } from "../rateLimit.js";
 import { ApiRoutesLive, AppLayer } from "../runtime.js";
-import { Readiness } from "../ready.js";
 import { RateLimiterMemory } from "../services/rateLimiter.js";
-import { Worker } from "../../worker/worker.js";
 import { TestValkeyLive } from "./valkey.js";
 
 /**
@@ -29,23 +25,17 @@ import { TestValkeyLive } from "./valkey.js";
  * Rate limits pass every request unless a test brings `rateLimit`: suites
  * register and log in far more often than a limit allows. The enforcing layer
  * counts in memory unless it brings its own `RateLimiter`.
- *
- * The health check probes the real pools and Valkey, and a worker that runs:
- * no test starts a runner. A test brings `health` to replace either.
  */
 export const makeTestApi = ({
   overrides = Layer.empty,
   rateLimit = RateLimitMiddlewarePassThrough,
-  health = Layer.mergeAll(Readiness.layer, workerRunning),
 }: {
   readonly overrides?: Layer.Layer<never>;
   readonly rateLimit?: Layer.Layer<RateLimitMiddleware, Config.ConfigError, RateLimiter>;
-  readonly health?: HealthDependencies;
 } = {}) =>
   // Route handlers take their services per request, so the served layer gets
   // them too, as `ServerLive` does.
   HttpRouter.serve(ApiRoutesLive, { disableLogger: true, disableListenLog: true }).pipe(
-    Layer.provide(health),
     Layer.provide(rateLimit),
     Layer.provide(RateLimiterMemory),
     Layer.provideMerge(AppLayer),
@@ -72,16 +62,6 @@ export const TestServer = HttpServer.layerTestClient.pipe(
   ),
   Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
 );
-
-/** A worker whose runner is up, for the health check. */
-export const workerRunning = Layer.succeed(Worker, Worker.of({ check: Effect.void }));
-
-/** What the health check reads: built over the database pools and Valkey. */
-export type HealthDependencies = Layer.Layer<
-  Readiness | Worker,
-  never,
-  Layer.Success<typeof DatabaseLive> | Redis
->;
 
 /** The API with its defaults, for suites that need nothing replaced. Built
  * last: `makeTestApi` reads the values above. */
