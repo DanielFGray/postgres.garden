@@ -106,7 +106,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
           ),
       resetPassword: ({ payload }) =>
         users
-          .resetPassword(payload.userId, payload.token, payload.password)
+          .resetPassword(payload.token, payload.password)
           .pipe(Effect.catchTag("DatabaseError", toHttpError)),
       changePassword: ({ payload }) =>
         Effect.gen(function* () {
@@ -117,7 +117,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
         }),
       verifyEmail: ({ payload }) =>
         users
-          .verifyEmail(payload.emailId, payload.token)
+          .verifyEmail(payload.token)
           .pipe(Effect.catchTag("DatabaseError", toHttpError)),
       makeEmailPrimary: ({ payload }) =>
         Effect.gen(function* () {

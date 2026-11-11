@@ -4,6 +4,7 @@ import {
   Context,
   Effect,
   Layer,
+  Match,
   Option,
   Redacted,
   Ref,
@@ -72,7 +73,7 @@ export const mailProvider: Config.Config<MailProvider> = Config.all({
   ),
 );
 
-/** Jobs depend on delivery; the worker supplies the selected provider. */
+/** Delivers mail through the provider `mailProvider` selects. */
 export class Mailer extends Context.Service<
   Mailer,
   {
@@ -85,21 +86,12 @@ export class Mailer extends Context.Service<
     return Layer.succeed(this, impl);
   }
 
-  /** In-memory capture: records each sent message in a Ref the test can read. */
-  static makeCapture = Effect.gen(function* () {
-    const sent = yield* Ref.make<ReadonlyArray<MailMessage>>([]);
-    return {
-      sent,
-      layer: Mailer.make({
-        send: (message) => Ref.update(sent, Arr.append(message)),
-      }),
-    } as const;
-  });
-
-  static readonly capture = Layer.unwrap(
+  /** Sends nothing: each message is kept in `MailCapture`, for tests to read. */
+  static readonly capture = Layer.effect(
+    this,
     Effect.gen(function* () {
-      const { layer } = yield* Mailer.makeCapture;
-      return layer;
+      const capture = yield* MailCapture;
+      return { send: capture.record };
     }),
   );
 
@@ -183,14 +175,31 @@ export class Mailer extends Context.Service<
   static readonly layer = Layer.unwrap(
     Effect.gen(function* () {
       const provider = yield* mailProvider;
-      const layers = {
-        ethereal: Mailer.ethereal,
-        capture: Mailer.capture,
-        cloudflare: Mailer.cloudflare,
-      } as const;
-      return layers[provider];
+      return Match.value(provider).pipe(
+        Match.when("ethereal", () => Mailer.ethereal),
+        Match.when("capture", () => Mailer.capture),
+        Match.when("cloudflare", () => Mailer.cloudflare),
+        Match.exhaustive,
+      );
     }),
   );
+}
+
+/**
+ * The messages the capture provider took, oldest first. It is in the server's
+ * layer graph under every provider, so the testing routes can read it; it
+ * stays empty unless `MAIL_PROVIDER` is `capture`.
+ */
+export class MailCapture extends Context.Service<MailCapture>()("worker/MailCapture", {
+  make: Effect.gen(function* () {
+    const sent = yield* Ref.make<ReadonlyArray<MailMessage>>([]);
+    return {
+      record: (message: MailMessage) => Ref.update(sent, Arr.append(message)),
+      sent: Ref.get(sent),
+    } as const;
+  }),
+}) {
+  static readonly layer = Layer.effect(this, this.make);
 }
 
 const EtherealAccount = Schema.Struct({

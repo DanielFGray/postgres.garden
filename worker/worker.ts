@@ -80,8 +80,7 @@ export class Worker extends Context.Service<Worker>()("Worker", {
 }
 
 /**
- * Starts the runner and returns once it runs. The Mailer is built here, not in
- * the layer, so a mail provider that cannot start stops only the worker.
+ * Starts the runner and returns once it runs.
  *
  * Paths resolve from the working directory: the production server is one
  * bundle in `dist/`, so a path relative to this module would point there.
@@ -91,11 +90,7 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
     Effect.mapError((cause) => new WorkerError({ message: "Worker failed to start", cause })),
   );
   const path = yield* Path.Path;
-  const mailer = yield* Layer.build(Mailer.layer).pipe(
-    Effect.mapError((cause) => new WorkerError({ message: "The mailer did not start", cause })),
-  );
-  const services = yield* Effect.context<FileSystem | Path.Path | RateLimiter>();
-  const context = Context.merge(services, mailer);
+  const context = yield* Effect.context<FileSystem | Path.Path | RateLimiter | Mailer>();
   const mail = yield* AccountMail;
   const playgrounds = yield* ExpiredPlaygrounds;
   const sponsorship = yield* Sponsorship;

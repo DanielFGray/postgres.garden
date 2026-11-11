@@ -1,21 +1,22 @@
 /**
  * Test-only HTTP routes under `/api/testing`. The e2e suite and `auth.test.ts`
- * call them to create users and sessions and to read secrets, without going
- * through the public API.
+ * call them to create users and sessions and to read the mail the server
+ * sent, without going through the public API.
  *
  * `ApiRoutesLive` (runtime.ts) mounts these routes outside production only. A failed route
  * answers 500 with a fixed body, so internal error text never reaches a test.
  */
-import { Context, Effect, Layer, Random, Schema as S } from "effect";
+import { Array as Arr, Context, Effect, Layer, Random, Schema as S } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { sql, type ExpressionBuilder } from "kysely";
+import { sql } from "kysely";
 import { Redis } from "effect/persistence/Redis";
 import { isProduction, rootUrl } from "./config.js";
-import type { DB, AppPublicUsers as User } from "../generated/db.js";
+import type { AppPublicUsers as User } from "../generated/db.js";
 import { SessionService, sessionKeyOf } from "./services/sessionService.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
 import { PgRootDB } from "./db.js";
+import { MailCapture } from "../worker/email/mailer.js";
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),
@@ -26,7 +27,7 @@ const UserQuery = S.Struct({
 
 const LoginQuery = S.Struct({ ...UserQuery.fields, redirectTo: S.optional(S.String) });
 
-const EmailQuery = S.Struct({ email: S.String });
+const MailQuery = S.Struct({ to: S.String });
 
 const UsernameQuery = S.Struct({ username: S.optional(S.String) });
 
@@ -60,6 +61,7 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
     const sessionKey = yield* sessionKeyOf;
     const rateLimitPrefix = yield* rateLimitKeyPrefix();
     const siteUrl = yield* rootUrl;
+    const capture = yield* MailCapture;
 
     /**
      * Creates a user through `really_create_user`, then opens a session for it.
@@ -95,38 +97,6 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
       const session = yield* sessions.createSession(user.id);
       return { user, session };
     });
-
-    const userSecrets = (username: string) =>
-      root
-        .all(
-          root.connection
-            .selectFrom("app_private.user_secrets")
-            .selectAll()
-            .where("user_id", "=", (eb: ExpressionBuilder<DB, "app_private.user_secrets">) =>
-              eb.selectFrom("app_public.users").select("id").where("username", "=", username),
-            ),
-        )
-        .pipe(Effect.head);
-
-    const emailSecrets = (email: string) =>
-      root
-        .all(
-          root.connection
-            .selectFrom("app_private.user_email_secrets")
-            .selectAll()
-            .where(
-              "user_email_id",
-              "=",
-              (eb: ExpressionBuilder<DB, "app_private.user_email_secrets">) =>
-                eb
-                  .selectFrom("app_public.user_emails")
-                  .select("id")
-                  .where("email", "=", email)
-                  .orderBy("id", "desc")
-                  .limit(1),
-            ),
-        )
-        .pipe(Effect.head);
 
     const sessionRedirect = (
       session: { readonly token: string; readonly expiresAt: Date },
@@ -201,20 +171,23 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
           verified: query.verified === "true",
           password: query.password,
         });
-        const email = query.email ?? `${query.username ?? "testuser"}@example.com`;
-        const secrets = yield* emailSecrets(email);
-        return HttpServerResponse.jsonUnsafe({
-          user,
-          userEmailId: secrets.user_email_id,
-          verificationToken: query.verified === undefined ? secrets.verification_token : null,
-        });
+        return HttpServerResponse.jsonUnsafe({ user });
       }),
 
-      userSecrets: (username: string) =>
-        userSecrets(username).pipe(Effect.map((row) => HttpServerResponse.jsonUnsafe(row))),
-
-      emailSecrets: (email: string) =>
-        emailSecrets(email).pipe(Effect.map((row) => HttpServerResponse.jsonUnsafe(row))),
+      /**
+       * The mail the capture provider took for `to`, oldest first. The emailed
+       * tokens exist only in the mail, so a test reads its link from here, as a
+       * user reads it. The list is empty until the worker sends the mail, and
+       * always empty on a server whose `MAIL_PROVIDER` is not `capture`.
+       */
+      mailTo: (to: string) =>
+        Effect.map(capture.sent, (sent) =>
+          HttpServerResponse.jsonUnsafe(
+            Arr.filter(sent, (mail) =>
+              mail.to.some((address) => address.toLowerCase() === to.toLowerCase()),
+            ),
+          ),
+        ),
 
       verifyUser: (username: string) =>
         root
@@ -251,15 +224,8 @@ export const TestingRoutesLive = HttpRouter.addAll(
       ),
       testingRoute(
         "GET",
-        "/getUserSecrets",
-        Effect.flatMap(searchParams(UsernameQuery), ({ username }) =>
-          testing.userSecrets(username ?? "testuser"),
-        ),
-      ),
-      testingRoute(
-        "GET",
-        "/getEmailSecrets",
-        Effect.flatMap(searchParams(EmailQuery), ({ email }) => testing.emailSecrets(email)),
+        "/mailTo",
+        Effect.flatMap(searchParams(MailQuery), ({ to }) => testing.mailTo(to)),
       ),
       testingRoute(
         "GET",

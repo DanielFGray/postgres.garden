@@ -3,14 +3,12 @@ import { apiCall } from "../api";
 import * as Effect from "effect/Effect";
 import { runRequest } from "../../../webview/request";
 
-// Set by the host's `init-view` message before this view mounts. Signals, not
-// plain variables: the view renders once, so a plain write after mount would
+// Set by the host's `init-view` message before this view mounts. A signal, not
+// a plain variable: the view renders once, so a plain write after mount would
 // never reach the DOM.
-const [resetParams, setParams] = createSignal({ userId: "", token: "" });
+const [resetToken, setResetToken] = createSignal("");
 
-export function setResetParams(userId: string, token: string) {
-  setParams({ userId, token });
-}
+export { setResetToken };
 
 export const ResetPasswordView = (props: { onNavigate: (view: string) => void }) => {
   const [submitting, setSubmitting] = createSignal(false);
@@ -44,7 +42,6 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
       apiCall("auth.reset_password.submit", (api) =>
         api.apiUsers.resetPassword({
           payload: {
-            userId: getText("userId"),
             token: getText("token"),
             password,
           },
@@ -89,33 +86,15 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
 
         <form onSubmit={handleSubmit} data-pw="reset-password-form">
           <Show
-            when={resetParams().userId}
+            when={resetToken()}
             fallback={
-              <>
-                <div class="auth-field">
-                  <label>User ID</label>
-                  <input
-                    type="text"
-                    name="userId"
-                    class="setting-input"
-                    data-pw="reset-userid-input"
-                  />
-                </div>
-
-                <div class="auth-field">
-                  <label>Reset Token</label>
-                  <input
-                    type="text"
-                    name="token"
-                    class="setting-input"
-                    data-pw="reset-token-input"
-                  />
-                </div>
-              </>
+              <div class="auth-field">
+                <label>Reset Token</label>
+                <input type="text" name="token" class="setting-input" data-pw="reset-token-input" />
+              </div>
             }
           >
-            <input type="hidden" name="userId" value={resetParams().userId} />
-            <input type="hidden" name="token" value={resetParams().token} />
+            <input type="hidden" name="token" value={resetToken()} />
           </Show>
 
           <div class="auth-field">
@@ -125,7 +104,7 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
               name="password"
               class="setting-input"
               placeholder="At least 8 characters"
-              autofocus={!!resetParams().userId}
+              autofocus={!!resetToken()}
               data-pw="reset-password-input"
             />
           </div>

@@ -11,6 +11,7 @@ import { Effect, Logger, Random } from "effect";
 import { sql } from "kysely";
 import { type DbHandle, type PublicDB } from "./db.js";
 import { RequestDatabase, withAuthContext } from "./requestDatabase.js";
+import { CurrentSession } from "../shared/session.js";
 
 /** Unique enough to keep concurrent test rows apart. */
 export const randomSuffix = Random.nextIntBetween(0, 0xffffffff).pipe(
@@ -40,6 +41,44 @@ export const createUser = (db: DbHandle, username: string) =>
  */
 export const asVisitor = <A, E, R>(use: (db: DbHandle<PublicDB>) => Effect.Effect<A, E, R>) =>
   withAuthContext(RequestDatabase.use(use));
+
+/**
+ * Runs `use` as the visitor signed in as `userId`, through a session row that
+ * exists only for the call. The sessions table has no foreign key to users,
+ * so the row is removed here, not by `deleteUser`.
+ */
+export const asUser = <A, E, R>(
+  root: DbHandle,
+  userId: string,
+  use: (db: DbHandle<PublicDB>) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const user = yield* root.one(
+      root.connection
+        .selectFrom("app_public.users")
+        .select(["id", "username", "role", "is_verified"])
+        .where("id", "=", userId),
+    );
+    const cookieId = `test_${yield* randomSuffix}`;
+    const session = yield* root.one(
+      root.connection
+        .insertInto("app_private.sessions")
+        .values({ id: cookieId, user_id: userId, expires_at: sql`now() + interval '1 hour'` })
+        .returning(["id", "user_id", "expires_at"])
+        .$narrowType<{ expires_at: Date }>(),
+    );
+    return yield* asVisitor(use).pipe(
+      Effect.provideService(CurrentSession, {
+        user,
+        session: { ...session, cookie_id: cookieId },
+      }),
+      Effect.ensuring(
+        root
+          .all(root.connection.deleteFrom("app_private.sessions").where("id", "=", session.id))
+          .pipe(Effect.orDie),
+      ),
+    );
+  });
 
 /** Removes the user and everything that cascades from it. */
 export const deleteUser = (db: DbHandle, userId: string) =>

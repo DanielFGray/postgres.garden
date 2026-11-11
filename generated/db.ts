@@ -52,20 +52,21 @@ export interface AppPrivateUserEmailSecrets {
   password_reset_email_sent_at: Timestamp | null;
   user_email_id: string;
   verification_email_sent_at: Timestamp | null;
-  verification_token: string | null;
+  verification_token_generated: Timestamp | null;
+  verification_token_hash: string | null;
 }
 
 export interface AppPrivateUserSecrets {
-  delete_account_token: string | null;
   delete_account_token_generated: Timestamp | null;
+  delete_account_token_hash: string | null;
   failed_password_attempts: Generated<number>;
   failed_reset_password_attempts: Generated<number>;
   first_failed_password_attempt: Timestamp | null;
   first_failed_reset_password_attempt: Timestamp | null;
   last_login_at: Generated<Timestamp>;
   password_hash: string | null;
-  reset_password_token: string | null;
   reset_password_token_generated: Timestamp | null;
+  reset_password_token_hash: string | null;
   user_id: string;
 }
 

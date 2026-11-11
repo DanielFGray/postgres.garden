@@ -1,4 +1,4 @@
-import { Array as Arr, Context, Effect, Layer, Match, Option, Record, Schema } from "effect";
+import { Array as Arr, Context, Effect, Layer, Match, Option, Schema } from "effect";
 import { sql } from "kysely";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -77,7 +77,7 @@ export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountM
         return yield* queue({
           options: { to: email, subject: "Password reset" },
           template: "password_reset.mjml",
-          variables: { token, verifyLink: yield* link("/reset", { userId: id, token }) },
+          variables: { token, verifyLink: yield* link("/reset", token) },
         });
       }),
 
@@ -103,18 +103,21 @@ export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountM
           template: "delete_account.mjml",
           variables: {
             token,
-            deleteAccountLink: yield* link("/settings", { token }),
+            deleteAccountLink: yield* link("/settings", token),
           },
         });
       }),
 
       /**
-       * Sends the code that verifies an address, at most once per 3 minutes.
-       * The mail is queued and the send time recorded in one transaction, so
-       * a job stopped between the two cannot send a second mail on retry.
+       * Sends the link that verifies an address, while the job's token is the
+       * address's live token: a newer token has replaced it when the user asked
+       * again, and its own job mails it. The mail is queued and the send time
+       * recorded in one transaction, and a send time after the token's mint
+       * means its mail went out, so a retried job does not mail twice.
        */
       sendVerification: Effect.fn("AccountMail.sendVerification")(function* ({
         id,
+        token,
       }: SendVerification) {
         const pending = yield* db.maybe(
           db.connection
@@ -129,36 +132,30 @@ export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountM
               "address.email",
               "user.username",
               "user.name",
-              "secrets.verification_token",
-              eb
-                .and([
-                  eb("secrets.verification_email_sent_at", "is not", null),
-                  eb(
-                    "secrets.verification_email_sent_at",
-                    ">",
-                    sql<Date>`now() - interval '3 minutes'`,
-                  ),
-                ])
-                .as("sent_recently"),
+              eb(
+                "secrets.verification_email_sent_at",
+                ">=",
+                eb.ref("secrets.verification_token_generated"),
+              ).as("already_sent"),
             ])
             .where("address.id", "=", id)
             .where("address.is_verified", "=", false)
-            // Every unverified address gets a token when it is created.
-            .where("secrets.verification_token", "is not", null)
-            .$narrowType<{ verification_token: string }>(),
+            .where(
+              "secrets.verification_token_hash",
+              "=",
+              sql<string>`app_private.hash_token(${token})`,
+            ),
         );
         if (Option.isNone(pending)) {
           return yield* Effect.logWarning(
-            `Email ${id} is gone or already verified; verification mail not sent`,
+            `Email ${id} is gone, verified, or has a newer token; verification mail not sent`,
           );
         }
-        const { email, username, name, verification_token: token, sent_recently } = pending.value;
-        if (sent_recently) {
-          return yield* Effect.logInfo(
-            `A verification mail went to email ${id} less than 3 minutes ago`,
-          );
+        const { email, username, name, already_sent } = pending.value;
+        if (already_sent) {
+          return yield* Effect.logInfo(`The verification mail for email ${id} already went out`);
         }
-        const verifyLink = yield* link("/verify", { id, token });
+        const verifyLink = yield* link("/verify", token);
         const statement = yield* emailJob({
           options: { to: email, subject: "Please verify your email address" },
           template: "verify_email.mjml",
@@ -225,8 +222,14 @@ export const DeleteAccount = Schema.Struct({
 });
 export type DeleteAccount = typeof DeleteAccount.Type;
 
-/** The trigger on `app_public.user_emails` names only the address; its token is a secret row. */
-export const SendVerification = Schema.Struct({ id: Schema.String });
+/**
+ * From the SQL that mints a verification token. The database keeps only the
+ * token's hash, so this payload is the one place the plaintext exists.
+ */
+export const SendVerification = Schema.Struct({
+  id: Schema.String,
+  token: Schema.NonEmptyString,
+});
 export type SendVerification = typeof SendVerification.Type;
 
 /** An audit for a user with no verified address: no one can be told, so the job fails. */
@@ -244,17 +247,12 @@ const emailJob = Effect.fnUntraced(function* (email: QueuedEmail) {
 });
 
 /**
- * The parameters travel in the link's fragment, which no request carries, so a
- * token never reaches server logs or a Referer header. `src/features/auth.ts`
- * reads them from there.
+ * The token alone finds its row, so it is the link's only parameter. It travels
+ * in the fragment, which no request carries, so it never reaches server logs or
+ * a Referer header. `src/features/auth.ts` reads it from there.
  */
-const link = (path: string, params: Record.ReadonlyRecord<string, string>) =>
-  Effect.map(rootUrl, (url) => {
-    const fragment = Record.toEntries(params)
-      .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
-      .join("&");
-    return `${url}${path}#${fragment}`;
-  });
+const link = (path: string, token: string) =>
+  Effect.map(rootUrl, (url) => `${url}${path}#token=${encodeURIComponent(token)}`);
 
 const describe = Match.type<AuditEvent>().pipe(
   Match.discriminatorsExhaustive("type")({

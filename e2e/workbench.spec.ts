@@ -14,6 +14,7 @@ import {
   openExplorerFile,
   openSignInPanel,
   registerWithPassword,
+  mailedLink,
   serverCommand,
   testingRegister,
   waitForWorkbench,
@@ -88,11 +89,8 @@ test.describe("workbench basics", () => {
 
   test("verify email deep link verifies email", async ({ page, request }) => {
     const username = `test_${Date.now().toString(36)}`;
-    const { userEmailId, verificationToken } = await serverCommand(request, "createUser", {
-      username,
-    });
-
-    expect(verificationToken).not.toBeNull();
+    await serverCommand(request, "createUser", { username });
+    const verifyLink = await mailedLink(request, `${username}@example.com`, "/verify");
 
     const errors: string[] = [];
     page.on("console", (msg) => {
@@ -100,9 +98,7 @@ test.describe("workbench basics", () => {
     });
     page.on("pageerror", (err) => errors.push(err.message));
 
-    await page.goto(
-      `/verify#id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
-    );
+    await page.goto(verifyLink);
 
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: /^sign in$/i }).click({ force: true });
@@ -154,15 +150,7 @@ test.describe("workbench basics", () => {
     let auth = await forgotPassword(page, `${username}@example.com`);
     await expect(auth.locator('[data-pw="forgot-password-sent"]')).toBeVisible({ timeout: 15_000 });
 
-    const { reset_password_token: token, user_id: userId } = await serverCommand(
-      request,
-      "getUserSecrets",
-      { username },
-    );
-
-    await page.goto(
-      `/reset#userId=${encodeURIComponent(String(userId))}&token=${encodeURIComponent(String(token))}`,
-    );
+    await page.goto(await mailedLink(request, `${username}@example.com`, "/reset"));
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: /^sign in$/i }).click({ force: true });
     auth = await authPanelFrame(page);
@@ -222,11 +210,7 @@ test.describe("workbench basics", () => {
       newEmailItem.locator('[data-pw="email-settings-indicator-unverified"]'),
     ).toBeVisible();
 
-    const { user_email_id: userEmailId, verification_token: verificationToken } =
-      await serverCommand(request, "getEmailSecrets", { email: newEmail });
-    await page.goto(
-      `/verify#id=${encodeURIComponent(String(userEmailId))}&token=${encodeURIComponent(String(verificationToken))}`,
-    );
+    await page.goto(await mailedLink(request, newEmail, "/verify"));
     await expect(page.locator("#workbench-container")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("tab", { name: /^sign in$/i }).click({ force: true });
     const auth = await authPanelFrame(page);
@@ -324,12 +308,8 @@ test.describe("workbench basics", () => {
       { timeout: 15_000 },
     );
 
-    const { delete_account_token: deleteToken } = await serverCommand(request, "getUserSecrets", {
-      username,
-    });
-    expect(deleteToken).toBeTruthy();
-
-    await page.goto(`/settings#token=${encodeURIComponent(String(deleteToken))}`, {
+    const deleteLink = await mailedLink(request, `${username}@example.com`, "/settings");
+    await page.goto(deleteLink, {
       waitUntil: "domcontentloaded",
     });
     await waitForWorkbench(page);

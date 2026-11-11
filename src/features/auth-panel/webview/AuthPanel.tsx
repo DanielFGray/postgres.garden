@@ -3,7 +3,7 @@ import { notifyAuthComplete, sendInitialized } from "./api";
 import { LoginView } from "./views/LoginView";
 import { RegisterView } from "./views/RegisterView";
 import { ForgotPasswordView } from "./views/ForgotPasswordView";
-import { ResetPasswordView, setResetParams } from "./views/ResetPasswordView";
+import { ResetPasswordView, setResetToken } from "./views/ResetPasswordView";
 import { VerifyEmailView, triggerVerification } from "./views/VerifyEmailView";
 import * as S from "effect/Schema";
 import { Match as M, Option } from "effect";
@@ -19,11 +19,11 @@ export const AuthPanel = () => {
         M.discriminator("type")("github-complete", ({ username }) => notifyAuthComplete(username)),
         M.discriminator("type")("github-error", ({ message }) => setGithubError(message)),
         M.discriminator("type")("init-view", ({ view = "login", params }) => {
-          if (view === "reset-password" && params?.userId && params?.token) {
-            setResetParams(params.userId, params.token);
+          if (view === "reset-password" && params?.token) {
+            setResetToken(params.token);
           }
-          if (view === "verify-email" && params?.emailId && params?.token) {
-            triggerVerification(params.emailId, params.token);
+          if (view === "verify-email" && params?.token) {
+            triggerVerification(params.token);
           }
           setActiveView(view);
         }),

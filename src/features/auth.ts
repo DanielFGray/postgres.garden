@@ -507,24 +507,16 @@ export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeServic
       const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
 
       if (pathname === "/reset") {
-        const userId = fragment.get("userId");
         const token = fragment.get("token");
-        if (userId && token) {
-          AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", {
-            userId,
-            token,
-          });
+        if (token) {
+          AuthPanelProvider.createOrShow(extensionUri, undefined, "reset-password", { token });
           // Clean URL
           window.history.replaceState({}, "", "/");
         }
       } else if (pathname === "/verify") {
-        const emailId = fragment.get("id");
         const token = fragment.get("token");
-        if (emailId && token) {
-          AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", {
-            emailId,
-            token,
-          });
+        if (token) {
+          AuthPanelProvider.createOrShow(extensionUri, undefined, "verify-email", { token });
           // Clean URL
           window.history.replaceState({}, "", "/");
         }

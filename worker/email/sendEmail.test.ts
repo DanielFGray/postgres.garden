@@ -1,6 +1,6 @@
 import { BunServices } from "@effect/platform-bun";
 import { describe, expect, it } from "@effect/vitest";
-import { ConfigProvider, DateTime, Effect, Layer, Ref, Schema } from "effect";
+import { ConfigProvider, DateTime, Effect, Layer, Schema } from "effect";
 import { vi } from "vitest";
 
 import { RateLimiterMemory } from "../../server/services/rateLimiter.js";
@@ -8,7 +8,7 @@ import {
   RateLimiterStoreFails,
   RateLimiterStoreSilent,
 } from "../../server/test/rateLimiterStores.js";
-import { Mailer, mailProvider } from "./mailer.js";
+import { MailCapture, Mailer, mailProvider } from "./mailer.js";
 import { type JobRun, taskIn } from "../worker.js";
 import { QueuedEmail, sendEmail } from "./sendEmail.js";
 
@@ -20,10 +20,14 @@ const nodemailer = vi.hoisted(() => {
 });
 vi.mock("nodemailer", () => ({ ...nodemailer, default: nodemailer }));
 
+/** The capture Mailer, with the store its tests read the sent mail from. */
+const captured = Layer.provideMerge(Mailer.capture, MailCapture.layer);
+const sentMail = MailCapture.use((capture) => capture.sent);
+
 const passwordReset = {
   options: { to: "visitor@example.com", subject: "Password reset" },
   template: "password_reset.mjml" as const,
-  variables: { token: "abc123", verifyLink: "https://postgres.garden/reset?token=abc123" },
+  variables: { token: "abc123", verifyLink: "https://postgres.garden/reset#token=abc123" },
 };
 
 const verification = {
@@ -87,7 +91,7 @@ describe("send_email with the cloudflare provider", () => {
         to: ["visitor@example.com"],
         subject: "Password reset",
       });
-      expect(message.html).toContain("https://postgres.garden/reset?token=abc123");
+      expect(message.html).toContain("https://postgres.garden/reset#token=abc123");
       expect(message.text).toContain("abc123");
     }),
   );
@@ -119,7 +123,6 @@ describe("send_email with the cloudflare provider", () => {
 describe("queued email delivery", () => {
   it.live("renders every account email through the capture Mailer", () =>
     Effect.gen(function* () {
-      const { layer, sent } = yield* Mailer.makeCapture;
       const jobs = [
         verification,
         passwordReset,
@@ -142,10 +145,8 @@ describe("queued email delivery", () => {
           variables: { actionDescription: "You changed your password." },
         },
       ];
-      yield* Effect.forEach(jobs, sendEmail).pipe(
-        Effect.provide(Layer.mergeAll(layer, RateLimiterMemory, BunServices.layer)),
-      );
-      const delivered = yield* Ref.get(sent);
+      yield* Effect.forEach(jobs, sendEmail);
+      const delivered = yield* sentMail;
       expect(delivered.map((mail) => mail.text)).toEqual([
         expect.stringContaining("verification-code"),
         expect.stringContaining("abc123"),
@@ -155,14 +156,13 @@ describe("queued email delivery", () => {
       ]);
       expect(delivered[0]?.html).toContain("https://example.invalid/verify-email");
       expect(delivered[4]?.to).toEqual(["one@example.invalid", "two@example.invalid"]);
-    }),
+    }).pipe(Effect.provide(Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer))),
   );
 
   it.live("fails a queued payload that does not decode, before delivery", () =>
     Effect.gen(function* () {
-      const { layer, sent } = yield* Mailer.makeCapture;
       const context = yield* Layer.build(
-        Layer.mergeAll(layer, RateLimiterMemory, BunServices.layer),
+        Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer),
       );
       const send = taskIn(context)(QueuedEmail, sendEmail);
       const helpers: JobRun = {
@@ -179,7 +179,7 @@ describe("queued email delivery", () => {
           send({ ...verification, variables: { token: "missing-link" } }, helpers),
         ).rejects.toSatisfy(Schema.isSchemaError),
       );
-      expect(yield* Ref.get(sent)).toHaveLength(0);
+      expect(yield* sentMail.pipe(Effect.provide(context))).toHaveLength(0);
     }).pipe(Effect.scoped),
   );
 });
@@ -215,20 +215,17 @@ describe("per-address mail cap", () => {
 
   it.live("drops a recipient after five mails an hour; security notices are exempt", () =>
     Effect.gen(function* () {
-      const { layer, sent } = yield* Mailer.makeCapture;
-      yield* Effect.gen(function* () {
-        yield* Effect.repeat(sendEmail(verification), { times: 4 });
-        yield* sendEmail(verificationTo("PLAYER@example.invalid"));
-        yield* sendEmail(verificationTo(["player@example.invalid", "fresh@example.invalid"]));
-        yield* sendEmail(notice);
-      }).pipe(Effect.provide(Layer.mergeAll(layer, RateLimiterMemory, BunServices.layer)));
-      const delivered = yield* Ref.get(sent);
+      yield* Effect.repeat(sendEmail(verification), { times: 4 });
+      yield* sendEmail(verificationTo("PLAYER@example.invalid"));
+      yield* sendEmail(verificationTo(["player@example.invalid", "fresh@example.invalid"]));
+      yield* sendEmail(notice);
+      const delivered = yield* sentMail;
       expect(delivered.map((mail) => mail.to)).toEqual([
         ...Array.from({ length: 5 }, () => ["player@example.invalid"]),
         ["fresh@example.invalid"],
         ["player@example.invalid"],
       ]);
-    }),
+    }).pipe(Effect.provide(Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer))),
   );
 
   for (const [state, limiter, failure] of [
@@ -237,15 +234,13 @@ describe("per-address mail cap", () => {
   ] as const) {
     it.live(`fails the job for a retry when the store ${state}; a security notice still goes`, () =>
       Effect.gen(function* () {
-        const { layer, sent } = yield* Mailer.makeCapture;
-        const services = Layer.mergeAll(layer, limiter, BunServices.layer);
-        const error = yield* sendEmail(verification).pipe(Effect.provide(services), Effect.flip);
+        const error = yield* Effect.flip(sendEmail(verification));
         expect(error._tag).toBe(failure);
-        yield* sendEmail(notice).pipe(Effect.provide(services));
-        const delivered = yield* Ref.get(sent);
+        yield* sendEmail(notice);
+        const delivered = yield* sentMail;
         expect(delivered).toHaveLength(1);
         expect(delivered[0]?.text).toContain("You changed your password.");
-      }),
+      }).pipe(Effect.provide(Layer.mergeAll(captured, limiter, BunServices.layer))),
     );
   }
 });

@@ -24,19 +24,19 @@ import { QueuedEmail } from "./email/sendEmail.js";
 layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), { timeout: "30 seconds" })(
   "AccountMail",
   (it) => {
-    it.effect("mails a new address its verification link once per 3 minutes", () =>
+    it.effect("mails a new address its verification link once", () =>
       withUsers("vrfy", (marker) =>
         Effect.gen(function* () {
           const { email } = yield* createUser(marker, false);
           const db = yield* PgRootDB;
-          const { id, token } = yield* db.one(
-            db.raw(sql<{ id: string; token: string }>`
-              select e.id, s.verification_token as token
-              from app_public.user_emails e
-              join app_private.user_email_secrets s on s.user_email_id = e.id
-              where e.email = ${email}`),
+          const { id } = yield* db.one(
+            db.connection
+              .selectFrom("app_public.user_emails")
+              .select("id")
+              .where("email", "=", email),
           );
           const [job] = yield* queuedOnce(SendVerification, "user_emails__send_verification", id);
+          const { token } = job.payload;
           const mail = yield* AccountMail;
           yield* mail.sendVerification(job.payload);
           yield* mail.sendVerification(job.payload);
@@ -46,12 +46,38 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), { timeout: "30 seco
               template: "verify_email.mjml",
               variables: {
                 token,
-                verifyLink: `${yield* rootUrl}/verify#id=${id}&token=${token}`,
+                verifyLink: `${yield* rootUrl}/verify#token=${token}`,
                 username: marker,
                 name: null,
               },
             },
           ]);
+        }),
+      ),
+    );
+
+    it.effect("does not mail a verification token that a newer one replaced", () =>
+      withUsers("stale", (marker) =>
+        Effect.gen(function* () {
+          const { email } = yield* createUser(marker, false);
+          const db = yield* PgRootDB;
+          const { id } = yield* db.one(
+            db.connection
+              .selectFrom("app_public.user_emails")
+              .select("id")
+              .where("email", "=", email),
+          );
+          const [job] = yield* queuedOnce(SendVerification, "user_emails__send_verification", id);
+          yield* db.all(
+            db.connection
+              .updateTable("app_private.user_email_secrets")
+              .set({
+                verification_token_hash: sql`app_private.hash_token(encode(gen_random_bytes(32), 'hex'))`,
+              })
+              .where("user_email_id", "=", id),
+          );
+          yield* (yield* AccountMail).sendVerification(job.payload);
+          expect(yield* queuedMail(marker)).toEqual([]);
         }),
       ),
     );
@@ -148,7 +174,7 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), { timeout: "30 seco
               template: "password_reset.mjml",
               variables: {
                 token,
-                verifyLink: `${root}/reset#userId=${user.id}&token=${encodeURIComponent(token)}`,
+                verifyLink: `${root}/reset#token=${token}`,
               },
             },
             {

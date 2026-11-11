@@ -1,3 +1,4 @@
+import { BunServices } from "@effect/platform-bun";
 import { type Config, Context, Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
@@ -61,6 +62,8 @@ export const makeTestHttpClientLive = ({
             // toWebHandler serves a request from what the app layer outputs.
             Layer.provideMerge(AppLayer),
             Layer.provide(TestValkeyLive),
+            // The Mailer layer names the files the ethereal provider reads.
+            Layer.provide(BunServices.layer),
             Layer.provideMerge(overrides),
           ),
           { disableLogger: true },

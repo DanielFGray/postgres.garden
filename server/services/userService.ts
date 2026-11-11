@@ -148,13 +148,12 @@ export class UserService extends Context.Service<UserService>()("UserService", {
       ),
 
       resetPassword: Effect.fn("UserService.resetPassword")(
-        (userId: string, token: string, password: string) =>
+        (token: string, password: string) =>
           root
             .one(
               root.connection.selectNoFrom((eb) =>
                 eb
                   .fn<boolean>("app_private.reset_password", [
-                    sql`${userId}::uuid`,
                     eb.val(token),
                     eb.val(password),
                   ])
@@ -180,12 +179,12 @@ export class UserService extends Context.Service<UserService>()("UserService", {
           ).pipe(Effect.map((row) => ({ success: row.change_password === true }))),
       ),
 
-      verifyEmail: Effect.fn("UserService.verifyEmail")((emailId: string, token: string) =>
+      verifyEmail: Effect.fn("UserService.verifyEmail")((token: string) =>
         root
           .one(
             root.connection.selectNoFrom((eb) =>
               eb
-                .fn<boolean>("app_public.verify_email", [sql`${emailId}::uuid`, eb.val(token)])
+                .fn<boolean>("app_public.verify_email", [eb.val(token)])
                 .as("verify_email"),
             ),
           )

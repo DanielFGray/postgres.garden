@@ -6,14 +6,11 @@ import { runRequest } from "../../../webview/request";
 // Set by the host's `init-view` message before this view mounts. A signal, not
 // a plain variable: the view renders once, so a plain write after mount would
 // never reach the DOM.
-const [pending, setPending] = createSignal<{
-  emailId: string;
-  token: string;
-} | null>(null);
+const [pendingToken, setPendingToken] = createSignal<string | null>(null);
 let autoVerifyAttempted = false;
 
-export function triggerVerification(emailId: string, token: string) {
-  setPending({ emailId, token });
+export function triggerVerification(token: string) {
+  setPendingToken(token);
 }
 
 export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) => {
@@ -23,13 +20,13 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
 
   // Signal writes are not allowed while the component renders, so the request starts once mounted.
   onSettled(() => {
-    const params = pending();
-    if (autoVerifyAttempted || !params) return;
+    const token = pendingToken();
+    if (autoVerifyAttempted || !token) return;
     autoVerifyAttempted = true;
     setVerifying(true);
     void runRequest(
       apiCall("auth.verify_email.auto", (api) =>
-        api.apiUsers.verifyEmail({ payload: params }),
+        api.apiUsers.verifyEmail({ payload: { token } }),
       ).pipe(
         Effect.match({
           onFailure: (error) => setError(error.message),

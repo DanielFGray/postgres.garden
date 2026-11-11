@@ -24,6 +24,7 @@ import { SessionService } from "./services/sessionService.js";
 import { UserService } from "./services/userService.js";
 import { WebhookService } from "./services/webhookService.js";
 import { TracingLayer } from "./tracing.js";
+import { MailCapture, Mailer } from "../worker/email/mailer.js";
 import { Worker } from "../worker/worker.js";
 
 /**
@@ -50,7 +51,10 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
 );
 
 /**
- * The services the routes and pages use, with the database pools they share.
+ * The services the routes, pages and worker use, with the database pools they
+ * share. The worker sends through the Mailer, and the testing routes read the
+ * mail it captures, so both live here: a mail provider that cannot start
+ * stops the server.
  * ServerLive and the API tests provide it once. Each service layer
  * provides its own dependencies, and Layer memoizes by reference, so a service
  * that several layers name (SessionService, Cookies) is built once.
@@ -63,7 +67,8 @@ export const AppLayer = Layer.mergeAll(
   WebhookService.layer,
   PageData.layer,
   SessionService.layer,
-).pipe(Layer.provideMerge(DatabaseLive));
+  Mailer.layer,
+).pipe(Layer.provideMerge(Layer.mergeAll(DatabaseLive, MailCapture.layer)));
 
 const HttpApiLive = HttpApiHandlers.pipe(
   Layer.provide(SessionMiddlewareLive),

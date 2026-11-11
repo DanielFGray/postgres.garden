@@ -85,7 +85,7 @@ export const UsersGroup = HttpApiGroup.make("apiUsers")
   )
   .add(
     HttpApiEndpoint.post("resetPassword", "/resetPassword", {
-      payload: S.Struct({ userId: S.String, token: S.String, password: S.String }),
+      payload: S.Struct({ token: S.String, password: S.String }),
       success: SuccessResponse,
     }).middleware(RateLimitMiddleware),
   )
@@ -98,7 +98,7 @@ export const UsersGroup = HttpApiGroup.make("apiUsers")
   )
   .add(
     HttpApiEndpoint.post("verifyEmail", "/verifyEmail", {
-      payload: S.Struct({ emailId: S.String, token: S.String }),
+      payload: S.Struct({ token: S.String }),
       success: SuccessResponse,
     }).middleware(RateLimitMiddleware),
   )

@@ -31,28 +31,8 @@ type ServerCommandMap = {
   clearTestUsers: { success: true };
   clearRateLimits: { success: true };
   clearTestOrganizations: { success: true };
-  createUser: {
-    user: User;
-    userEmailId: string;
-    verificationToken: string | null;
-  };
-  getUserSecrets: {
-    user_id: string;
-    password_hash: string | null;
-    last_login_at: string;
-    failed_password_attempts: number;
-    first_failed_password_attempt: string | null;
-    reset_password_token: string | null;
-    reset_password_token_generated: string | null;
-    failed_reset_password_attempts: number;
-    first_failed_reset_password_attempt: string | null;
-    delete_account_token: string | null;
-    delete_account_token_generated: string | null;
-  };
-  getEmailSecrets: {
-    user_email_id: string;
-    verification_token: string | null;
-  };
+  createUser: { user: User };
+  mailTo: Array<{ to: string[]; subject: string; html: string; text: string }>;
   verifyUser: { success: true };
 };
 
@@ -64,6 +44,33 @@ export async function serverCommand<K extends keyof ServerCommandMap>(
   const params = payload ? `?${new URLSearchParams(Object.entries(payload)).toString()}` : "";
   const response = await request.get(`${BASE_URL}/api/testing/${command}${params}`);
   return response.json();
+}
+
+/**
+ * The link to `path` in the newest mail sent to `to` that has one, as a user
+ * finds it in their inbox. The database keeps only a hash of each emailed
+ * token, so the mail is the one place a test can read it: the server under
+ * test must run with MAIL_PROVIDER=capture. The worker sends the mail a moment
+ * after the request that queued it, so this waits for it.
+ */
+export async function mailedLink(
+  request: APIRequestContext,
+  to: string,
+  path: "/verify" | "/reset" | "/settings",
+): Promise<string> {
+  const pattern = new RegExp(`href="([^"]*${path}#token=[0-9a-f]+)"`);
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const mail = await serverCommand(request, "mailTo", { to });
+    const link = mail
+      .map(({ html }) => pattern.exec(html)?.[1])
+      .findLast((found) => found !== undefined);
+    if (link !== undefined) return link;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(
+    `No mail to ${to} with a ${path} link. Does the server run with MAIL_PROVIDER=capture?`,
+  );
 }
 
 // --- Login ---
