@@ -4,7 +4,7 @@ import type { GithubCallbackQuery } from "../../shared/api/auth.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
 import { Cookies } from "./cookies.js";
-import { OAuthCallbackError, OAuthNotConfiguredError, OAuthService } from "./oauthService.js";
+import { OAuthCallbackError, OAuthNotConfiguredError, OAuth } from "./oauth.js";
 import { Secrets } from "../secrets.js";
 
 /**
@@ -16,9 +16,9 @@ import { Secrets } from "../secrets.js";
  *
  * @effect-expect-leaking HttpServerRequest
  */
-export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
+export class OAuthPopup extends Context.Service<OAuthPopup>()("postgres-garden/oauthPopup", {
   make: Effect.gen(function* () {
-    const oauth = yield* OAuthService;
+    const oauth = yield* OAuth;
     const cookies = yield* Cookies;
     const secrets = yield* Secrets;
 
@@ -115,7 +115,7 @@ export class OAuthPopup extends Context.Service<OAuthPopup>()("OAuthPopup", {
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(OAuthService.layer, Cookies.layer, Secrets.layer)),
+    Layer.provide(Layer.mergeAll(OAuth.layer, Cookies.layer, Secrets.layer)),
   );
 }
 

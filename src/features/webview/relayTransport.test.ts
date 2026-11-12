@@ -110,7 +110,7 @@ it.effect("a GET crosses the relay and comes back decoded against the contract",
   Effect.gen(function* () {
     const { client, request } = yield* connect(() => json(userJson));
 
-    const result = yield* client.apiCall("test", (api) => api.apiUsers.me());
+    const result = yield* client.apiCall("test", (api) => api.users.me());
 
     expect(Option.map(Option.fromNullishOr(result.user), (user) => user.username)).toStrictEqual(
       Option.some("ada"),
@@ -131,7 +131,7 @@ it.effect("the server's request joins the trace of the webview call that asked f
 
     const webviewTrace = yield* Effect.gen(function* () {
       const span = yield* Effect.currentSpan;
-      yield* client.apiCall("test", (api) => api.apiUsers.me());
+      yield* client.apiCall("test", (api) => api.users.me());
       return span.traceId;
     }).pipe(Effect.withSpan("webview action"));
 
@@ -150,7 +150,7 @@ it.effect("a PATCH keeps the JSON content type its body would otherwise overwrit
     const { client, request } = yield* connect(() => json(JSON.stringify(user)));
 
     yield* client.apiCall("test", (api) =>
-      api.apiUsers.patchMe({ payload: { name: "Ada Lovelace" } }),
+      api.users.patchMe({ payload: { name: "Ada Lovelace" } }),
     );
 
     expect(

@@ -40,7 +40,7 @@ export class UnknownRunError extends S.TaggedError<
   }
 }
 
-export class AgentRuns extends Context.Service<AgentRuns>()("app/ai/AgentRuns", {
+export class AgentRuns extends Context.Service<AgentRuns>()("postgres-garden/runs/AgentRuns", {
   make: Effect.gen(function* () {
     const runs = yield* Ref.make(HashMap.empty<string, AgentRun>());
 

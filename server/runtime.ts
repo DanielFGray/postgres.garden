@@ -15,14 +15,14 @@ import { HealthLive } from "./health.js";
 import { Pages, PagesRoutesLive, PagesUntraced } from "./pages.js";
 import { RateLimitMiddlewareLive } from "./rateLimit.js";
 import { RateLimiterValkey } from "./services/rateLimiter.js";
-import { AuthService } from "./services/authService.js";
+import { Auth } from "./services/auth.js";
 import { OAuthPopup } from "./services/oauthPopup.js";
 import { PageData } from "./services/pageData.js";
-import { PlaygroundService } from "./services/playgroundService.js";
+import { Playgrounds } from "./services/playgrounds.js";
 import { SessionMiddlewareLive } from "./services/sessionMiddleware.js";
-import { SessionService } from "./services/sessionService.js";
-import { UserService } from "./services/userService.js";
-import { WebhookService } from "./services/webhookService.js";
+import { Sessions } from "./services/sessions.js";
+import { Users } from "./services/users.js";
+import { Webhooks } from "./services/webhooks.js";
 import { TracingLayer } from "./tracing.js";
 import { MailCapture, Mailer } from "../worker/email/mailer.js";
 import { Worker } from "../worker/worker.js";
@@ -56,16 +56,16 @@ const HttpApiHandlers = HttpApiBuilder.layer(PgGardenApi).pipe(
  * stops the server.
  * ServerLive and the API tests provide it once. Each service layer
  * provides its own dependencies, and Layer memoizes by reference, so a service
- * that several layers name (SessionService, Cookies) is built once.
+ * that several layers name (Sessions, Cookies) is built once.
  */
 export const AppLayer = Layer.mergeAll(
-  AuthService.layer,
-  UserService.layer,
-  PlaygroundService.layer,
+  Auth.layer,
+  Users.layer,
+  Playgrounds.layer,
   OAuthPopup.layer,
-  WebhookService.layer,
+  Webhooks.layer,
   PageData.layer,
-  SessionService.layer,
+  Sessions.layer,
   Mailer.layer,
 ).pipe(Layer.provideMerge(Layer.mergeAll(DatabaseLive, MailCapture.layer)));
 

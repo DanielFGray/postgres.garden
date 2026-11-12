@@ -51,7 +51,7 @@ layer(limitedApi(), { excludeTestServices: true, timeout: "30 seconds" })("rate 
       const cookieA = yield* signIn(userA);
       const cookieB = yield* signIn(userB);
 
-      for (let i = 0; i < rules["apiUsers:createMeEmail"].limit; i++) {
+      for (let i = 0; i < rules["users:createMeEmail"].limit; i++) {
         const response = yield* addEmail(cookieA, `a${i}_${userA}@example.com`, ip);
         expect(response.status).toBe(200);
       }

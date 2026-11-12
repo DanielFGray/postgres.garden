@@ -12,7 +12,7 @@ import { sql } from "kysely";
 import { Redis } from "effect/persistence/Redis";
 import { isProduction, rootUrl } from "./config.js";
 import type { AppPublicUsers as User } from "../generated/db.js";
-import { SessionService, sessionKeyOf } from "./services/sessionService.js";
+import { Sessions, sessionKeyOf } from "./services/sessions.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
 import { PgRootDB } from "./db.js";
@@ -49,13 +49,13 @@ const LoginPostBody = S.Struct({
  * Valkey. Building it fails in production, so the routes cannot exist there
  * even when a caller imports this module.
  */
-class TestingService extends Context.Service<TestingService>()("TestingService", {
+class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
   make: Effect.gen(function* () {
     if (yield* isProduction) {
       return yield* Effect.die("testing routes must not run in production");
     }
     const root = yield* PgRootDB;
-    const sessions = yield* SessionService;
+    const sessions = yield* Sessions;
     const cookies = yield* Cookies;
     const redis = yield* Redis;
     const sessionKey = yield* sessionKeyOf;
@@ -146,7 +146,7 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
           password: body.password,
         }).pipe(Effect.map(({ session }) => sessionRedirect(session, body.redirectTo))),
 
-      loginPost: Effect.fn("TestingService.loginPost")(function* (body: typeof LoginPostBody.Type) {
+      loginPost: Effect.fn("Testing.loginPost")(function* (body: typeof LoginPostBody.Type) {
         const user = yield* root
           .all(
             root.connection
@@ -164,7 +164,7 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
         return sessionRedirect(session, body.redirectTo);
       }),
 
-      createUser: Effect.fn("TestingService.createUser")(function* (query: typeof UserQuery.Type) {
+      createUser: Effect.fn("Testing.createUser")(function* (query: typeof UserQuery.Type) {
         const { user } = yield* reallyCreateUser({
           username: query.username,
           email: query.email,
@@ -202,13 +202,13 @@ class TestingService extends Context.Service<TestingService>()("TestingService",
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer)),
+    Layer.provide(Layer.mergeAll(Sessions.layer, Cookies.layer)),
   );
 }
 
 export const TestingRoutesLive = HttpRouter.addAll(
   Effect.gen(function* () {
-    const testing = yield* TestingService;
+    const testing = yield* Testing;
     const searchParams = HttpServerRequest.schemaSearchParams;
     const body = HttpServerRequest.schemaBodyJson;
     return [
@@ -236,7 +236,7 @@ export const TestingRoutesLive = HttpRouter.addAll(
       ),
     ];
   }),
-).pipe(Layer.provide(TestingService.layer));
+).pipe(Layer.provide(Testing.layer));
 
 /**
  * Maps a failed route to a response. Schema failures answer 422; anything

@@ -188,7 +188,7 @@ export class SandboxReplacedError extends Schema.TaggedError<
   }
 }
 
-export class PGlite extends Context.Service<PGlite>()("app/PGlite", {
+export class PGlite extends Context.Service<PGlite>()("postgres-garden/pglite", {
   make: Effect.gen(function* () {
     const runtimeState =
       sharedRuntimeState ??

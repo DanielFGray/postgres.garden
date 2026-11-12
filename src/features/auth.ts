@@ -296,7 +296,7 @@ export class AuthProvider implements vscode.AuthenticationProvider, vscode.Dispo
    * that the flow finished, never who finished it.
    */
   private get sessionFromServer() {
-    return this.call("apiUsers.me", (api) => api.apiUsers.me({})).pipe(
+    return this.call("users.me", (api) => api.users.me({})).pipe(
       Effect.mapError((error) => new AuthError({ message: error.message })),
       Effect.flatMap(({ user }) =>
         Option.match(Option.fromNullishOr(user), {

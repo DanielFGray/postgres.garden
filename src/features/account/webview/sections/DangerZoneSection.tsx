@@ -50,7 +50,7 @@ export const DangerZoneSection = () => {
     setMutationError(null);
     void runRequest(
       // Without a token the server emails a link that carries one.
-      apiCall("account.danger.request_delete", (api) => api.apiUsers.deleteMe({ query: {} })),
+      apiCall("account.danger.request_delete", (api) => api.users.deleteMe({ query: {} })),
     )
       .then(
         () => {
@@ -73,7 +73,7 @@ export const DangerZoneSection = () => {
     setMutationError(null);
     void runRequest(
       apiCall("account.danger.confirm_delete", (api) =>
-        api.apiUsers.deleteMe({ query: { token } }),
+        api.users.deleteMe({ query: { token } }),
       ),
     )
       .then(

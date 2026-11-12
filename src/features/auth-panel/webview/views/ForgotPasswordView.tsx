@@ -20,7 +20,7 @@ export const ForgotPasswordView = (props: { onNavigate: (view: string) => void }
 
     void runRequest(
       apiCall("auth.forgot_password.submit", (api) =>
-        api.apiUsers.forgotPassword({ payload: { email: getText("email") } }),
+        api.users.forgotPassword({ payload: { email: getText("email") } }),
       ).pipe(
         Effect.match({
           onFailure: (error) => setError(error.message),

@@ -32,10 +32,13 @@ export class Pages extends Context.Service<
       HttpServerRequest.HttpServerRequest
     >;
   }
->()("server/Pages") {
-  static readonly layer = Layer.unwrap(
-    isProduction.pipe(Effect.map((production) => (production ? builtPages : vitePages))),
-  );
+>()("postgres-garden/pages", {
+  make: Effect.gen(function* () {
+    const production = yield* isProduction;
+    return yield* production ? builtPages : vitePages;
+  }),
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(PageData.layer));
 }
 
 /**
@@ -86,24 +89,21 @@ class PageError extends S.TaggedError<PageError, { readonly brand: unique symbol
   message: S.String,
 }) {}
 
-const builtPages = Layer.effect(
-  Pages,
-  Effect.gen(function* () {
-    const fs = yield* FS.FileSystem;
-    const path = yield* Path.Path;
-    const pageData = yield* PageData;
-    // Vite's built index.html, not one rebuilt from the manifest, so production
-    // serves the same shell development reads through transformIndexHtml.
-    const html = yield* fs
-      .readFileString(path.resolve("dist", "index.html"))
-      .pipe(
-        Effect.mapError(
-          () => new PageError({ message: "dist/index.html not found. Run `bun run build` first." }),
-        ),
-      );
-    return { respond: pageData.render(html) };
-  }),
-);
+const builtPages = Effect.gen(function* () {
+  const fs = yield* FS.FileSystem;
+  const path = yield* Path.Path;
+  const pageData = yield* PageData;
+  // Vite's built index.html, not one rebuilt from the manifest, so production
+  // serves the same shell development reads through transformIndexHtml.
+  const html = yield* fs
+    .readFileString(path.resolve("dist", "index.html"))
+    .pipe(
+      Effect.mapError(
+        () => new PageError({ message: "dist/index.html not found. Run `bun run build` first." }),
+      ),
+    );
+  return { respond: pageData.render(html) };
+});
 
 /** Built files under `dist/`. `index` is off so a directory does not answer. */
 const builtFilesLive = Layer.mergeAll(
@@ -124,55 +124,52 @@ const builtFilesLive = Layer.mergeAll(
   ),
 );
 
-const vitePages = Layer.effect(
-  Pages,
-  Effect.gen(function* () {
-    const fs = yield* FS.FileSystem;
-    const path = yield* Path.Path;
-    const pageData = yield* PageData;
-    const port = yield* Config.Port("PORT");
-    // Loaded here so production never loads Vite.
-    const { createServer } = yield* Effect.promise(() => import("vite"));
-    const node = {
-      http: yield* Effect.promise(() => import("node:http")),
-      net: yield* Effect.promise(() => import("node:net")),
-    };
-    const vite = yield* Effect.acquireRelease(
-      Effect.tryPromise({
-        try: () =>
-          createServer({
-            server: { middlewareMode: true, hmr: { port: port + 1 } },
-            appType: "custom",
-          }),
-        catch: (cause) => new PageError({ message: `Vite did not start: ${String(cause)}` }),
-      }),
-      (server) => Effect.promise(() => server.close()),
-    );
+const vitePages = Effect.gen(function* () {
+  const fs = yield* FS.FileSystem;
+  const path = yield* Path.Path;
+  const pageData = yield* PageData;
+  const port = yield* Config.Port("PORT");
+  // Loaded here so production never loads Vite.
+  const { createServer } = yield* Effect.promise(() => import("vite"));
+  const node = {
+    http: yield* Effect.promise(() => import("node:http")),
+    net: yield* Effect.promise(() => import("node:net")),
+  };
+  const vite = yield* Effect.acquireRelease(
+    Effect.tryPromise({
+      try: () =>
+        createServer({
+          server: { middlewareMode: true, hmr: { port: port + 1 } },
+          appType: "custom",
+        }),
+      catch: (cause) => new PageError({ message: `Vite did not start: ${String(cause)}` }),
+    }),
+    (server) => Effect.promise(() => server.close()),
+  );
 
-    const renderShell = Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const template = yield* fs
-        .readFileString(path.resolve("index.html"))
-        .pipe(Effect.mapError((error) => new PageError({ message: error.message })));
-      const html = yield* Effect.tryPromise({
-        try: () => vite.transformIndexHtml(pathnameOf(request), template),
-        catch: (cause) => {
-          if (cause instanceof Error) vite.ssrFixStacktrace(cause);
-          return new PageError({ message: String(cause) });
-        },
-      });
-      return yield* pageData.render(html);
+  const renderShell = Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const template = yield* fs
+      .readFileString(path.resolve("index.html"))
+      .pipe(Effect.mapError((error) => new PageError({ message: error.message })));
+    const html = yield* Effect.tryPromise({
+      try: () => vite.transformIndexHtml(pathnameOf(request), template),
+      catch: (cause) => {
+        if (cause instanceof Error) vite.ssrFixStacktrace(cause);
+        return new PageError({ message: String(cause) });
+      },
     });
+    return yield* pageData.render(html);
+  });
 
-    return {
-      respond: Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const served = yield* runViteMiddleware(node, vite.middlewares, request);
-        return served ?? (yield* renderShell);
-      }),
-    };
-  }),
-);
+  return {
+    respond: Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const served = yield* runViteMiddleware(node, vite.middlewares, request);
+      return served ?? (yield* renderShell);
+    }),
+  };
+});
 
 /**
  * Runs Vite's Connect middleware for one request. Vite takes node:http request

@@ -4,13 +4,13 @@ import { PgRootDB } from "../server/db.js";
 
 /**
  * Gives a GitHub sponsor the sponsor role, and takes it back when the
- * sponsorship ends. `WebhookService` verifies GitHub's sponsorship event and
+ * sponsorship ends. `Webhooks` verifies GitHub's sponsorship event and
  * queues its body as the `sponsor_webhook` job.
  *
  * Only the user and sponsor roles change: an admin or pro account that also
  * sponsors keeps its role.
  */
-export class Sponsorship extends Context.Service<Sponsorship>()("Worker/Sponsorship", {
+export class Sponsorship extends Context.Service<Sponsorship>()("postgres-garden/sponsorship", {
   make: Effect.gen(function* () {
     const db = yield* PgRootDB;
 
@@ -58,7 +58,7 @@ export class Sponsorship extends Context.Service<Sponsorship>()("Worker/Sponsors
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(PgRootDB.layer));
 }
 
 /**

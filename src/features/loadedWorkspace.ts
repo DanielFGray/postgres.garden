@@ -30,7 +30,7 @@ export interface WorkspaceBinding {
   ) => Effect.Effect<A, E | WorkspaceReplacedError, R>;
 }
 
-export class LoadedWorkspace extends Context.Service<LoadedWorkspace>()("app/LoadedWorkspace", {
+export class LoadedWorkspace extends Context.Service<LoadedWorkspace>()("postgres-garden/loadedWorkspace", {
   make: Effect.gen(function* () {
     const generation = yield* Ref.make(0);
     const lock = yield* Semaphore.make(1);

@@ -65,7 +65,7 @@ const initializeWorkbench = (workbenchElement: HTMLDivElement) =>
     );
   });
 
-export class Workbench extends Context.Service<Workbench>()("app/Workbench", {
+export class Workbench extends Context.Service<Workbench>()("postgres-garden/workbench", {
   make: Effect.gen(function* () {
     yield* initializeCommon.pipe(
       Effect.withSpan("workbench.initializeCommon"),

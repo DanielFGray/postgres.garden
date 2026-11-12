@@ -1,3 +1,4 @@
+// @entrypoint
 import { NodeServices } from "@effect/platform-node";
 import { Effect, Schema as S } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";

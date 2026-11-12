@@ -8,7 +8,7 @@ import { PgRootDB } from "../server/db.js";
  * queues `prune_expired_playgrounds` once a day.
  */
 export class ExpiredPlaygrounds extends Context.Service<ExpiredPlaygrounds>()(
-  "Worker/ExpiredPlaygrounds",
+  "postgres-garden/expiredPlaygrounds",
   {
     make: Effect.gen(function* () {
       const db = yield* PgRootDB;
@@ -31,7 +31,7 @@ export class ExpiredPlaygrounds extends Context.Service<ExpiredPlaygrounds>()(
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(PgRootDB.layer));
 }
 
 /** A crontab job's payload holds only graphile's `_cron` field, which the job does not read. */

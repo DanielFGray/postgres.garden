@@ -3,7 +3,7 @@ import { HttpEffect, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { sessionCookie } from "../../shared/session.js";
 import { isProduction } from "../config.js";
-import { sessionCookieName } from "./sessionService.js";
+import { sessionCookieName } from "./sessions.js";
 
 /**
  * Every cookie the server sets. The policy is read once, when the layer is
@@ -18,7 +18,7 @@ import { sessionCookieName } from "./sessionService.js";
  *
  * @effect-expect-leaking HttpServerRequest
  */
-export class Cookies extends Context.Service<Cookies>()("Cookies", {
+export class Cookies extends Context.Service<Cookies>()("postgres-garden/cookies", {
   make: Effect.gen(function* () {
     const secure = yield* isProduction;
     const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;

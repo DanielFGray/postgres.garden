@@ -6,7 +6,7 @@ import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
 const loadPasswordStatus = () =>
-  apiCall("account.security.load_password_status", (api) => api.apiUsers.meHasPassword({}));
+  apiCall("account.security.load_password_status", (api) => api.users.meHasPassword({}));
 
 export const SecuritySection = () => {
   const status = createRequest(loadPasswordStatus);
@@ -38,7 +38,7 @@ export const SecuritySection = () => {
     setSaving(true);
     void runRequest(
       apiCall("account.security.change_password", (api) =>
-        api.apiUsers.changePassword({
+        api.users.changePassword({
           payload: {
             oldPassword: hasPassword ? formText(data, "oldPassword") : "",
             newPassword,

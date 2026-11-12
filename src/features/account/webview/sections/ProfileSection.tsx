@@ -18,7 +18,7 @@ export const ProfileSection = () => {
     setSaveError(null);
     void runRequest(
       apiCall("account.profile.save", (api) =>
-        api.apiUsers.patchMe({
+        api.users.patchMe({
           payload: {
             username: formText(data, "username"),
             name: formText(data, "name"),

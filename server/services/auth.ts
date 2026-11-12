@@ -5,7 +5,7 @@ import type { AppPublicUsers } from "../../generated/db.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
 import { Cookies } from "./cookies.js";
-import { SessionService } from "./sessionService.js";
+import { Sessions } from "./sessions.js";
 
 export class InvalidCredentialsError extends S.TaggedError<
   InvalidCredentialsError,
@@ -23,10 +23,10 @@ const refusalCode = (error: DatabaseError) => Option.map(error.report, (report) 
  *
  * @effect-expect-leaking HttpServerRequest
  */
-export class AuthService extends Context.Service<AuthService>()("AuthService", {
+export class Auth extends Context.Service<Auth>()("postgres-garden/auth", {
   make: Effect.gen(function* () {
     const root = yield* PgRootDB;
-    const sessionService = yield* SessionService;
+    const sessions = yield* Sessions;
     const cookies = yield* Cookies;
 
     /** Records the attempt, counts the new session and hands the caller its cookie. */
@@ -40,7 +40,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
       );
 
     return {
-      register: Effect.fn("AuthService.register")(
+      register: Effect.fn("Auth.register")(
         function* ({
           username,
           email,
@@ -74,7 +74,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
               .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
           );
 
-          const { token, expiresAt } = yield* sessionService
+          const { token, expiresAt } = yield* sessions
             .createSession(user.id)
             .pipe(
               Effect.catchTag("NoSuchElementError", () =>
@@ -96,7 +96,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
         ),
       ),
 
-      login: Effect.fn("AuthService.login")(
+      login: Effect.fn("Auth.login")(
         function* ({ id, password }: { id: string; password: string }) {
           // A wrong password must not fail inside the boundary. `app_private.login`
           // records the failed attempt and then returns null, and a failure here would
@@ -121,7 +121,7 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
             ),
           );
 
-          const { token, expiresAt } = yield* sessionService
+          const { token, expiresAt } = yield* sessions
             .createSession(user.id)
             .pipe(
               Effect.catchTag("NoSuchElementError", () =>
@@ -145,11 +145,11 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
         ),
       ),
 
-      logout: Effect.fn("AuthService.logout")(
+      logout: Effect.fn("Auth.logout")(
         function* () {
           const { session } = yield* CurrentSession;
           if (session) {
-            yield* sessionService.deleteSession(session.cookie_id);
+            yield* sessions.deleteSession(session.cookie_id);
           }
           yield* recordActiveSessions(-1);
           yield* cookies.expireSession;
@@ -162,6 +162,6 @@ export class AuthService extends Context.Service<AuthService>()("AuthService", {
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer)),
+    Layer.provide(Layer.mergeAll(Sessions.layer, Cookies.layer)),
   );
 }

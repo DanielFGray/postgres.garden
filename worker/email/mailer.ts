@@ -73,141 +73,34 @@ export const mailProvider: Config.Config<MailProvider> = Config.all({
   ),
 );
 
-/** Delivers mail through the provider `mailProvider` selects. */
-export class Mailer extends Context.Service<
-  Mailer,
-  {
-    readonly send: (message: MailMessage) => Effect.Effect<void, MailDeliveryError>;
-  }
->()("worker/Mailer") {
-  static make(impl: {
-    readonly send: (message: MailMessage) => Effect.Effect<void, MailDeliveryError>;
-  }) {
-    return Layer.succeed(this, impl);
-  }
-
-  /** Sends nothing: each message is kept in `MailCapture`, for tests to read. */
-  static readonly capture = Layer.effect(
-    this,
-    Effect.gen(function* () {
-      const capture = yield* MailCapture;
-      return { send: capture.record };
-    }),
-  );
-
-  /**
-   * A throwaway ethereal.email account, kept in `worker/.ethereal` so the server
-   * and the worker CLI share it. Each sent message logs its preview URL.
-   */
-  static readonly ethereal = Layer.effect(
-    this,
-    Effect.gen(function* () {
-      const fs = yield* FileSystem;
-      const path = yield* Path;
-      const filename = yield* Config.NonEmptyString("ETHEREAL_ACCOUNT_FILE").pipe(
-        Config.withDefault(path.resolve("worker/.ethereal")),
-      );
-      const exists = yield* fs.exists(filename);
-      const account = yield* exists
-        ? fs
-            .readFileString(filename)
-            .pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(EtherealAccount))))
-        : Effect.gen(function* () {
-            const created = yield* Effect.tryPromise({
-              try: () => createTestAccount(),
-              catch: (cause) =>
-                new MailDeliveryError({
-                  message: "Could not create the development email account",
-                  cause,
-                }),
-            });
-            const decoded = yield* Schema.decodeEffect(EtherealAccount)(created);
-            const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(EtherealAccount))(
-              decoded,
-            );
-            yield* fs.writeFileString(filename, encoded, { mode: 0o600 });
-            return decoded;
-          });
-      const from = yield* Config.NonEmptyString("EMAIL_FROM").pipe(
-        Config.withDefault(packageJson.fromEmail),
-      );
-      return yield* makeSmtp(
-        new SmtpSettings({
-          host: "smtp.ethereal.email",
-          port: 587,
-          secure: false,
-          credentials: Option.some(account),
-        }),
-        from,
-      );
-    }),
-  );
-
-  /**
-   * Cloudflare Email Service accepts authenticated SMTP submission with the
-   * literal username `api_token` and the API token as the password. An empty
-   * token fails here rather than connecting unauthenticated.
-   */
-  static readonly cloudflare = Layer.effect(
-    this,
-    Effect.gen(function* () {
-      const token = yield* Config.schema(
-        Schema.Redacted(Schema.NonEmptyString),
-        "CLOUDFLARE_EMAIL_API_TOKEN",
-      );
-      const from = yield* Config.NonEmptyString("EMAIL_FROM");
-      return yield* makeSmtp(
-        new SmtpSettings({
-          host: "smtp.mx.cloudflare.net",
-          port: 465,
-          secure: true,
-          credentials: Option.some({ user: "api_token", pass: token }),
-        }),
-        from,
-      );
-    }),
-  );
-
-  static smtp(settings: SmtpSettings, from: string) {
-    return Layer.effect(this, makeSmtp(settings, from));
-  }
-
-  static readonly layer = Layer.unwrap(
-    Effect.gen(function* () {
-      const provider = yield* mailProvider;
-      return Match.value(provider).pipe(
-        Match.when("ethereal", () => Mailer.ethereal),
-        Match.when("capture", () => Mailer.capture),
-        Match.when("cloudflare", () => Mailer.cloudflare),
-        Match.exhaustive,
-      );
-    }),
-  );
-}
-
 /**
  * The messages the capture provider took, oldest first. It is in the server's
  * layer graph under every provider, so the testing routes can read it; it
- * stays empty unless `MAIL_PROVIDER` is `capture`.
+ * stays empty unless `MAIL_PROVIDER` is `capture`. Declared before `Mailer`,
+ * whose static layers provide it.
  */
-export class MailCapture extends Context.Service<MailCapture>()("worker/MailCapture", {
-  make: Effect.gen(function* () {
-    const sent = yield* Ref.make<ReadonlyArray<MailMessage>>([]);
-    return {
-      record: (message: MailMessage) => Ref.update(sent, Arr.append(message)),
-      sent: Ref.get(sent),
-    } as const;
-  }),
-}) {
+export class MailCapture extends Context.Service<MailCapture>()(
+  "postgres-garden/mailer/MailCapture",
+  {
+    make: Effect.gen(function* () {
+      const sent = yield* Ref.make<ReadonlyArray<MailMessage>>([]);
+      return {
+        record: (message: MailMessage) => Ref.update(sent, Arr.append(message)),
+        sent: Ref.get(sent),
+      } as const;
+    }),
+  },
+) {
   static readonly layer = Layer.effect(this, this.make);
 }
-
-const EtherealAccount = Schema.Struct({
-  user: Schema.String,
-  pass: Schema.RedactedFromValue(Schema.String),
+/** Sends nothing: each message is kept in `MailCapture`, for tests to read. */
+const captureMailer = Effect.gen(function* () {
+  const capture = yield* MailCapture;
+  return { send: Effect.fn("Mailer.send")(capture.record) };
 });
 
-const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings, from: string) {
+/** SMTP to `settings`, with `from` as the sender. The transport closes with the scope. */
+const smtpMailer = Effect.fnUntraced(function* (settings: SmtpSettings, from: string) {
   const transport = yield* Effect.acquireRelease(
     Effect.try({
       try: () =>
@@ -248,7 +141,7 @@ const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings, from: stri
       });
       if (result.rejected.length > 0) {
         return yield* new MailDeliveryError({
-          message: `SMTP rejected: ${result.rejected.join(", ")}`,
+          message: "SMTP rejected one or more recipients",
           cause: result.response,
         });
       }
@@ -259,4 +152,98 @@ const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings, from: stri
       return undefined;
     }),
   };
+});
+
+/**
+ * Ethereal's SMTP, with a development account kept in `ETHEREAL_ACCOUNT_FILE`.
+ * The first run creates the account and writes that file.
+ */
+const etherealMailer = Effect.gen(function* () {
+  const fs = yield* FileSystem;
+  const path = yield* Path;
+  const defaultFile = yield* path.fromFileUrl(new URL("../.ethereal", import.meta.url));
+  const filename = yield* Config.NonEmptyString("ETHEREAL_ACCOUNT_FILE").pipe(
+    Config.withDefault(defaultFile),
+  );
+  const exists = yield* fs.exists(filename);
+  const account = yield* exists
+    ? fs
+        .readFileString(filename)
+        .pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(EtherealAccount))))
+    : Effect.gen(function* () {
+        const created = yield* Effect.tryPromise({
+          try: () => createTestAccount(),
+          catch: (cause) =>
+            new MailDeliveryError({
+              message: "Could not create the development email account",
+              cause,
+            }),
+        });
+        const decoded = yield* Schema.decodeEffect(EtherealAccount)(created);
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(EtherealAccount))(decoded);
+        yield* fs.writeFileString(filename, encoded, { mode: 0o600 });
+        return decoded;
+      });
+  const from = yield* Config.NonEmptyString("EMAIL_FROM").pipe(
+    Config.withDefault(packageJson.fromEmail),
+  );
+  return yield* smtpMailer(
+    new SmtpSettings({
+      host: "smtp.ethereal.email",
+      port: 587,
+      secure: false,
+      credentials: Option.some(account),
+    }),
+    from,
+  );
+});
+
+/**
+ * Cloudflare Email Service accepts authenticated SMTP submission with the
+ * literal username `api_token` and the API token as the password.
+ */
+const cloudflareMailer = Effect.gen(function* () {
+  const token = yield* Config.Redacted("CLOUDFLARE_EMAIL_API_TOKEN");
+  const from = yield* Config.NonEmptyString("EMAIL_FROM");
+  return yield* smtpMailer(
+    new SmtpSettings({
+      host: "smtp.mx.cloudflare.net",
+      port: 465,
+      secure: true,
+      credentials: Option.some({ user: "api_token", pass: token }),
+    }),
+    from,
+  );
+});
+
+/** Delivers mail through the provider `mailProvider` selects. */
+export class Mailer extends Context.Service<
+  Mailer,
+  {
+    readonly send: (message: MailMessage) => Effect.Effect<void, MailDeliveryError>;
+  }
+>()("postgres-garden/mailer", {
+  make: Effect.gen(function* () {
+    const provider = yield* mailProvider;
+    return yield* Match.value(provider).pipe(
+      Match.when("ethereal", () => etherealMailer),
+      Match.when("capture", () => captureMailer),
+      Match.when("cloudflare", () => cloudflareMailer),
+      Match.exhaustive,
+    );
+  }),
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(MailCapture.layer));
+
+  static readonly layerCapture = Layer.effect(this, captureMailer).pipe(
+    Layer.provide(MailCapture.layer),
+  );
+
+  static readonly layerSmtp = (settings: SmtpSettings, from: string) =>
+    Layer.effect(this, smtpMailer(settings, from));
+}
+
+const EtherealAccount = Schema.Struct({
+  user: Schema.String,
+  pass: Schema.RedactedFromValue(Schema.String),
 });

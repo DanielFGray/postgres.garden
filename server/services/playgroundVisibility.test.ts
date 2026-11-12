@@ -4,11 +4,11 @@ import { sql } from "kysely";
 import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { withAuthContext } from "../requestDatabase.js";
-import { PlaygroundService } from "./playgroundService.js";
+import { Playgrounds } from "./playgrounds.js";
 import { TestValkeyLive } from "../test/valkey.js";
-import { SessionService } from "./sessionService.js";
+import { Sessions } from "./sessions.js";
 
-const TestLayer = Layer.mergeAll(SessionService.layer, PlaygroundService.layer).pipe(
+const TestLayer = Layer.mergeAll(Sessions.layer, Playgrounds.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(DatabaseLive, TestValkeyLive)),
 );
 
@@ -34,8 +34,8 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
   (it) => {
     it.effect("applies visibility rules to browse, search, and profiles", () =>
       Effect.gen(function* () {
-        const sessionService = yield* SessionService;
-        const playgroundService = yield* PlaygroundService;
+        const sessions = yield* Sessions;
+        const playgrounds = yield* Playgrounds;
         const suffix = yield* randomSuffix;
         const ownerUsername = `visibility_owner_${suffix}`;
         const otherUsername = `visibility_other_${suffix}`;
@@ -59,32 +59,22 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
 
         yield* Effect.ensuring(
           Effect.gen(function* () {
-            const ownerToken = yield* sessionService.createSession(owner.id);
-            const otherToken = yield* sessionService.createSession(other.id);
-            const ownerSession = yield* sessionService.validateSessionToken(ownerToken.token);
-            const otherSession = yield* sessionService.validateSessionToken(otherToken.token);
+            const ownerToken = yield* sessions.createSession(owner.id);
+            const otherToken = yield* sessions.createSession(other.id);
+            const ownerSession = yield* sessions.validateSessionToken(ownerToken.token);
+            const otherSession = yield* sessions.validateSessionToken(otherToken.token);
             if (!ownerSession.session || !otherSession.session) {
               return yield* Effect.die(new Error("Failed to create test sessions"));
             }
 
             const anonymous = yield* listAll(
-              playgroundService,
+              playgrounds,
               anonymousSession,
               ownerUsername,
               fixtures,
             );
-            const ownerView = yield* listAll(
-              playgroundService,
-              ownerSession,
-              ownerUsername,
-              fixtures,
-            );
-            const otherView = yield* listAll(
-              playgroundService,
-              otherSession,
-              ownerUsername,
-              fixtures,
-            );
+            const ownerView = yield* listAll(playgrounds, ownerSession, ownerUsername, fixtures);
+            const otherView = yield* listAll(playgrounds, otherSession, ownerUsername, fixtures);
 
             expect(anonymous).toEqual({
               list: sortHashes([hashes.owner.public, hashes.other.public]),
@@ -124,7 +114,7 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
     // playground a 500 on /api/playgrounds.
     it.effect("lists an anonymous playground with a null user", () =>
       Effect.gen(function* () {
-        const playgroundService = yield* PlaygroundService;
+        const playgrounds = yield* Playgrounds;
         const hash = `anon_public_${yield* randomSuffix}`;
 
         yield* PgRootDB.use((rootDb) =>
@@ -137,7 +127,7 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
 
         yield* Effect.ensuring(
           Effect.gen(function* () {
-            const rows = yield* playgroundService.list({});
+            const rows = yield* playgrounds.list({});
             const row = rows.find((candidate) => candidate.hash === hash);
             expect(row).toBeDefined();
             expect(row?.user).toBeNull();
@@ -274,7 +264,7 @@ const deleteUser = (db: DbHandle, userId: string) =>
   db.all(db.connection.deleteFrom("app_public.users").where("id", "=", userId));
 
 const listAll = (
-  service: (typeof PlaygroundService)["Service"],
+  service: (typeof Playgrounds)["Service"],
   session: SessionData,
   username: string,
   fixtures: ReadonlySet<string>,

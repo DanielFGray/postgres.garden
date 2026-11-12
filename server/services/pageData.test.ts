@@ -3,7 +3,7 @@ import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
 import { DatabaseLive, PgRootDB } from "../db.js";
 import { randomSuffix, withCapturedLogs } from "../testSupport.js";
-import { SessionService } from "./sessionService.js";
+import { Sessions } from "./sessions.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { insertCommit, setHead, withPlayground } from "../test/playgrounds.js";
 import { PageData } from "./pageData.js";
@@ -25,7 +25,7 @@ const headCommit = (hash: string) =>
 
 layer(
   PageData.layer.pipe(
-    Layer.provideMerge(SessionService.layer),
+    Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
   ),
   { excludeTestServices: true, timeout: "30 seconds" },

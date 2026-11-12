@@ -1,6 +1,6 @@
 import { Effect, Layer, Redacted } from "effect";
 import { CurrentSession, SessionMiddleware, type SessionData } from "../../shared/session.js";
-import { SessionService } from "./sessionService.js";
+import { Sessions } from "./sessions.js";
 
 const noSession: SessionData = { user: null, session: null };
 
@@ -15,14 +15,12 @@ const noSession: SessionData = { user: null, session: null };
 export const SessionMiddlewareLive = Layer.effect(
   SessionMiddleware,
   Effect.gen(function* () {
-    const sessionService = yield* SessionService;
+    const sessions = yield* Sessions;
     return SessionMiddleware.of({
       session: Effect.fn("SessionMiddleware.session")(function* (httpEffect, { credential }) {
         const token = Redacted.value(credential);
         const session = token
-          ? yield* sessionService
-              .validateSessionToken(token)
-              .pipe(Effect.orElseSucceed(() => noSession))
+          ? yield* sessions.validateSessionToken(token).pipe(Effect.orElseSucceed(() => noSession))
           : noSession;
         return yield* Effect.provideService(httpEffect, CurrentSession, session);
       }),

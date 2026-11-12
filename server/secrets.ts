@@ -12,7 +12,7 @@ import { Context, Effect, Layer } from "effect";
 import { NodeCrypto } from "@effect/platform-node";
 import { Digest, SecureRandom } from "effect/crypto";
 
-export class Secrets extends Context.Service<Secrets>()("Secrets", {
+export class Secrets extends Context.Service<Secrets>()("postgres-garden/secrets", {
   make: Effect.gen(function* () {
     const random = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;

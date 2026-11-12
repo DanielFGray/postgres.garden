@@ -6,7 +6,7 @@ import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
 const loadAccounts = () =>
-  apiCall("account.linked_accounts.load", (api) => api.apiUsers.meAuthentications({}));
+  apiCall("account.linked_accounts.load", (api) => api.users.meAuthentications({}));
 
 type LinkedAccount = Effect.Success<ReturnType<typeof loadAccounts>>[number];
 
@@ -33,7 +33,7 @@ export const LinkedAccountsSection = () => {
     setMutationError(null);
     void runRequest(
       apiCall("account.linked_accounts.unlink", (api) =>
-        api.apiUsers.deleteMeAuthentication({ params: { id: account.id } }),
+        api.users.deleteMeAuthentication({ params: { id: account.id } }),
       ),
     )
       .then(

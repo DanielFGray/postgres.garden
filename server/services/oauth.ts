@@ -15,7 +15,7 @@ import * as arctic from "arctic";
 import { sql } from "kysely";
 import { rootUrl } from "../config.js";
 import { PgRootDB } from "../db.js";
-import { SessionService } from "./sessionService.js";
+import { Sessions } from "./sessions.js";
 import { Cookies } from "./cookies.js";
 import { UserRole as UserRoleSchema } from "../../shared/schemas.js";
 
@@ -129,7 +129,7 @@ const callbackError = (message: string) =>
 const mapDecodeError = (message: string) =>
   Effect.mapError(() => new OAuthCallbackError({ message, isBadCode: false }));
 
-export class OAuthService extends Context.Service<OAuthService>()("OAuthService", {
+export class OAuth extends Context.Service<OAuth>()("postgres-garden/oauth", {
   make: Effect.gen(function* () {
     const githubPat = Option.getOrUndefined(yield* Config.option(Config.Redacted("GITHUB_PAT")));
     const clientId = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_CLIENT_ID")));
@@ -139,7 +139,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     const callbackUrl = `${yield* rootUrl}/auth/github/callback`;
     const cookies = yield* Cookies;
     const root = yield* PgRootDB;
-    const sessions = yield* SessionService;
+    const sessions = yield* Sessions;
     const client = yield* HttpClient.HttpClient;
 
     const fetchGitHubJson = (url: string, token: string, errorPrefix: string) =>
@@ -201,7 +201,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
     };
 
     return {
-      createAuthorizationUrl: Effect.fn("OAuthService.createAuthorizationUrl")((scopes: string[]) =>
+      createAuthorizationUrl: Effect.fn("OAuth.createAuthorizationUrl")((scopes: string[]) =>
         Effect.gen(function* () {
           const provider = getProvider();
           if (!provider) {
@@ -215,7 +215,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
         }),
       ),
 
-      handleCallback: Effect.fn("OAuthService.handleCallback")(
+      handleCallback: Effect.fn("OAuth.handleCallback")(
         (code: string, currentUserId: string | undefined) =>
           Effect.gen(function* () {
             const provider = getProvider();
@@ -347,7 +347,7 @@ export class OAuthService extends Context.Service<OAuthService>()("OAuthService"
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(SessionService.layer, Cookies.layer, FetchHttpClient.layer)),
+    Layer.provide(Layer.mergeAll(Sessions.layer, Cookies.layer, FetchHttpClient.layer)),
   );
 }
 

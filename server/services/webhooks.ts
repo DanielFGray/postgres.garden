@@ -25,12 +25,12 @@ class WebhookVerificationError extends S.TaggedError<
  *
  * @effect-expect-leaking HttpServerRequest
  */
-export class WebhookService extends Context.Service<WebhookService>()("WebhookService", {
+export class Webhooks extends Context.Service<Webhooks>()("postgres-garden/webhooks", {
   make: Effect.gen(function* () {
     const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
     const root = yield* PgRootDB;
     return {
-      handleGitHubSponsor: Effect.fn("WebhookService.handleGitHubSponsor")(function* () {
+      handleGitHubSponsor: Effect.fn("Webhooks.handleGitHubSponsor")(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const event = request.headers["x-github-event"] ?? null;
         const signature = request.headers["x-hub-signature-256"] ?? null;
@@ -94,7 +94,7 @@ export class WebhookService extends Context.Service<WebhookService>()("WebhookSe
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(PgRootDB.layer));
 }
 
 export { WebhookNotConfiguredError, WebhookVerificationError };

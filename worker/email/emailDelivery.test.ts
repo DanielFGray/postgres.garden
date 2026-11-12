@@ -1,6 +1,7 @@
 import { BunServices } from "@effect/platform-bun";
 import { describe, expect, it } from "@effect/vitest";
 import { ConfigProvider, DateTime, Effect, Layer, Schema } from "effect";
+import { RateLimiter } from "effect/persistence/RateLimiter";
 import { vi } from "vitest";
 
 import { RateLimiterMemory } from "../../server/services/rateLimiter.js";
@@ -10,7 +11,7 @@ import {
 } from "../../server/test/rateLimiterStores.js";
 import { MailCapture, Mailer, mailProvider } from "./mailer.js";
 import { type JobRun, taskIn } from "../worker.js";
-import { QueuedEmail, sendEmail } from "./sendEmail.js";
+import { EmailDelivery, QueuedEmail } from "./emailDelivery.js";
 
 // nodemailer is replaced, so no test here opens a connection to Cloudflare.
 const nodemailer = vi.hoisted(() => {
@@ -21,7 +22,16 @@ const nodemailer = vi.hoisted(() => {
 vi.mock("nodemailer", () => ({ ...nodemailer, default: nodemailer }));
 
 /** The capture Mailer, with the store its tests read the sent mail from. */
-const captured = Layer.provideMerge(Mailer.capture, MailCapture.layer);
+const mailerWithCapture = Layer.provideMerge(Mailer.layerCapture, MailCapture.layer);
+const deliveryLayer = (limiter: Layer.Layer<RateLimiter, never, never>) => {
+  const platformAndLimiter = Layer.provideMerge(limiter, BunServices.layer);
+  return Layer.provideMerge(
+    EmailDelivery.layerNoDeps.pipe(Layer.provideMerge(mailerWithCapture)),
+    platformAndLimiter,
+  );
+};
+const captured = deliveryLayer(RateLimiterMemory);
+const sendEmail = (job: QueuedEmail) => EmailDelivery.use(({ send }) => send(job));
 const sentMail = MailCapture.use((capture) => capture.sent);
 
 const passwordReset = {
@@ -50,17 +60,21 @@ const withConfig = (env: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromUnknown(env));
 
 const cloudflare = (token = "test-token") =>
-  Layer.mergeAll(
-    Mailer.cloudflare.pipe(
+  Layer.provideMerge(
+    EmailDelivery.layerNoDeps.pipe(
       Layer.provide(
-        withConfig({
-          CLOUDFLARE_EMAIL_API_TOKEN: token,
-          EMAIL_FROM: "Postgres Garden <noreply@example.test>",
-        }),
+        Mailer.layer.pipe(
+          Layer.provide(
+            withConfig({
+              MAIL_PROVIDER: "cloudflare",
+              CLOUDFLARE_EMAIL_API_TOKEN: token,
+              EMAIL_FROM: "Postgres Garden <noreply@example.test>",
+            }),
+          ),
+        ),
       ),
     ),
-    RateLimiterMemory,
-    BunServices.layer,
+    Layer.provideMerge(RateLimiterMemory, BunServices.layer),
   );
 
 describe("send_email with the cloudflare provider", () => {
@@ -103,7 +117,7 @@ describe("send_email with the cloudflare provider", () => {
 
       const error = yield* sendEmail(passwordReset).pipe(Effect.provide(cloudflare()), Effect.flip);
       expect(error._tag).toBe("MailDeliveryError");
-      expect(error.message).toMatch(/rejected: visitor@example.com/);
+      expect(error.message).toBe("SMTP rejected one or more recipients");
     }),
   );
 
@@ -156,15 +170,15 @@ describe("queued email delivery", () => {
       ]);
       expect(delivered[0]?.html).toContain("https://example.invalid/verify-email");
       expect(delivered[4]?.to).toEqual(["one@example.invalid", "two@example.invalid"]);
-    }).pipe(Effect.provide(Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer))),
+    }).pipe(Effect.provide(captured)),
   );
 
   it.live("fails a queued payload that does not decode, before delivery", () =>
     Effect.gen(function* () {
-      const context = yield* Layer.build(
-        Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer),
+      const context = yield* Layer.build(captured);
+      const send = taskIn(context)(QueuedEmail, (job) =>
+        EmailDelivery.use(({ send }) => send(job)),
       );
-      const send = taskIn(context)(QueuedEmail, sendEmail);
       const helpers: JobRun = {
         abortSignal: yield* Effect.abortSignal,
         job: {
@@ -225,7 +239,7 @@ describe("per-address mail cap", () => {
         ["fresh@example.invalid"],
         ["player@example.invalid"],
       ]);
-    }).pipe(Effect.provide(Layer.mergeAll(captured, RateLimiterMemory, BunServices.layer))),
+    }).pipe(Effect.provide(captured)),
   );
 
   for (const [state, limiter, failure] of [
@@ -240,7 +254,7 @@ describe("per-address mail cap", () => {
         const delivered = yield* sentMail;
         expect(delivered).toHaveLength(1);
         expect(delivered[0]?.text).toContain("You changed your password.");
-      }).pipe(Effect.provide(Layer.mergeAll(captured, limiter, BunServices.layer))),
+      }).pipe(Effect.provide(deliveryLayer(limiter))),
     );
   }
 });

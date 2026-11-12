@@ -1,3 +1,4 @@
+// @entrypoint: graphile-worker calls the tasks and logger, which run with the worker's context.
 import {
   Cause,
   Config,
@@ -22,8 +23,7 @@ import {
   ForgotPasswordUnregistered,
   SendVerification,
 } from "./accountMail.js";
-import { Mailer } from "./email/mailer.js";
-import { QueuedEmail, sendEmail } from "./email/sendEmail.js";
+import { EmailDelivery, QueuedEmail } from "./email/emailDelivery.js";
 import { ExpiredPlaygrounds, PruneExpiredPlaygrounds } from "./expiredPlaygrounds.js";
 import { Sponsorship, SponsorshipEvent } from "./sponsorship.js";
 
@@ -47,7 +47,7 @@ class WorkerError extends Schema.TaggedError<WorkerError, { readonly brand: uniq
  * layer's scope closes and waits for its running jobs, so release the layer
  * before the database pools.
  */
-export class Worker extends Context.Service<Worker>()("Worker", {
+export class Worker extends Context.Service<Worker>()("postgres-garden/worker", {
   make: Effect.gen(function* () {
     // A runner that has not started yet is not failed: the health check reports
     // only a runner that stopped or could not start.
@@ -65,7 +65,14 @@ export class Worker extends Context.Service<Worker>()("Worker", {
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(Layer.mergeAll(AccountMail.layer, ExpiredPlaygrounds.layer, Sponsorship.layer)),
+    Layer.provide(
+      Layer.mergeAll(
+        AccountMail.layer,
+        EmailDelivery.layer,
+        ExpiredPlaygrounds.layer,
+        Sponsorship.layer,
+      ),
+    ),
   );
 }
 
@@ -80,7 +87,8 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
     Effect.mapError((cause) => new WorkerError({ message: "Worker failed to start", cause })),
   );
   const path = yield* Path.Path;
-  const context = yield* Effect.context<FileSystem | Path.Path | RateLimiter | Mailer>();
+  const context = yield* Effect.context<FileSystem | Path.Path | RateLimiter | EmailDelivery>();
+  const email = yield* EmailDelivery;
   const mail = yield* AccountMail;
   const playgrounds = yield* ExpiredPlaygrounds;
   const sponsorship = yield* Sponsorship;
@@ -93,7 +101,7 @@ const start = Effect.fnUntraced(function* (stopped: Ref.Ref<boolean>) {
   );
   const task = taskIn(context);
   const taskList = {
-    send_email: task(QueuedEmail, sendEmail),
+    send_email: task(QueuedEmail, email.send),
     user__audit: task(AuditEvent, (event, helpers) => mail.audit(event, helpers.job.created_at)),
     user__forgot_password: task(ForgotPassword, mail.forgotPassword),
     user__forgot_password_unregistered_email: task(

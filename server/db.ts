@@ -87,30 +87,16 @@ export type DbHandle<Schema = DB> = {
   ) => Effect.Effect<A, E | DatabaseError, R>;
 };
 
-// Above the pool classes: their static layers call it while the module loads.
-const openPool = Effect.fnUntraced(function* <Schema>(urlKey: string) {
-  const url = yield* Config.Redacted(urlKey);
-  const db = connect<Schema>(Redacted.value(url));
-  yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
-  // The pool connects on first use, so a first query proves Postgres answers.
-  // The retries reuse this one pool.
-  yield* Effect.tryPromise({
-    try: () => sql`select 1`.execute(db),
-    catch: (cause) => toDatabaseError(cause),
-  }).pipe(waitFor(`postgres (${urlKey})`));
-  return db;
-});
-
 /**
  * The authenticator login. Its type holds only `app_public` tables. A query on
  * the pool itself runs as the authenticator role; request code reaches it
  * through `withAuthContext`, which switches each transaction to the visitor role.
  */
-export class PgAuthDB extends Context.Service<PgAuthDB, DbHandle<PublicDB>>()("PgAuthDB") {
-  static readonly layer = Layer.effect(
-    this,
-    openPool<PublicDB>("AUTH_DATABASE_URL").pipe(Effect.map(makeHandle)),
-  );
+export class PgAuthDB extends Context.Service<PgAuthDB, DbHandle<PublicDB>>()(
+  "postgres-garden/db/PgAuthDB",
+  { make: makePool<PublicDB>("AUTH_DATABASE_URL").pipe(Effect.map(makeHandle)) },
+) {
+  static readonly layer = Layer.effect(this, this.make);
 }
 
 /**
@@ -119,14 +105,29 @@ export class PgAuthDB extends Context.Service<PgAuthDB, DbHandle<PublicDB>>()("P
  * `transaction`. Its connections are not the visitor pool's, so a root write
  * inside a request stays committed when the request's transaction rolls back.
  */
-export class PgRootDB extends Context.Service<PgRootDB, DbHandle>()("PgRootDB") {
-  static readonly layer = Layer.effect(
-    this,
-    openPool<DB>("DATABASE_URL").pipe(Effect.map(makeHandle)),
-  );
+export class PgRootDB extends Context.Service<PgRootDB, DbHandle>()("postgres-garden/db/PgRootDB", {
+  make: makePool<DB>("DATABASE_URL").pipe(Effect.map(makeHandle)),
+}) {
+  static readonly layer = Layer.effect(this, this.make);
 }
 
 export const DatabaseLive = Layer.mergeAll(PgAuthDB.layer, PgRootDB.layer);
+
+// Shared by both database services so their pool setup stays identical.
+function makePool<Schema>(urlKey: string) {
+  return Effect.gen(function* () {
+    const url = yield* Config.Redacted(urlKey);
+    const db = connect<Schema>(Redacted.value(url));
+    yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
+    // The pool connects on first use, so a first query proves Postgres answers.
+    // The retries reuse this one pool.
+    yield* Effect.tryPromise({
+      try: () => sql`select 1`.execute(db),
+      catch: (cause) => toDatabaseError(cause),
+    }).pipe(waitFor(`postgres (${urlKey})`));
+    return db;
+  });
+}
 
 function makeHandle<Schema>(kysely: Kysely<Schema>): DbHandle<Schema> {
   const raw = <A>(query: RawBuilder<A>): Query<ReadonlyArray<A>> => ({

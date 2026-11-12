@@ -13,7 +13,7 @@ import { Effect, Random, pipe } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { PgRootDB } from "./db.js";
 import { Redis } from "effect/persistence/Redis";
-import { sessionKeyOf } from "./services/sessionService.js";
+import { sessionKeyOf } from "./services/sessions.js";
 import { TestApi } from "./test/apiHarness.js";
 
 // ---------------------------------------------------------------------------
@@ -312,7 +312,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
 
   // -- Playgrounds ---------------------------------------------------------
 
-  describe("Playgrounds", () => {
+  describe("postgres-garden/playgrounds", () => {
     it.effect("an unknown playground hash answers 404", () =>
       Effect.gen(function* () {
         const response = yield* http("GET", "/api/playgrounds/nosuchhash00");

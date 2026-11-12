@@ -26,7 +26,7 @@ export const VerifyEmailView = (props: { onNavigate: (view: string) => void }) =
     setVerifying(true);
     void runRequest(
       apiCall("auth.verify_email.auto", (api) =>
-        api.apiUsers.verifyEmail({ payload: { token } }),
+        api.users.verifyEmail({ payload: { token } }),
       ).pipe(
         Effect.match({
           onFailure: (error) => setError(error.message),

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+// @entrypoint
 import { BunRedis, BunRuntime, BunServices } from "@effect/platform-bun";
 import { Config, Layer } from "effect";
 import { ServerLive } from "./runtime.js";

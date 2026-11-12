@@ -13,7 +13,7 @@ const UserAuthenticationResponse = UserAuthentication.mapFields(
 
 const HasPasswordResponse = S.Struct({ has_password: S.Boolean });
 
-export const UsersGroup = HttpApiGroup.make("apiUsers")
+export const UsersGroup = HttpApiGroup.make("users")
   .add(
     HttpApiEndpoint.get("me", "/me", {
       success: S.Struct({ user: S.NullOr(User) }),

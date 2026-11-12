@@ -62,7 +62,7 @@ export const Stale = Schema.TaggedStruct("Stale", {});
 export const SaveOutcome = Schema.Union([Saved, SessionExpired, Stale]);
 export type SaveOutcome = typeof SaveOutcome.Type;
 
-export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/PlaygroundSaver", {
+export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("postgres-garden/playgroundSaver", {
   make: Effect.gen(function* () {
     const { api: vscodeApi } = yield* VSCodeService;
     const { call } = yield* ApiCaller;
@@ -108,7 +108,7 @@ export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("app/Pla
     const upload = Effect.fn("PlaygroundSaver.upload")(function* (request: SaveRequest) {
       // The session cookie, not the local auth provider, says who the caller
       // is, so the server is asked.
-      const user = yield* call("apiUsers.me", (api) => api.apiUsers.me({})).pipe(
+      const user = yield* call("users.me", (api) => api.users.me({})).pipe(
         Effect.map(({ user }) => Option.fromNullishOr(user)),
         Effect.catch((error) =>
           Effect.logWarning("[ServerSync] Failed to check auth status:", error).pipe(

@@ -5,6 +5,10 @@ output:
 
 pre-push:
   commands:
+    typecheck:
+      run: bun run typecheck
+    lint:
+      run: bun run lint
     # For each pushed main or develop tree that has no signoff, `ops signoff pre-push` runs
     # scripts/verify and records a signoff on the control host, for every remote. A failing
     # verify refuses the push. {1} and {2} are git's remote name and URL.

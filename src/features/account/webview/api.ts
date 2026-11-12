@@ -14,7 +14,7 @@ export const apiCall = client.apiCall;
 
 /** The signed-in visitor's profile; a visitor with no session fails as 401. */
 export const loadProfile = (action: string) =>
-  apiCall(action, (api) => api.apiUsers.me({})).pipe(
+  apiCall(action, (api) => api.users.me({})).pipe(
     Effect.flatMap(({ user }) =>
       Effect.fromOption(
         Option.fromNullOr(user),

@@ -6,7 +6,7 @@ import { Redis } from "effect/persistence/Redis";
 import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
 import { createUser, deleteUser, randomSuffix, withCapturedLogs } from "../testSupport.js";
 import { TestValkeyLive } from "../test/valkey.js";
-import { SessionService, sessionKeyOf } from "./sessionService.js";
+import { Sessions, sessionKeyOf } from "./sessions.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
@@ -59,14 +59,14 @@ const cachedSessionsFor = Effect.fnUntraced(function* (userId: string) {
 });
 
 layer(
-  SessionService.layer.pipe(
+  Sessions.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, TestValkeyLive)),
   ),
   { excludeTestServices: true, timeout: "30 seconds" },
-)("SessionService", (it) => {
+)("postgres-garden/sessions", (it) => {
   it.effect("mints a session the database and the cache agree on", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       const suffix = yield* randomSuffix;
       const user = yield* PgRootDB.use((rootDb) => createUser(rootDb, `session_mint_${suffix}`));
 
@@ -104,7 +104,7 @@ layer(
 
   it.effect("refuses a user that does not exist and caches nothing", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       const absent = yield* randomUuid;
 
       const error = yield* Effect.flip(sessions.createSession(absent));
@@ -120,7 +120,7 @@ layer(
 
   it.effect("reads no session for an absent token", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       expect(yield* sessions.validateSessionToken()).toEqual({ user: null, session: null });
       expect(yield* sessions.validateSessionToken("")).toEqual({ user: null, session: null });
       // Nothing to split on a dot: no cookie id, so no lookup.
@@ -133,7 +133,7 @@ layer(
 
   it.effect("treats a cookie the cache does not hold as absence, not corruption", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       const suffix = yield* randomSuffix;
 
       const { result, lines } = yield* withCapturedLogs(
@@ -150,7 +150,7 @@ layer(
 
   it.effect("warns and stays anonymous when a cached session does not decode", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       const suffix = yield* randomSuffix;
       const cookieId = `badrole_${suffix}`;
 
@@ -182,7 +182,7 @@ layer(
 
   it.effect("drops a cached session whose row is gone", () =>
     Effect.gen(function* () {
-      const sessions = yield* SessionService;
+      const sessions = yield* Sessions;
       const suffix = yield* randomSuffix;
       const user = yield* PgRootDB.use((rootDb) => createUser(rootDb, `session_revoked_${suffix}`));
 

@@ -7,7 +7,7 @@ import { formText } from "../format";
 import { createRequest, runRequest } from "../../../webview/request";
 import { SectionBoundary } from "../SectionBoundary";
 
-const loadEmails = () => apiCall("account.emails.load", (api) => api.apiUsers.meEmails({}));
+const loadEmails = () => apiCall("account.emails.load", (api) => api.users.meEmails({}));
 
 const testId = (email: string) =>
   `email-settings-item-${email
@@ -42,7 +42,7 @@ export const EmailsSection = () => {
     runAction(
       emailId,
       apiCall("account.emails.make_primary", (api) =>
-        api.apiUsers.makeEmailPrimary({ payload: { emailId } }),
+        api.users.makeEmailPrimary({ payload: { emailId } }),
       ),
       true,
     );
@@ -52,7 +52,7 @@ export const EmailsSection = () => {
     runAction(
       emailId,
       apiCall("account.emails.resend_verification", (api) =>
-        api.apiUsers.resendEmailVerificationCode({ payload: { emailId } }),
+        api.users.resendEmailVerificationCode({ payload: { emailId } }),
       ),
     );
   }
@@ -61,7 +61,7 @@ export const EmailsSection = () => {
     runAction(
       emailId,
       apiCall("account.emails.remove", (api) =>
-        api.apiUsers.deleteMeEmail({ params: { id: emailId } }),
+        api.users.deleteMeEmail({ params: { id: emailId } }),
       ),
       true,
     );
@@ -76,7 +76,7 @@ export const EmailsSection = () => {
     setAddingEmail(true);
     setMutationError(null);
     void runRequest(
-      apiCall("account.emails.add", (api) => api.apiUsers.createMeEmail({ payload: { email } })),
+      apiCall("account.emails.add", (api) => api.users.createMeEmail({ payload: { email } })),
     )
       .then(
         () => {

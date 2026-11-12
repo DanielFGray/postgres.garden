@@ -64,7 +64,7 @@ class WorkspaceError extends S.TaggedError<WorkspaceError, { readonly brand: uni
  * load replaces what is there, one at a time (see `LoadedWorkspace`).
  */
 export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
-  "app/WorkspaceSwitcher",
+  "postgres-garden/workspaceSwitcher",
   {
     make: Effect.gen(function* () {
       const { call } = yield* ApiCaller;

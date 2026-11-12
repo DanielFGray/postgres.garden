@@ -8,7 +8,7 @@ import { withAuthContext } from "../requestDatabase.js";
 import { Secrets } from "../secrets.js";
 import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
 import { dropPlayground, insertCommit, setHead, withPlayground } from "../test/playgrounds.js";
-import { PlaygroundService } from "./playgroundService.js";
+import { Playgrounds } from "./playgrounds.js";
 
 const at = (iso: string) => DateTime.toDate(DateTime.makeUnsafe(iso));
 
@@ -27,7 +27,7 @@ const withAnonymousPlayground = <A, E, R>(
   }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const created = yield* PlaygroundService.use((playgrounds) =>
+    const created = yield* Playgrounds.use((playgrounds) =>
       playgrounds.create({ message: "first", files: files("select 1") }),
     ).pipe(withAuthContext, anonymous);
     return yield* Effect.ensuring(
@@ -49,7 +49,7 @@ const save = (
   basis: string | null,
   content: string,
 ) =>
-  PlaygroundService.use((playgrounds) =>
+  Playgrounds.use((playgrounds) =>
     playgrounds.createCommit(
       null,
       created.hash,
@@ -81,14 +81,14 @@ const locksWaiting = PgRootDB.use((db) =>
 ).pipe(Effect.map(({ waiting }) => waiting));
 
 const listCommitIds = (hash: string) =>
-  PlaygroundService.use((playgrounds) => playgrounds.listCommits(hash)).pipe(
+  Playgrounds.use((playgrounds) => playgrounds.listCommits(hash)).pipe(
     withAuthContext,
     anonymous,
     Effect.map((commits) => commits.map((commit) => commit.id)),
   );
 
 layer(
-  PlaygroundService.layer.pipe(
+  Playgrounds.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer)),
   ),
   { excludeTestServices: true, timeout: "30 seconds" },

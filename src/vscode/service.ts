@@ -259,7 +259,7 @@ type VSCodeServiceApi = {
   ) => Effect.Effect<A, E, R>;
 };
 
-export class VSCodeService extends Context.Service<VSCodeService>()("app/VSCodeService", {
+export class VSCodeService extends Context.Service<VSCodeService>()("postgres-garden/service/VSCodeService", {
   make: Effect.gen(function* () {
     const extension = yield* Effect.sync(() => {
       if (!registeredExtension) {

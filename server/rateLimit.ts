@@ -32,12 +32,12 @@ interface Rule {
 export const rules = {
   "auth:login": { by: "ip", limit: 10, window: "5 minutes", whenStoreDown: "allow" },
   "auth:register": { by: "ip", limit: 5, window: "1 hour", whenStoreDown: "deny" },
-  "apiUsers:forgotPassword": { by: "ip", limit: 5, window: "1 hour", whenStoreDown: "deny" },
-  "apiUsers:resetPassword": { by: "ip", limit: 10, window: "1 hour", whenStoreDown: "allow" },
-  "apiUsers:verifyEmail": { by: "ip", limit: 20, window: "1 hour", whenStoreDown: "allow" },
-  "apiUsers:changePassword": { by: "user", limit: 10, window: "1 hour", whenStoreDown: "allow" },
-  "apiUsers:createMeEmail": { by: "user", limit: 5, window: "1 day", whenStoreDown: "deny" },
-  "apiUsers:resendEmailVerificationCode": {
+  "users:forgotPassword": { by: "ip", limit: 5, window: "1 hour", whenStoreDown: "deny" },
+  "users:resetPassword": { by: "ip", limit: 10, window: "1 hour", whenStoreDown: "allow" },
+  "users:verifyEmail": { by: "ip", limit: 20, window: "1 hour", whenStoreDown: "allow" },
+  "users:changePassword": { by: "user", limit: 10, window: "1 hour", whenStoreDown: "allow" },
+  "users:createMeEmail": { by: "user", limit: 5, window: "1 day", whenStoreDown: "deny" },
+  "users:resendEmailVerificationCode": {
     by: "user",
     limit: 5,
     window: "1 day",
@@ -46,7 +46,7 @@ export const rules = {
   // One endpoint both requests deletion (it sends an email) and confirms it
   // (it checks the emailed token), so one count covers a request, its
   // confirmation and a few retries.
-  "apiUsers:deleteMe": { by: "user", limit: 5, window: "1 day", whenStoreDown: "deny" },
+  "users:deleteMe": { by: "user", limit: 5, window: "1 day", whenStoreDown: "deny" },
 } as const satisfies Record<string, Rule>;
 
 const ruleByKey: ReadonlyMap<string, Rule> = new Map(Object.entries(rules));

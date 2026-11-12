@@ -29,8 +29,9 @@ export type SessionData = {
   readonly session: SessionInfo | null;
 };
 
+/** @perRequest */
 export class CurrentSession extends Context.Service<CurrentSession, SessionData>()(
-  "CurrentSession",
+  "postgres-garden/session/CurrentSession",
 ) {}
 
 export class SessionMiddleware extends HttpApiMiddleware.Service<

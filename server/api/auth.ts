@@ -4,14 +4,14 @@ import { PgGardenApi } from "../../shared/httpApi.js";
 import { Unauthorized } from "../../shared/errors.js";
 import { toHttpError } from "../databaseErrors.js";
 import { reportUnexpected } from "../failureBoundary.js";
-import { AuthService } from "../services/authService.js";
+import { Auth } from "../services/auth.js";
 import { OAuthPopup } from "../services/oauthPopup.js";
 
 const notConfigured = "GitHub sign-in is not configured on this server.";
 
 export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handlers) =>
   Effect.gen(function* () {
-    const auth = yield* AuthService;
+    const auth = yield* Auth;
     const popup = yield* OAuthPopup;
 
     /**

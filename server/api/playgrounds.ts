@@ -6,14 +6,14 @@ import { toHttpError } from "../databaseErrors.js";
 import { editKeyFrom, requireSession } from "./http.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
-import { PlaygroundService } from "../services/playgroundService.js";
+import { Playgrounds } from "../services/playgrounds.js";
 
 export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
   PgGardenApi,
   "apiPlaygrounds",
   (handlers) =>
     Effect.gen(function* () {
-      const playgrounds = yield* PlaygroundService;
+      const playgrounds = yield* Playgrounds;
       return handlers.handleAll({
         userPlaygrounds: ({ params, query }) =>
           playgrounds

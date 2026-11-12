@@ -3,7 +3,7 @@ import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
 import { toHttpError } from "../databaseErrors.js";
-import { WebhookService } from "../services/webhookService.js";
+import { Webhooks } from "../services/webhooks.js";
 
 /**
  * GitHub posts here with a signature and no session. Its own failures answer
@@ -12,7 +12,7 @@ import { WebhookService } from "../services/webhookService.js";
  */
 export const WebhooksApiGroupLive = HttpApiBuilder.group(PgGardenApi, "webhooks", (handlers) =>
   Effect.gen(function* () {
-    const webhooks = yield* WebhookService;
+    const webhooks = yield* Webhooks;
     return handlers.handleRaw("githubSponsorWebhook", () =>
       webhooks.handleGitHubSponsor().pipe(
         Effect.map((result) => HttpServerResponse.jsonUnsafe(result)),

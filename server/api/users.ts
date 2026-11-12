@@ -6,11 +6,11 @@ import { toHttpError } from "../databaseErrors.js";
 import { requireSession } from "./http.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
-import { UserService } from "../services/userService.js";
+import { Users } from "../services/users.js";
 
-export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (handlers) =>
+export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "users", (handlers) =>
   Effect.gen(function* () {
-    const users = yield* UserService;
+    const users = yield* Users;
     return handlers.handleAll({
       me: () =>
         Effect.gen(function* () {
@@ -116,9 +116,7 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "apiUsers", (
             .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
         }),
       verifyEmail: ({ payload }) =>
-        users
-          .verifyEmail(payload.token)
-          .pipe(Effect.catchTag("DatabaseError", toHttpError)),
+        users.verifyEmail(payload.token).pipe(Effect.catchTag("DatabaseError", toHttpError)),
       makeEmailPrimary: ({ payload }) =>
         Effect.gen(function* () {
           yield* requireSession;

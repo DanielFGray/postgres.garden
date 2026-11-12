@@ -12,8 +12,9 @@ import { type DbHandle, type PublicDB, PgAuthDB } from "./db.js";
  * @effect-leakable-service: each request has its own, so a service method
  * requires it per call instead of resolving it when its layer is built.
  */
+/** @perRequest */
 export class RequestDatabase extends Context.Service<RequestDatabase, DbHandle<PublicDB>>()(
-  "RequestDatabase",
+  "postgres-garden/requestDatabase",
 ) {}
 
 /**

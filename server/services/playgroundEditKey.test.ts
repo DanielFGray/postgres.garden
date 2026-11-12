@@ -14,7 +14,7 @@ import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle, type PublicDB } from "../db.js";
 import { Secrets } from "../secrets.js";
-import { PlaygroundService } from "./playgroundService.js";
+import { Playgrounds } from "./playgrounds.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
 import { dropPlayground } from "../test/playgrounds.js";
@@ -458,7 +458,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
  * the key it answered with.
  */
 layer(
-  PlaygroundService.layer.pipe(
+  Playgrounds.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer)),
   ),
   { excludeTestServices: true, timeout: "30 seconds" },
@@ -466,7 +466,7 @@ layer(
   it.effect("answers a key, then takes that key as proof of a later save", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const created = yield* PlaygroundService.use((service) =>
+      const created = yield* Playgrounds.use((service) =>
         service.create({
           name: `svc-${suffix}`,
           message: "first",
@@ -480,7 +480,7 @@ layer(
           // The author is told when an unclaimed playground goes.
           expect(created.expires_at).not.toBeNull();
 
-          const second = yield* PlaygroundService.use((service) =>
+          const second = yield* Playgrounds.use((service) =>
             service.createCommit(
               null,
               created.playground_hash,
@@ -498,7 +498,7 @@ layer(
 
           // A save with no key reaches the same playground and is refused:
           // the key is the whole claim to it.
-          const refused = yield* PlaygroundService.use((service) =>
+          const refused = yield* Playgrounds.use((service) =>
             service.createCommit(
               null,
               created.playground_hash,
@@ -535,7 +535,7 @@ layer(
       const user = yield* PgRootDB.use((db) => createUser(db, `svc_claim_${suffix}`));
       const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
-      const created = yield* PlaygroundService.use((service) =>
+      const created = yield* Playgrounds.use((service) =>
         service.create({
           name: `svc-claim-${suffix}`,
           message: "first",
@@ -555,7 +555,7 @@ layer(
             ),
           );
 
-          const claimed = yield* PlaygroundService.use((service) =>
+          const claimed = yield* Playgrounds.use((service) =>
             service.claim(created.playground_hash, created.edit_key ?? ""),
           ).pipe(
             withAuthContext,

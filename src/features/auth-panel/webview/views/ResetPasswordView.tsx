@@ -40,7 +40,7 @@ export const ResetPasswordView = (props: { onNavigate: (view: string) => void })
 
     void runRequest(
       apiCall("auth.reset_password.submit", (api) =>
-        api.apiUsers.resetPassword({
+        api.users.resetPassword({
           payload: {
             token: getText("token"),
             password,

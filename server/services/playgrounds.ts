@@ -153,12 +153,12 @@ const forkFrom = (
  * cannot be resolved once when this service's Layer is built: each method
  * requires them per call, the same way `HttpServerRequest` would be.
  */
-export class PlaygroundService extends Context.Service<PlaygroundService>()("PlaygroundService", {
+export class Playgrounds extends Context.Service<Playgrounds>()("postgres-garden/playgrounds", {
   make: Effect.gen(function* () {
     const secrets = yield* Secrets;
 
     return {
-      listForUser: Effect.fn("PlaygroundService.listForUser")(
+      listForUser: Effect.fn("Playgrounds.listForUser")(
         (username: string, query: ListPlaygroundsQuery) =>
           RequestDatabase.use((db) =>
             db.all(
@@ -194,7 +194,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
           ),
       ),
 
-      list: Effect.fn("PlaygroundService.list")((query: ListPlaygroundsQuery) =>
+      list: Effect.fn("Playgrounds.list")((query: ListPlaygroundsQuery) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -229,71 +229,66 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ).pipe(Effect.map((rows) => rows.map(nestUser))),
       ),
 
-      search: Effect.fn("PlaygroundService.search")(
-        (q: string, limit?: number, offset?: number) => {
-          const parsed = parseSearchDSL(q);
-          // `starred:` narrows to the caller's own stars, so it only means
-          // anything when somebody is logged in.
-          return Effect.flatMap(CurrentSession, ({ session }) =>
-            RequestDatabase.use((db) =>
-              db
-                .all(
-                  pipe(
-                    db.connection
-                      .selectFrom("app_public.playgrounds as p")
-                      .leftJoin("app_public.users as u", "p.user_id", "u.id")
-                      .leftJoin(
-                        (eb) =>
-                          eb
-                            .selectFrom("app_public.playground_stars")
-                            .select((eb) => [
-                              "playground_hash",
-                              eb.fn.countAll<bigint>().as("stars"),
-                            ])
-                            .groupBy("playground_hash")
-                            .as("star_counts"),
-                        (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
-                      )
-                      .orderBy(sql.ref(parsed.sort), "desc")
-                      .limit(limit ?? 50)
-                      .offset(offset ?? 0),
-                    (q) =>
-                      parsed.starred && session
-                        ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
-                            join
-                              .onRef("my_stars.playground_hash", "=", "p.hash")
-                              .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
-                          )
-                        : q,
-                    (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
-                    (q) => q.where(publicOrOwn),
-                    (q) =>
-                      parsed.text
-                        ? q.where((eb) =>
-                            eb.or([
-                              eb("p.name", "ilike", `%${parsed.text}%`),
-                              eb("p.description", "ilike", `%${parsed.text}%`),
-                            ]),
-                          )
-                        : q,
-                    (q) =>
-                      q.select((eb) => [
-                        "p.hash",
-                        "p.fork_hash",
-                        "p.name",
-                        "p.description",
-                        eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
-                        "p.created_at",
-                        "p.updated_at",
-                        "u.username",
-                      ]),
-                  ),
-                )
-                .pipe(Effect.map((rows) => rows.map(nestUser))),
-            ),
-          );
-        },
-      ),
+      search: Effect.fn("Playgrounds.search")((q: string, limit?: number, offset?: number) => {
+        const parsed = parseSearchDSL(q);
+        // `starred:` narrows to the caller's own stars, so it only means
+        // anything when somebody is logged in.
+        return Effect.flatMap(CurrentSession, ({ session }) =>
+          RequestDatabase.use((db) =>
+            db
+              .all(
+                pipe(
+                  db.connection
+                    .selectFrom("app_public.playgrounds as p")
+                    .leftJoin("app_public.users as u", "p.user_id", "u.id")
+                    .leftJoin(
+                      (eb) =>
+                        eb
+                          .selectFrom("app_public.playground_stars")
+                          .select((eb) => ["playground_hash", eb.fn.countAll<bigint>().as("stars")])
+                          .groupBy("playground_hash")
+                          .as("star_counts"),
+                      (join) => join.onRef("star_counts.playground_hash", "=", "p.hash"),
+                    )
+                    .orderBy(sql.ref(parsed.sort), "desc")
+                    .limit(limit ?? 50)
+                    .offset(offset ?? 0),
+                  (q) =>
+                    parsed.starred && session
+                      ? q.innerJoin("app_public.playground_stars as my_stars", (join) =>
+                          join
+                            .onRef("my_stars.playground_hash", "=", "p.hash")
+                            .on("my_stars.user_id", "=", sql`app_public.current_user_id()`),
+                        )
+                      : q,
+                  (q) => (parsed.username ? q.where("u.username", "=", parsed.username) : q),
+                  (q) => q.where(publicOrOwn),
+                  (q) =>
+                    parsed.text
+                      ? q.where((eb) =>
+                          eb.or([
+                            eb("p.name", "ilike", `%${parsed.text}%`),
+                            eb("p.description", "ilike", `%${parsed.text}%`),
+                          ]),
+                        )
+                      : q,
+                  (q) =>
+                    q.select((eb) => [
+                      "p.hash",
+                      "p.fork_hash",
+                      "p.name",
+                      "p.description",
+                      eb.fn.coalesce(eb.ref("star_counts.stars"), sql.lit(0n)).as("stars"),
+                      "p.created_at",
+                      "p.updated_at",
+                      "u.username",
+                    ]),
+                ),
+              )
+              .pipe(Effect.map((rows) => rows.map(nestUser))),
+          ),
+        );
+      }),
 
       /**
        * Start a playground. A caller with no account gets a key back: it is
@@ -301,7 +296,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
        * claim it later, so the answer carries it once and the database stores
        * nothing the key can be read out of.
        */
-      create: Effect.fn("PlaygroundService.create")(function* (body: CreatePlaygroundInput) {
+      create: Effect.fn("Playgrounds.create")(function* (body: CreatePlaygroundInput) {
         const { user } = yield* CurrentSession;
         const editKey = user === null ? yield* secrets.generate : null;
         const editKeyHash = editKey === null ? null : yield* secrets.digest(editKey);
@@ -358,7 +353,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
        * Hand an anonymous playground to the caller's account. The key stops
        * being the way in, and the playground stops expiring.
        */
-      claim: Effect.fn("PlaygroundService.claim")(function* (hash: string, editKey: string | null) {
+      claim: Effect.fn("Playgrounds.claim")(function* (hash: string, editKey: string | null) {
         // A claim with no key is a claim with nothing to redeem. The digest of
         // nothing is not null, so there is no digest to take: the function is
         // handed null and refuses, the same as it does for a key that is wrong.
@@ -392,7 +387,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         );
       }),
 
-      getByHash: Effect.fn("PlaygroundService.getByHash")((hash: string) =>
+      getByHash: Effect.fn("Playgrounds.getByHash")((hash: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -438,11 +433,11 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ).pipe(Effect.head, Effect.map(nestUser)),
       ),
 
-      fork: Effect.fn("PlaygroundService.fork")((hash: string, name: string | null | undefined) =>
+      fork: Effect.fn("Playgrounds.fork")((hash: string, name: string | null | undefined) =>
         RequestDatabase.use((db) => forkFrom(db, { hash, name: name ?? null })),
       ),
 
-      update: Effect.fn("PlaygroundService.update")(function* (
+      update: Effect.fn("Playgrounds.update")(function* (
         hash: string,
         input: UpdatePlaygroundInput,
         editKey: string | null,
@@ -485,7 +480,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ).pipe(Effect.head);
       }),
 
-      createCommit: Effect.fn("PlaygroundService.createCommit")(
+      createCommit: Effect.fn("Playgrounds.createCommit")(
         (userId: string | null, hash: string, body: CommitToPlayground, editKey: string | null) =>
           RequestDatabase.use((db) =>
             Effect.gen(function* () {
@@ -559,7 +554,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
        * transaction's `now()`, and a save whose transaction began first can be
        * stamped before its parent.
        */
-      listCommits: Effect.fn("PlaygroundService.listCommits")((hash: string) =>
+      listCommits: Effect.fn("Playgrounds.listCommits")((hash: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -608,7 +603,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ),
       ),
 
-      getCommit: Effect.fn("PlaygroundService.getCommit")((hash: string, commitId: string) =>
+      getCommit: Effect.fn("Playgrounds.getCommit")((hash: string, commitId: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection
@@ -648,7 +643,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ),
       ),
 
-      getCommitHistory: Effect.fn("PlaygroundService.getCommitHistory")(
+      getCommitHistory: Effect.fn("Playgrounds.getCommitHistory")(
         (hash: string, commitId: string, limit = 50) =>
           RequestDatabase.use((db) =>
             db.all(
@@ -702,66 +697,65 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
           ),
       ),
 
-      getCommitDiff: Effect.fn("PlaygroundService.getCommitDiff")(
-        (hash: string, commitId: string) =>
-          RequestDatabase.use((db) =>
-            Effect.gen(function* () {
-              const commit = yield* db
-                .all(
-                  db.connection
-                    .selectFrom("app_public.playground_commits")
-                    .select(["id", "parent_id", "data"])
-                    .where("id", "=", commitId)
-                    .where("playground_hash", "=", hash),
-                )
-                .pipe(Effect.head);
+      getCommitDiff: Effect.fn("Playgrounds.getCommitDiff")((hash: string, commitId: string) =>
+        RequestDatabase.use((db) =>
+          Effect.gen(function* () {
+            const commit = yield* db
+              .all(
+                db.connection
+                  .selectFrom("app_public.playground_commits")
+                  .select(["id", "parent_id", "data"])
+                  .where("id", "=", commitId)
+                  .where("playground_hash", "=", hash),
+              )
+              .pipe(Effect.head);
 
-              const currentData = (commit.data as {
-                files: Array<{ path: string; content: string }>;
-              }) || { files: [] };
-              const currentFiles = currentData.files;
+            const currentData = (commit.data as {
+              files: Array<{ path: string; content: string }>;
+            }) || { files: [] };
+            const currentFiles = currentData.files;
 
-              if (!commit.parent_id) {
-                return {
-                  isRootCommit: true,
-                  added: currentFiles,
-                  modified: [],
-                  deleted: [],
-                };
-              }
+            if (!commit.parent_id) {
+              return {
+                isRootCommit: true,
+                added: currentFiles,
+                modified: [],
+                deleted: [],
+              };
+            }
 
-              const parentCommit = yield* db
-                .all(
-                  db.connection
-                    .selectFrom("app_public.playground_commits")
-                    .select(["data"])
-                    .where("id", "=", commit.parent_id),
-                )
-                .pipe(Effect.head);
+            const parentCommit = yield* db
+              .all(
+                db.connection
+                  .selectFrom("app_public.playground_commits")
+                  .select(["data"])
+                  .where("id", "=", commit.parent_id),
+              )
+              .pipe(Effect.head);
 
-              const parentData = (parentCommit.data as {
-                files: Array<{ path: string; content: string }>;
-              }) || { files: [] };
-              const parentFiles = parentData.files;
+            const parentData = (parentCommit.data as {
+              files: Array<{ path: string; content: string }>;
+            }) || { files: [] };
+            const parentFiles = parentData.files;
 
-              const currentFileMap = new Map(currentFiles.map((f) => [f.path, f.content]));
-              const parentFileMap = new Map(parentFiles.map((f) => [f.path, f.content]));
+            const currentFileMap = new Map(currentFiles.map((f) => [f.path, f.content]));
+            const parentFileMap = new Map(parentFiles.map((f) => [f.path, f.content]));
 
-              const added = currentFiles.filter((f) => !parentFileMap.has(f.path));
-              const modified = currentFiles.flatMap((f) => {
-                const parentContent = parentFileMap.get(f.path);
-                return parentContent !== undefined && parentContent !== f.content
-                  ? [{ ...f, parentContent }]
-                  : [];
-              });
-              const deleted = parentFiles.filter((f) => !currentFileMap.has(f.path));
+            const added = currentFiles.filter((f) => !parentFileMap.has(f.path));
+            const modified = currentFiles.flatMap((f) => {
+              const parentContent = parentFileMap.get(f.path);
+              return parentContent !== undefined && parentContent !== f.content
+                ? [{ ...f, parentContent }]
+                : [];
+            });
+            const deleted = parentFiles.filter((f) => !currentFileMap.has(f.path));
 
-              return { isRootCommit: false, added, modified, deleted };
-            }),
-          ),
+            return { isRootCommit: false, added, modified, deleted };
+          }),
+        ),
       ),
 
-      toggleStar: Effect.fn("PlaygroundService.toggleStar")((hash: string) =>
+      toggleStar: Effect.fn("Playgrounds.toggleStar")((hash: string) =>
         RequestDatabase.use((db) =>
           Effect.gen(function* () {
             const deleted = yield* db.all(
@@ -783,7 +777,7 @@ export class PlaygroundService extends Context.Service<PlaygroundService>()("Pla
         ),
       ),
 
-      deletePlayground: Effect.fn("PlaygroundService.deletePlayground")((hash: string) =>
+      deletePlayground: Effect.fn("Playgrounds.deletePlayground")((hash: string) =>
         RequestDatabase.use((db) =>
           db.all(
             db.connection

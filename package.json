@@ -20,7 +20,7 @@
     "start:prod": "bun run migrate && bun run worker:schema:prod && bun run start",
     "deploy": "bun run start",
     "format": "oxfmt",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware && ast-grep scan --globs 'server/**' --globs 'worker/**' --globs 'shared/**' && ast-grep test",
     "lint:fix": "oxlint --type-aware --fix",
     "typecheck:watch": "tsc --noEmit --watch",
     "typecheck:main": "tsc --noEmit",

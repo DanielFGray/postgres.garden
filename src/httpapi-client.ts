@@ -41,7 +41,7 @@ export class ApiCaller extends Context.Service<
       run: (api: PgGardenClient) => Effect.Effect<A, E>,
     ) => Effect.Effect<A, ApiRequestError>;
   }
->()("app/ApiCaller") {
+>()("postgres-garden/httpapi-client/ApiCaller") {
   /** Calls over `options.transport`, attributed to `options.feature`. */
   static readonly layer = (options: {
     readonly baseUrl: string;

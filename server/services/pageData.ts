@@ -6,7 +6,7 @@ import { RequestDatabase, withAuthContext } from "../requestDatabase.js";
 import { PgAuthDB } from "../db.js";
 import { CurrentSession } from "../../shared/session.js";
 import { injectInitialData } from "../initialData.js";
-import { SessionService, sessionCookieName } from "./sessionService.js";
+import { Sessions, sessionCookieName } from "./sessions.js";
 
 /**
  * The state a server-rendered page starts from: who is signed in, the route,
@@ -21,9 +21,9 @@ import { SessionService, sessionCookieName } from "./sessionService.js";
  *
  * @effect-expect-leaking HttpServerRequest
  */
-export class PageData extends Context.Service<PageData>()("PageData", {
+export class PageData extends Context.Service<PageData>()("postgres-garden/pageData", {
   make: Effect.gen(function* () {
-    const sessions = yield* SessionService;
+    const sessions = yield* Sessions;
     const auth = yield* PgAuthDB;
 
     /** The commit a playground names as its head, or `null` if it has none. */
@@ -136,7 +136,7 @@ export class PageData extends Context.Service<PageData>()("PageData", {
     return { render, initialState, headCommit } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(SessionService.layer));
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Sessions.layer));
 }
 
 export const pathnameOf = (request: HttpServerRequest.HttpServerRequest) =>

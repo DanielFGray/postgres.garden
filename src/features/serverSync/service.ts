@@ -96,7 +96,7 @@ export const Failed = Schema.TaggedStruct("Failed", {});
 /** How a load of the workspace ended, which `workspaceSwitcher` reports after each load. */
 export const LoadEnded = Schema.Union([Loaded, Kept, Failed]);
 
-export class ServerSync extends Context.Service<ServerSync>()("app/ServerSync", {
+export class ServerSync extends Context.Service<ServerSync>()("postgres-garden/service/ServerSync", {
   make: Effect.gen(function* () {
     const { api: vscodeApi, withProgress } = yield* VSCodeService;
     const { runPromise } = yield* Workbench;

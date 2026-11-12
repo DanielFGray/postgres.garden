@@ -4,17 +4,17 @@ import { sql } from "kysely";
 import packageJson from "../package.json" with { type: "json" };
 import { rootUrl } from "../server/config.js";
 import { PgRootDB } from "../server/db.js";
-import { QueuedEmail } from "./email/sendEmail.js";
+import { QueuedEmail } from "./email/emailDelivery.js";
 
 /**
  * Turns account events into queued mail. The SQL in `migrations/` queues one
  * job per event (`graphile_worker.add_job`); each method here handles one of
- * those jobs and queues a `send_email` job, which `sendEmail` delivers.
+ * those jobs and queues a `send_email` job, which `EmailDelivery` delivers.
  *
  * The payload schemas below are written from that SQL: it is their only
  * producer.
  */
-export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountMail", {
+export class AccountMail extends Context.Service<AccountMail>()("postgres-garden/accountMail", {
   make: Effect.gen(function* () {
     const db = yield* PgRootDB;
 
@@ -176,7 +176,7 @@ export class AccountMail extends Context.Service<AccountMail>()("Worker/AccountM
     } as const;
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(PgRootDB.layer));
 }
 
 /** A password audit names only the user. */
@@ -240,7 +240,7 @@ export class NoVerifiedEmail extends Schema.TaggedError<
 
 const QueuedEmailJson = Schema.fromJsonString(QueuedEmail);
 
-/** The statement that queues `email` for `sendEmail`. */
+/** The statement that queues `email` for `EmailDelivery`. */
 const emailJob = Effect.fnUntraced(function* (email: QueuedEmail) {
   const json = yield* Schema.encodeEffect(QueuedEmailJson)(email);
   return sql`select graphile_worker.add_job('send_email', ${json}::json)`;
