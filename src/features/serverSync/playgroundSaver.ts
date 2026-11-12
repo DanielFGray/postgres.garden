@@ -14,7 +14,7 @@ import { ApiCaller } from "../../httpapi-client";
 import { editKeyLink, forgetEditKey, heldEditKey, rememberEditKey } from "../../shared/editKey";
 import { toErrorMessage } from "../../shared/errors";
 import { buildPath } from "../../shared/routes";
-import { VSCodeService } from "../../vscode/service";
+import { VSCode } from "../../vscode/service";
 
 export class PlaygroundSaveError extends Schema.TaggedError<
   PlaygroundSaveError,
@@ -64,7 +64,7 @@ export type SaveOutcome = typeof SaveOutcome.Type;
 
 export class PlaygroundSaver extends Context.Service<PlaygroundSaver>()("postgres-garden/playgroundSaver", {
   make: Effect.gen(function* () {
-    const { api: vscodeApi } = yield* VSCodeService;
+    const { api: vscodeApi } = yield* VSCode;
     const { call } = yield* ApiCaller;
 
     /**

@@ -7,7 +7,7 @@
  * until the model answers without tool calls or the iteration budget ends.
  */
 
-import { Effect, Option, Stream } from "effect";
+import { Context, Effect, Layer, Option, Stream } from "effect";
 import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { LoadedWorkspace } from "../loadedWorkspace";
@@ -23,81 +23,90 @@ import {
   type AgentToolName,
 } from "./tools";
 
-export const runAgentChat = Effect.fn("ai.runAgentChat")(function* (
-  vscodeApi: typeof vscode,
-  request: vscode.ChatRequest,
-  context: vscode.ChatContext,
-  response: vscode.ChatResponseStream,
-  token: vscode.CancellationToken,
-) {
-  const runs = yield* AgentRuns;
-  const pglite = yield* PGlite;
-  const loadedWorkspace = yield* LoadedWorkspace;
-  const workspaceRoot = yield* Effect.fromOption(
-    activeWorkspaceRoot(vscodeApi),
-    () => new NoWorkspaceError(),
-  );
-  const tools = toolsForRequest(request.tools);
-  yield* runs.register({
-    requestId: request.id,
-    workspaceRoot,
-    workspace: yield* loadedWorkspace.bind,
-    database: yield* pglite.sandbox,
-    tools,
-    token,
-  });
-
-  const initial = initialMessages(vscodeApi, request, context);
-  Option.map(describeUnsupported(initial.unsupported), (note) =>
-    response.markdown(`_${note}_\n\n`),
-  );
-
-  const chatTools = languageModelChatTools(tools);
-
-  const step = (
-    messages: ReadonlyArray<vscode.LanguageModelChatMessage>,
-    iteration: number,
-  ): Effect.Effect<void, ModelRequestError> =>
-    Effect.gen(function* () {
-      if (iteration > MAX_AGENT_ITERATIONS) {
-        response.markdown(
-          `\n\n_Stopped after ${MAX_AGENT_ITERATIONS} model requests without a final answer._`,
-        );
-        return;
-      }
-      const reply = yield* requestModel(
-        vscodeApi,
-        request.model,
-        messages,
-        chatTools,
-        response,
+export class AgentChat extends Context.Service<AgentChat>()("postgres-garden/agentLoop/AgentChat", {
+  make: Effect.gen(function* () {
+    const runs = yield* AgentRuns;
+    const pglite = yield* PGlite;
+    const loadedWorkspace = yield* LoadedWorkspace;
+    const runAgentChat = Effect.fn("ai.runAgentChat")(function* (
+      vscodeApi: typeof vscode,
+      request: vscode.ChatRequest,
+      context: vscode.ChatContext,
+      response: vscode.ChatResponseStream,
+      token: vscode.CancellationToken,
+    ) {
+      const workspaceRoot = yield* Effect.fromOption(
+        activeWorkspaceRoot(vscodeApi),
+        () => new NoWorkspaceError(),
+      );
+      const tools = toolsForRequest(request.tools);
+      yield* runs.register({
+        requestId: request.id,
+        workspaceRoot,
+        workspace: yield* loadedWorkspace.bind,
+        database: yield* pglite.sandbox,
+        tools,
         token,
-      );
-      if (reply.calls.length === 0) return;
+      });
 
-      const results = yield* Effect.forEach(reply.calls, (call) =>
-        invokeTool(vscodeApi, request, tools, call, response, token),
+      const initial = initialMessages(vscodeApi, request, context);
+      Option.map(describeUnsupported(initial.unsupported), (note) =>
+        response.markdown(`_${note}_\n\n`),
       );
-      yield* step(
-        [
-          ...messages,
-          vscodeApi.LanguageModelChatMessage.Assistant([...reply.content, ...reply.calls]),
-          vscodeApi.LanguageModelChatMessage.User(results),
-        ],
-        iteration + 1,
-      );
-    });
 
-  yield* step(initial.messages, 1).pipe(
-    Effect.onInterrupt(() =>
-      Effect.sync(() =>
-        response.markdown(
-          "\n\n_Stopped. No further tool calls run. A SQL statement that had already started runs to completion, because PGlite cannot interrupt it._",
+      const chatTools = languageModelChatTools(tools);
+
+      const step = (
+        messages: ReadonlyArray<vscode.LanguageModelChatMessage>,
+        iteration: number,
+      ): Effect.Effect<void, ModelRequestError> =>
+        Effect.gen(function* () {
+          if (iteration > MAX_AGENT_ITERATIONS) {
+            response.markdown(
+              `\n\n_Stopped after ${MAX_AGENT_ITERATIONS} model requests without a final answer._`,
+            );
+            return;
+          }
+          const reply = yield* requestModel(
+            vscodeApi,
+            request.model,
+            messages,
+            chatTools,
+            response,
+            token,
+          );
+          if (reply.calls.length === 0) return;
+
+          const results = yield* Effect.forEach(reply.calls, (call) =>
+            invokeTool(vscodeApi, request, tools, call, response, token),
+          );
+          yield* step(
+            [
+              ...messages,
+              vscodeApi.LanguageModelChatMessage.Assistant([...reply.content, ...reply.calls]),
+              vscodeApi.LanguageModelChatMessage.User(results),
+            ],
+            iteration + 1,
+          );
+        });
+
+      yield* step(initial.messages, 1).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() =>
+            response.markdown(
+              "\n\n_Stopped. No further tool calls run. A SQL statement that had already started runs to completion, because PGlite cannot interrupt it._",
+            ),
+          ),
         ),
-      ),
-    ),
+      );
+    }, Effect.scoped);
+    return { runAgentChat };
+  }),
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Layer.mergeAll(AgentRuns.layer, PGlite.layer, LoadedWorkspace.layer)),
   );
-}, Effect.scoped);
+}
 
 export class NoWorkspaceError extends S.TaggedError<
   NoWorkspaceError,

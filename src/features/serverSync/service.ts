@@ -26,7 +26,7 @@ import { takeEditKeyFromUrl } from "../../shared/editKey";
 import { toErrorMessage } from "../../shared/errors";
 import { navigateTo } from "../../shared/navigation";
 import { buildPath } from "../../shared/routes";
-import { VSCodeService } from "../../vscode/service";
+import { VSCode } from "../../vscode/service";
 import { Workbench } from "../../workbench";
 import {
   SERVER_SYNC_CHECKOUT_VERSION,
@@ -98,7 +98,7 @@ export const LoadEnded = Schema.Union([Loaded, Kept, Failed]);
 
 export class ServerSync extends Context.Service<ServerSync>()("postgres-garden/service/ServerSync", {
   make: Effect.gen(function* () {
-    const { api: vscodeApi, withProgress } = yield* VSCodeService;
+    const { api: vscodeApi, withProgress } = yield* VSCode;
     const { runPromise } = yield* Workbench;
     const loadedWorkspace = yield* LoadedWorkspace;
     const { call } = yield* ApiCaller;

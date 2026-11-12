@@ -186,7 +186,7 @@ export const createWebviewApiClient = <Message, Encoded>(options: {
   // A webview has no layer graph of its own. The runtime builds the caller once,
   // on the first call, and keeps it for the webview's lifetime.
   const caller = ManagedRuntime.make(
-    ApiCaller.layer({
+    ApiCaller.layerWebview({
       baseUrl: relayBaseUrl,
       transport: makeRelayTransport(options.channel),
       feature: options.feature,

@@ -1,3 +1,4 @@
+// @entrypoint: VS Code calls the webview message callback.
 /**
  * Sidebar WebviewView provider for Playground Metadata
  * Replaces the old TreeDataProvider with an editable form

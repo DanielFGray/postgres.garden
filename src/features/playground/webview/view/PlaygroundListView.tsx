@@ -1,3 +1,4 @@
+// @entrypoint: Solid calls the cleanup and event callbacks.
 import { createSignal, onCleanup, refresh, Errored, For, Loading, Show } from "solid-js";
 import { runAction } from "../api";
 import { apiCall, openPlayground } from "./api";

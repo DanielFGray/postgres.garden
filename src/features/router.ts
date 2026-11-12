@@ -1,3 +1,4 @@
+// @entrypoint: the browser calls the popstate listener.
 import { Effect, Layer } from "effect";
 import { parseRoute } from "../shared/routes";
 import { WorkspaceSwitcher } from "./workspaceSwitcher";

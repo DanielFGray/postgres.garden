@@ -68,59 +68,67 @@ const resolveRelayUrl = (path: string, method: string, origin: string) =>
  * action to the server. `Effect.fn` cannot name the parent: its span opens
  * outside the functions piped after the body.
  */
-export const relayReply = Effect.fnUntraced(
-  function* (
-    request: RelayRequest,
-    /**
-     * Headers the host adds on the webview's behalf. A webview has its own
-     * storage and cannot see the page's, so credentials that live in the page -
-     * the playground's edit key - are added here rather than sent by the caller.
-     */
-    hostHeaders: Record<string, string>,
-  ) {
-    const failure = (message: string) =>
-      new RelayFailure({ type: "api-relay-failure", id: request.id, message });
+export class Relay extends Context.Service<Relay>()("postgres-garden/relay", {
+  make: Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
+    const relayReply = Effect.fnUntraced(
+      function* (
+        request: RelayRequest,
+        /**
+         * Headers the host adds on the webview's behalf. A webview has its own
+         * storage and cannot see the page's, so credentials that live in the page -
+         * the playground's edit key - are added here rather than sent by the caller.
+         */
+        hostHeaders: Record<string, string>,
+      ) {
+        const failure = (message: string) =>
+          new RelayFailure({ type: "api-relay-failure", id: request.id, message });
 
-    const url = resolveRelayUrl(request.path, request.method, yield* RelayOrigin);
-    if (Option.isNone(url)) {
-      yield* Effect.logWarning(
-        "A webview asked the relay for a route the contract does not serve",
-      ).pipe(Effect.annotateLogs({ method: request.method, path: request.path }));
-      return failure(`${request.method} ${request.path} is not an endpoint this app serves`);
-    }
+        const url = resolveRelayUrl(request.path, request.method, yield* RelayOrigin);
+        if (Option.isNone(url)) {
+          yield* Effect.logWarning(
+            "A webview asked the relay for a route the contract does not serve",
+          ).pipe(Effect.annotateLogs({ method: request.method, path: request.path }));
+          return failure(`${request.method} ${request.path} is not an endpoint this app serves`);
+        }
 
-    return yield* Effect.gen(function* () {
-      const httpClient = yield* HttpClient.HttpClient;
-      const response = yield* httpClient.execute(
-        HttpClientRequest.make(request.method)(url.value, {
-          headers: { ...request.headers, ...hostHeaders },
-          body: Option.match(request.body, {
-            onNone: () => HttpBody.empty,
-            // Setting a body overwrites content-type from the body's own
-            // metadata, so the request's type has to be handed over with it or
-            // every relayed call arrives as text/plain.
-            onSome: (text) => HttpBody.text(text, request.headers["content-type"]),
-          }),
+        return yield* Effect.gen(function* () {
+          const response = yield* httpClient.execute(
+            HttpClientRequest.make(request.method)(url.value, {
+              headers: { ...request.headers, ...hostHeaders },
+              body: Option.match(request.body, {
+                onNone: () => HttpBody.empty,
+                // Setting a body overwrites content-type from the body's own
+                // metadata, so the request's type has to be handed over with it or
+                // every relayed call arrives as text/plain.
+                onSome: (text) => HttpBody.text(text, request.headers["content-type"]),
+              }),
+            }),
+          );
+          const body = yield* response.text;
+          return new RelayReply({
+            type: "api-relay-reply",
+            id: request.id,
+            status: response.status,
+            headers: response.headers,
+            body,
+          });
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.succeed(failure(`Could not reach the server: ${Cause.pretty(cause)}`)),
+          ),
+        );
+      },
+      (effect, request) =>
+        Effect.withSpan(effect, "relayReply", {
+          parent: Option.getOrUndefined(
+            HttpTraceContext.fromHeaders(Headers.fromInput(request.headers)),
+          ),
         }),
-      );
-      const body = yield* response.text;
-      return new RelayReply({
-        type: "api-relay-reply",
-        id: request.id,
-        status: response.status,
-        headers: response.headers,
-        body,
-      });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.succeed(failure(`Could not reach the server: ${Cause.pretty(cause)}`)),
-      ),
     );
-  },
-  (effect, request) =>
-    Effect.withSpan(effect, "relayReply", {
-      parent: Option.getOrUndefined(
-        HttpTraceContext.fromHeaders(Headers.fromInput(request.headers)),
-      ),
-    }),
-);
+    return { reply: relayReply };
+  }),
+}) {
+  static readonly layerNoDeps = Layer.effect(this, this.make);
+  static readonly layer = this.layerNoDeps.pipe(Layer.provide(relayHttpClient));
+}

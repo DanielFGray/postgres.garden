@@ -17,10 +17,10 @@ import {
   PLAYGROUND_TOGGLE_STAR,
   PLAYGROUND_METADATA,
 } from "../constants";
-import { VSCodeService } from "../../vscode/service";
+import { VSCode } from "../../vscode/service";
 
 const activatePlaygroundExtension = Effect.gen(function* () {
-  const vscodeService = yield* VSCodeService;
+  const vscodeService = yield* VSCode;
   const { runFork } = yield* Workbench;
   const { call } = yield* ApiCaller;
   const vscodeApi = vscodeService.api;

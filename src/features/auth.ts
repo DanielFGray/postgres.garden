@@ -17,7 +17,7 @@ import {
 } from "./constants";
 import { AccountSettingsPanelProvider } from "./account/AccountSettingsPanelProvider";
 import { AuthPanelProvider } from "./auth-panel/AuthPanelProvider";
-import { VSCodeService } from "../vscode/service";
+import { VSCode } from "../vscode/service";
 import { Workbench } from "../workbench";
 
 /**
@@ -316,10 +316,10 @@ interface AccountMenuItem extends vscode.QuickPickItem {
   value: "profile" | "settings" | "signout";
 }
 
-export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCodeService | Workbench> =
+export const AuthFeatureLive: Layer.Layer<never, never, ApiCaller | VSCode | Workbench> =
   Layer.effectDiscard(
     Effect.gen(function* () {
-      const vscodeService = yield* VSCodeService;
+      const vscodeService = yield* VSCode;
       const { runFork, runPromise } = yield* Workbench;
       const { user: initialUser } = readInitialData();
       const user = Option.fromNullishOr(initialUser);

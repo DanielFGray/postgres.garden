@@ -1,9 +1,10 @@
+// @entrypoint: VS Code calls the registered command and provider callbacks.
 import { Effect, Fiber, Layer, Scope } from "effect";
 import * as S from "effect/Schema";
 import type * as vscode from "vscode";
 import { getCurrentPlaygroundId } from "../shared/routes.js";
 import { toError } from "../shared/errors.js";
-import { VSCodeService } from "../vscode/service";
+import { VSCode } from "../vscode/service";
 import {
   DATABASE_EXPLORER,
   DATABASE_MIGRATE,
@@ -123,7 +124,7 @@ const runCommand = (effect: Effect.Effect<void, Error, never>, label: string): P
   );
 
 const activatePostgresFeature = Effect.gen(function* () {
-  const vscodeService = yield* VSCodeService;
+  const vscodeService = yield* VSCode;
   const vscodeApi = vscodeService.api;
   const runtime = yield* Effect.context<never>();
   const workspace = yield* WorkspaceSwitcher;
@@ -378,9 +379,7 @@ const activatePostgresFeature = Effect.gen(function* () {
         yield* fromPromise(() => dbExplorer.refresh());
         if (dbExplorer.introspection) {
           const introspection = dbExplorer.introspection;
-          yield* Effect.sync(() => {
-            updateSchema(introspection);
-          });
+          yield* updateSchema(introspection);
         }
       }),
       "[Postgres] introspection refresh failed",

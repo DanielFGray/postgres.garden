@@ -1,3 +1,4 @@
+// @entrypoint: VS Code calls the TreeDataProvider methods.
 import * as vscode from "vscode";
 import { Effect, Option, Schema, pipe } from "effect";
 import { Introspection, makeIntrospectionQuery, parseIntrospectionResults } from "pg-introspection";

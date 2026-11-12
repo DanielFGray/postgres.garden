@@ -2,7 +2,7 @@ import { Effect, Layer, Schema as S } from "effect";
 import { LanguageClient } from "vscode-languageclient/browser";
 import type { Introspection } from "pg-introspection";
 import { syncSchema } from "./lsp/schemaSync.js";
-import { VSCodeService } from "../vscode/service";
+import { VSCode } from "../vscode/service";
 
 /** Resolve when the LSP client is ready. Used by postgres.ts to sync schema. */
 let currentClient: LanguageClient | undefined;
@@ -16,9 +16,8 @@ export const clientReady = Effect.callback<LanguageClient>((resume) => {
 });
 
 /** Called by postgres.ts after introspection to sync schema to the LSP. */
-export function updateSchema(introspection: Introspection): void {
-  Effect.runFork(Effect.map(clientReady, (client) => syncSchema(client, introspection)));
-}
+export const updateSchema = (introspection: Introspection) =>
+  Effect.flatMap(clientReady, (client) => syncSchema(client, introspection));
 
 class LspStartError extends S.TaggedError<LspStartError, { readonly brand: unique symbol }>()(
   "LspStartError",
@@ -29,7 +28,7 @@ class LspStartError extends S.TaggedError<LspStartError, { readonly brand: uniqu
 
 export const LspFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    yield* VSCodeService;
+    yield* VSCode;
 
     const worker = new Worker(new URL("./lsp/pgls.worker.ts", import.meta.url), { type: "module" });
 

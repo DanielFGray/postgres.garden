@@ -1,3 +1,4 @@
+// @entrypoint: the browser calls the window message listener.
 import mermaid from "mermaid";
 import svgPanZoom from "svg-pan-zoom";
 import { Cause, Effect } from "effect";

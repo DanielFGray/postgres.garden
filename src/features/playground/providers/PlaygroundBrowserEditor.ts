@@ -1,3 +1,4 @@
+// @entrypoint: VS Code calls the webview message callback.
 /**
  * Playground Browser Panel
  * Shows the playground list in a webview panel (like a welcome page)

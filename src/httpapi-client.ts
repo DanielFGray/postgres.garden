@@ -23,79 +23,78 @@ import { type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 /** The generated client for `PgGardenApi`. */
 export type PgGardenClient = HttpApiClient.ForApi<typeof PgGardenApi>;
 
+type ApiCallerService = {
+  readonly call: <A, E extends ClientFailure>(
+    action: string,
+    run: (api: PgGardenClient) => Effect.Effect<A, E>,
+  ) => Effect.Effect<A, ApiRequestError>;
+};
+
+const buildApiCaller = Effect.fnUntraced(function* (options: {
+  readonly baseUrl: string;
+  readonly transport: Layer.Layer<HttpClient.HttpClient>;
+  readonly feature: string;
+}) {
+  const client = yield* HttpApiClient.make(PgGardenApi, {
+    baseUrl: options.baseUrl,
+    transformClient: (httpClient) =>
+      HttpClient.mapRequestEffect(httpClient, (request) =>
+        Effect.map(
+          CurrentRequestTelemetry,
+          Option.match({
+            onNone: () => request,
+            onSome: (telemetry) =>
+              HttpClientRequest.setHeaders(request, telemetryHeaders(telemetry)),
+          }),
+        ),
+      ),
+  }).pipe(Effect.provide(options.transport));
+  const call: ApiCallerService["call"] = (action, run) =>
+    run(client).pipe(
+      Effect.provideService(
+        CurrentRequestTelemetry,
+        Option.some({ action, feature: options.feature }),
+      ),
+      Effect.withSpan(`api ${action}`),
+      Effect.mapError(toApiRequestError),
+    );
+  return { call } satisfies ApiCallerService;
+});
+
 /**
  * Makes calls against `PgGardenApi` as named UI actions: attributes each for
  * tracing and flattens every way it can fail into `ApiRequestError`.
  *
- * The workbench provides `ApiCaller.workbench`. A sandboxed webview cannot use
- * `fetch`, so it provides `ApiCaller.layer` over a transport that relays each
+ * The workbench provides `ApiCaller.layer`. A sandboxed webview cannot use
+ * `fetch`, so it provides `ApiCaller.layerWebview` over a transport that relays each
  * request through the extension host (`features/webview/relayTransport.ts`).
  * Both sides get the same client, so both decode the server's answer with the
  * contract instead of trusting a shape they wrote by hand.
  */
-export class ApiCaller extends Context.Service<
-  ApiCaller,
+export class ApiCaller extends Context.Service<ApiCaller, ApiCallerService>()(
+  "postgres-garden/httpapi-client/ApiCaller",
   {
-    readonly call: <A, E extends ClientFailure>(
-      action: string,
-      run: (api: PgGardenClient) => Effect.Effect<A, E>,
-    ) => Effect.Effect<A, ApiRequestError>;
-  }
->()("postgres-garden/httpapi-client/ApiCaller") {
+    make: Effect.suspend(() =>
+      buildApiCaller({
+        baseUrl: window.location.origin,
+        feature: "workbench",
+        transport: Layer.mergeAll(
+          withPageEditKey.pipe(Layer.provide(FetchHttpClient.layer)),
+          Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
+        ),
+      }),
+    ),
+  },
+) {
+  /** Calls over `fetch` from the workbench page. */
+  static readonly layer = Layer.effect(this, this.make);
+
   /** Calls over `options.transport`, attributed to `options.feature`. */
-  static readonly layer = (options: {
+  static readonly layerWebview = (options: {
     readonly baseUrl: string;
     readonly transport: Layer.Layer<HttpClient.HttpClient>;
     readonly feature: string;
-  }) =>
-    Layer.effect(
-      ApiCaller,
-      Effect.gen(function* () {
-        // Built once per layer, not once per call.
-        const client = yield* HttpApiClient.make(PgGardenApi, {
-          baseUrl: options.baseUrl,
-          transformClient: (httpClient) =>
-            HttpClient.mapRequestEffect(httpClient, (request) =>
-              Effect.map(
-                CurrentRequestTelemetry,
-                Option.match({
-                  onNone: () => request,
-                  onSome: (telemetry) =>
-                    HttpClientRequest.setHeaders(request, telemetryHeaders(telemetry)),
-                }),
-              ),
-            ),
-        }).pipe(Effect.provide(options.transport));
-
-        const call: ApiCaller["Service"]["call"] = (action, run) =>
-          run(client).pipe(
-            Effect.provideService(
-              CurrentRequestTelemetry,
-              Option.some({ action, feature: options.feature }),
-            ),
-            Effect.withSpan(`api ${action}`),
-            Effect.mapError(toApiRequestError),
-          );
-
-        return { call };
-      }),
-    );
-
-  /** Calls over `fetch` from the workbench page. */
-  static readonly workbench = Layer.suspend(() =>
-    ApiCaller.layer({
-      // Read when the layer is built, not when this module loads: importing it
-      // reads no browser global.
-      baseUrl: window.location.origin,
-      feature: "workbench",
-      transport: Layer.mergeAll(
-        withPageEditKey.pipe(Layer.provide(FetchHttpClient.layer)),
-        // The workbench is served from this origin, so the session cookie
-        // travels with every call.
-        Layer.succeed(FetchHttpClient.RequestInit, { credentials: "include" }),
-      ),
-    }),
-  );
+  }) => Layer.effect(ApiCaller, buildApiCaller(options));
 }
 
 /**

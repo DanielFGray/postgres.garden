@@ -1,3 +1,4 @@
+// @entrypoint: Solid evaluates the memo callback that starts each request.
 import * as Effect from "effect/Effect";
 import { createMemo } from "solid-js";
 

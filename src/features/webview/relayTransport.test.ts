@@ -2,9 +2,9 @@ import { expect, it } from "@effect/vitest";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
-import { Array, Effect, Option, Queue, Ref } from "effect";
+import { Array, Effect, Layer, Option, Queue, Ref } from "effect";
 import * as S from "effect/Schema";
-import { RelayOrigin, relayReply } from "./relay";
+import { Relay, RelayOrigin } from "./relay";
 import {
   RelayRequest,
   type RelayMethod,
@@ -85,7 +85,10 @@ const connect = Effect.fnUntraced(function* (respond: (seen: Seen) => Response) 
       const request = yield* S.decodeEffect(RelayRequest)(message);
       // The host adds no credentials of its own in this test: the stub server
       // answers whatever arrives.
-      const reply = yield* relayReply(request, {});
+      const reply = yield* Effect.gen(function* () {
+        const relay = yield* Relay;
+        return yield* relay.reply(request, {});
+      }).pipe(Effect.provide(Relay.layerNoDeps.pipe(Layer.provideMerge(stubServer))));
       const encoded = yield* S.encodeEffect(RelayResponse)(reply);
       // postMessage hands the other side a structured clone, never the value.
       for (const subscriber of subscribers) subscriber(structuredClone(encoded));
@@ -176,18 +179,21 @@ it.effect("a header the relay does not carry is dropped before the wire", () =>
 );
 
 const refused = (method: RelayMethod, path: string) =>
-  relayReply(
-    new RelayRequest({
-      type: "api-relay-request",
-      id: "1",
-      method,
-      path,
-      headers: {},
-      body: Option.none(),
-    }),
-    {},
-  ).pipe(
-    Effect.provide(refuseToSend),
+  Effect.gen(function* () {
+    const relay = yield* Relay;
+    return yield* relay.reply(
+      new RelayRequest({
+        type: "api-relay-request",
+        id: "1",
+        method,
+        path,
+        headers: {},
+        body: Option.none(),
+      }),
+      {},
+    );
+  }).pipe(
+    Effect.provide(Relay.layerNoDeps.pipe(Layer.provideMerge(refuseToSend))),
     Effect.provideService(RelayOrigin, origin),
     Effect.map((reply) => reply.type),
   );

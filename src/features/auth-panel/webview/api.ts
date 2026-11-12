@@ -1,3 +1,4 @@
+// @entrypoint: the webview calls this module's message bridge.
 import * as Effect from "effect/Effect";
 import { createWebviewApiClient, vsCodeChannel } from "../../webview/relayTransport";
 import { AuthComplete, AuthWebviewMessage, GitHubSignIn, Initialized } from "../types";

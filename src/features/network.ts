@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { Effect, Layer } from "effect";
-import { VSCodeService } from "../vscode/service";
+import { VSCode } from "../vscode/service";
 
 export type NetworkState = "online" | "offline";
 
@@ -22,7 +22,7 @@ function setState(next: NetworkState) {
 
 export const NetworkFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    yield* VSCodeService;
+    yield* VSCode;
 
     const onOnline = () => setState("online");
     const onOffline = () => setState("offline");

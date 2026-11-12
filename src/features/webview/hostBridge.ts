@@ -1,16 +1,8 @@
 import type * as vscode from "vscode";
 import { Effect } from "effect";
-import * as S from "effect/Schema";
-import { getNetworkState } from "../network";
 import { generateNonce } from "../../utils/nonce";
-import {
-  RelayFailure,
-  type RelayRequest,
-  RelayResponse,
-  type RelayResponseEncoded,
-} from "./relayProtocol";
-import { editKeyHeaders } from "../../shared/editKey";
-import { relayHttpClient, relayReply } from "./relay";
+import { type RelayRequest, type RelayResponseEncoded } from "./relayProtocol";
+import { RelayHost } from "./relayHost";
 
 /**
  * Makes one HTTP request on a webview's behalf and posts the raw answer back.
@@ -22,24 +14,10 @@ import { relayHttpClient, relayReply } from "./relay";
  * It opens no span of its own: `relayReply`'s span is the host's part of the
  * call, and it joins the webview's trace.
  */
-export const handleRelayRequest = Effect.fnUntraced(function* (
+export const handleRelayRequest = (
   post: (response: RelayResponseEncoded) => void,
   request: RelayRequest,
-) {
-  const reply = yield* getNetworkState() === "offline"
-    ? Effect.succeed(
-        new RelayFailure({
-          type: "api-relay-failure",
-          id: request.id,
-          message: "You're offline",
-        }),
-      )
-    : // The session cookie reaches the server because the relay runs on the
-      // host origin. The edit key reaches it because the host reads it here: a
-      // webview has its own storage and cannot see the page's.
-      relayReply(request, editKeyHeaders()).pipe(Effect.provide(relayHttpClient));
-  post(yield* S.encodeEffect(RelayResponse)(reply));
-});
+) => RelayHost.use((host) => host.handle(post, request)).pipe(Effect.provide(RelayHost.layer));
 
 export type WebviewHtmlOptions = {
   readonly webview: vscode.Webview;

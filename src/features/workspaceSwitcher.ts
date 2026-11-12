@@ -21,7 +21,7 @@ import {
 } from "./constants";
 import { LoadedWorkspace } from "./loadedWorkspace";
 import { Failed, Kept, LoadEnded, Loaded } from "./serverSync/service";
-import { VSCodeService } from "../vscode/service";
+import { VSCode } from "../vscode/service";
 
 /** Schema for base64-encoded shared workspace payloads */
 const SharedWorkspacePayload = S.Struct({
@@ -69,7 +69,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
     make: Effect.gen(function* () {
       const { call } = yield* ApiCaller;
       const { replace: replaceWorkspace } = yield* LoadedWorkspace;
-      const { withProgress } = yield* VSCodeService;
+      const { withProgress } = yield* VSCode;
 
       /**
        * Core workspace loading logic (runs inside withProgress)

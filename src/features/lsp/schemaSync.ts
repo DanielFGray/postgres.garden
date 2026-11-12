@@ -364,24 +364,13 @@ export function toSchemaCache(introspection: Introspection): SchemaCache {
 /**
  * Send a SchemaCache to the language server via pgls/setSchema notification.
  */
-export function syncSchema(client: LanguageClient, introspection: Introspection): void {
-  try {
+export function syncSchema(client: LanguageClient, introspection: Introspection) {
+  return Effect.gen(function* () {
     const cache = toSchemaCache(introspection);
-    const encoded = S.encodeSync(SchemaCache)(cache);
-    void client.sendNotification("pgls/setSchema", {
-      schema: JSON.stringify(encoded),
-    });
-    Effect.runSync(
-      Effect.log(
-        `[PGLS] Schema synced: ${cache.schemas.length} schemas, ${cache.tables.length} tables, ${cache.columns.length} columns, ${cache.functions.length} functions`,
-      ),
+    const schema = yield* S.encodeEffect(S.fromJsonString(SchemaCache))(cache);
+    yield* Effect.sync(() => void client.sendNotification("pgls/setSchema", { schema }));
+    yield* Effect.log(
+      `[PGLS] Schema synced: ${cache.schemas.length} schemas, ${cache.tables.length} tables, ${cache.columns.length} columns, ${cache.functions.length} functions`,
     );
-  } catch (err) {
-    Effect.runSync(
-      Effect.logWarning(
-        "[PGLS] Schema sync error:",
-        err instanceof Error ? err.message : String(err),
-      ),
-    );
-  }
+  }).pipe(Effect.catchCause((cause) => Effect.logWarning("[PGLS] Schema sync error:", cause)));
 }

@@ -1,3 +1,4 @@
+// @entrypoint: the browser starts this module as a Web Worker.
 import { createLanguageServer, type LanguageServer } from "@postgres-language-server/wasm/lsp";
 import { createWorkspace, type Workspace } from "@postgres-language-server/wasm/workspace";
 import { Effect } from "effect";

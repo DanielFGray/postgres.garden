@@ -1,3 +1,4 @@
+// @entrypoint: VS Code calls the webview message callback.
 import * as vscode from "vscode";
 import { Effect, Match } from "effect";
 import * as S from "effect/Schema";

@@ -1,3 +1,4 @@
+// @entrypoint: Vite loads this browser module to start the workbench.
 // Patch VS Code's Delayer before any of it is constructed.
 import "./suppressCancellationErrors";
 import { render } from "@solidjs/web";
@@ -6,6 +7,7 @@ import { TelemetryLive } from "./telemetry";
 import { AuthFeatureLive } from "./features/auth";
 import { ApiCaller } from "./httpapi-client";
 import { AiFeatureLive } from "./features/ai";
+import { AgentChat } from "./features/ai/agentLoop";
 import { LoadedWorkspace } from "./features/loadedWorkspace";
 import { LspFeatureLive } from "./features/lsp";
 import { NetworkFeatureLive } from "./features/network";
@@ -17,7 +19,7 @@ import { ServerSyncFeatureLive } from "./features/serverSync/feature";
 import { PlaygroundSaver } from "./features/serverSync/playgroundSaver";
 import { ServerSync } from "./features/serverSync/service";
 import { WorkspaceSwitcher } from "./features/workspaceSwitcher";
-import { VSCodeService } from "./vscode/service";
+import { VSCode } from "./vscode/service";
 import { Workbench } from "./workbench";
 import "./style.css";
 
@@ -89,11 +91,12 @@ const pluginLayers = Layer.mergeAll(
   Layer.provide(ServerSync.layer),
   Layer.provide(PlaygroundSaver.layer),
   Layer.provide(WorkspaceSwitcher.layer),
-  Layer.provide(VSCodeService.layer),
+  Layer.provide(VSCode.layer),
   Layer.provide(PGlite.layer),
   Layer.provide(LoadedWorkspace.layer),
+  Layer.provide(AgentChat.layer),
   Layer.provide(Workbench.layer),
-  Layer.provide(ApiCaller.workbench),
+  Layer.provide(ApiCaller.layer),
 );
 
 const program = Effect.gen(function* () {

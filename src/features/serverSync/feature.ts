@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode";
 import { Effect, Layer, Option, Schema, SchemaGetter } from "effect";
-import { VSCodeService } from "../../vscode/service";
+import { VSCode } from "../../vscode/service";
 import { Workbench } from "../../workbench";
 import {
   SERVER_SYNC_CHECKOUT_VERSION,
@@ -48,7 +48,7 @@ const decodeString = Schema.decodeUnknownOption(Schema.String);
 
 export const ServerSyncFeatureLive = Layer.effectDiscard(
   Effect.gen(function* () {
-    const { api: vscodeApi, registerCommand } = yield* VSCodeService;
+    const { api: vscodeApi, registerCommand } = yield* VSCode;
     const { runFork } = yield* Workbench;
     const sync = yield* ServerSync;
 

@@ -1,3 +1,4 @@
+// @entrypoint: VS Code calls the webview message and lifecycle callbacks.
 import * as vscode from "vscode";
 import { Effect, Fiber } from "effect";
 import { getMermaidERD, type ERDQueryClient } from "./query.js";

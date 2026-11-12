@@ -1,3 +1,4 @@
+// @entrypoint: the webview calls this module's message bridge.
 import { Effect, Option } from "effect";
 import { ApiRequestError } from "../../../httpapi-client";
 import { createWebviewApiClient, vsCodeChannel } from "../../webview/relayTransport";

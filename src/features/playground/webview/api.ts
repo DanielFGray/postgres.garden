@@ -1,3 +1,4 @@
+// @entrypoint: the webview calls the action bridge from UI event handlers.
 import * as Effect from "effect/Effect";
 
 /** Starts one UI action from an event handler; a failure the action leaves unhandled is logged. */
