@@ -1,0 +1,20 @@
+id: service-has-make
+language: TypeScript
+severity: error
+message: A Context.Service needs `make`, so that its static layer can build it.
+note: |
+  Put the implementation in `make`, and set
+  `static readonly layer = Layer.effect(this, this.make)`.
+  A service that a scope provides for each request (the session cookie, the
+  request database) has no `make`: put `@perRequest` in its class's doc comment.
+rule:
+  pattern: Context.Service<$$$TYPES>()($ID)
+  not:
+    inside:
+      stopBy: end
+      any:
+        - kind: class_declaration
+        - kind: export_statement
+      follows:
+        kind: comment
+        regex: '@perRequest'

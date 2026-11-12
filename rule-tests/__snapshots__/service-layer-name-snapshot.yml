@@ -1,0 +1,105 @@
+id: service-layer-name
+snapshots:
+  ? |
+    class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer') {
+      static make(impl: Shape) {
+        return Layer.succeed(this, impl)
+      }
+    }
+  : labels:
+      - source: |-
+          static make(impl: Shape) {
+              return Layer.succeed(this, impl)
+            }
+        style: primary
+        start: 80
+        end: 147
+      - source: make
+        style: secondary
+        start: 87
+        end: 91
+      - source: Layer.succeed
+        style: secondary
+        start: 118
+        end: 131
+      - source: Context.Service
+        style: secondary
+        start: 21
+        end: 36
+      - source: extends Context.Service<Mailer, Shape>()('effect-test/Mailer')
+        style: secondary
+        start: 13
+        end: 75
+      - source: |-
+          class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer') {
+            static make(impl: Shape) {
+              return Layer.succeed(this, impl)
+            }
+          }
+        style: secondary
+        start: 0
+        end: 149
+  ? |
+    class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+      static readonly Live = Layer.effect(this, this.make)
+    }
+  : labels:
+      - source: static readonly Live = Layer.effect(this, this.make)
+        style: primary
+        start: 83
+        end: 135
+      - source: Live
+        style: secondary
+        start: 99
+        end: 103
+      - source: Layer.effect
+        style: secondary
+        start: 106
+        end: 118
+      - source: Context.Service
+        style: secondary
+        start: 21
+        end: 36
+      - source: extends Context.Service<Mailer>()('effect-test/Mailer', { make })
+        style: secondary
+        start: 13
+        end: 78
+      - source: |-
+          class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+            static readonly Live = Layer.effect(this, this.make)
+          }
+        style: secondary
+        start: 0
+        end: 137
+  ? |
+    class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+      static readonly capture = Layer.effect(this, capture)
+    }
+  : labels:
+      - source: static readonly capture = Layer.effect(this, capture)
+        style: primary
+        start: 83
+        end: 136
+      - source: capture
+        style: secondary
+        start: 99
+        end: 106
+      - source: Layer.effect
+        style: secondary
+        start: 109
+        end: 121
+      - source: Context.Service
+        style: secondary
+        start: 21
+        end: 36
+      - source: extends Context.Service<Mailer>()('effect-test/Mailer', { make })
+        style: secondary
+        start: 13
+        end: 78
+      - source: |-
+          class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+            static readonly capture = Layer.effect(this, capture)
+          }
+        style: secondary
+        start: 0
+        end: 138

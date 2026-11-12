@@ -1,0 +1,26 @@
+id: effect-run-at-entry
+language: TypeScript
+severity: error
+message: Only an entry point runs an effect; inside a program, yield* it.
+note: |
+  A run uses its own runtime, so it loses the caller's services, scope and
+  interruption. A process entry point, a script, or the one module that
+  bridges a framework's callbacks may run effects: put `@entrypoint` in a
+  comment at the top level of that file.
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: member_expression
+    has:
+      field: property
+      regex: '^run(Promise|Sync|Fork|Callback|Main)(Exit|With)?$'
+  not:
+    inside:
+      stopBy: end
+      kind: program
+      has:
+        kind: comment
+        regex: '@entrypoint'
+ignores:
+  - 'scripts/**'

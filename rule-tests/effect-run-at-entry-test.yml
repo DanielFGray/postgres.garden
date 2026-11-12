@@ -1,0 +1,18 @@
+id: effect-run-at-entry
+valid:
+  - |
+    // @entrypoint: the Bun server process.
+    BunRuntime.runMain(Layer.launch(MainLive))
+  - |
+    const program = Effect.gen(function* () {
+      return yield* users.login(payload)
+    })
+invalid:
+  - |
+    export const resolveUser = (token: string) => Effect.runSync(users.find(token))
+  - |
+    const handler = async () => {
+      await Effect.runPromise(sendMail)
+    }
+  - |
+    const log = (message: string) => runtime.runSyncWith(context)(Effect.log(message))

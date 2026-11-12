@@ -1,0 +1,28 @@
+id: no-module-service-function
+language: TypeScript
+severity: error
+message: Behaviour that needs a service is a method of a service, not an exported module effect.
+note: |
+  An exported Effect.fn or Effect.gen that yields a service tag, or calls
+  `Service.use`, is a service method outside its service. Move it into the
+  `make` of the service that owns it. Handlers (`server/api/**`) are
+  adapters and may yield the services they call.
+rule:
+  kind: variable_declarator
+  all:
+    - has:
+        field: value
+        regex: '^Effect\.(gen|fn|fnUntraced)\b'
+    - inside:
+        kind: lexical_declaration
+        inside:
+          kind: export_statement
+    - has:
+        stopBy: end
+        any:
+          - kind: yield_expression
+            regex: '^yield\*\s*[A-Z][A-Za-z0-9]*$'
+          - kind: member_expression
+            regex: '^[A-Z][A-Za-z0-9]*\.use$'
+ignores:
+  - 'server/api/**'

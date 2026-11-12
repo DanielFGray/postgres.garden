@@ -1,0 +1,21 @@
+id: service-has-make
+snapshots:
+  ? |
+    /** Sends mail. */
+    export class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer') {
+      static make(impl: Shape) {
+        return Layer.succeed(this, impl)
+      }
+    }
+  : labels:
+      - source: Context.Service<Mailer, Shape>()('effect-test/Mailer')
+        style: primary
+        start: 47
+        end: 101
+  ? |
+    export class Users extends Context.Service<Users>()('effect-test/Users') {}
+  : labels:
+      - source: Context.Service<Users>()('effect-test/Users')
+        style: primary
+        start: 27
+        end: 72

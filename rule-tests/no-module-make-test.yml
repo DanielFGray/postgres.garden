@@ -1,0 +1,23 @@
+id: no-module-make
+valid:
+  - |
+    export class Storage extends Context.Service<Storage>()('effect-test/Storage', {
+      make: Effect.gen(function* () {
+        return {}
+      }),
+    }) {}
+  - |
+    const makeCookieJar = Effect.gen(function* () {
+      return yield* Ref.make(Cookies.empty)
+    })
+invalid:
+  - |
+    const makeStorage = Effect.gen(function* () {
+      return {}
+    })
+    export class Storage extends Context.Service<Storage>()('effect-test/Storage', { make: makeStorage }) {}
+  - |
+    export const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+      return {}
+    })
+    export class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer', { make }) {}

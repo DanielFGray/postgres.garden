@@ -1,0 +1,56 @@
+id: no-exported-layer-function
+snapshots:
+  ? |
+    export const makeHttpApiLive = (oauthLayer = OAuthProviders.layer) =>
+      Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+  : labels:
+      - source: |-
+          (oauthLayer = OAuthProviders.layer) =>
+            Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+        style: primary
+        start: 31
+        end: 150
+      - source: |-
+          export const makeHttpApiLive = (oauthLayer = OAuthProviders.layer) =>
+            Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+        style: secondary
+        start: 0
+        end: 150
+      - source: |-
+          const makeHttpApiLive = (oauthLayer = OAuthProviders.layer) =>
+            Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+        style: secondary
+        start: 7
+        end: 150
+      - source: |-
+          makeHttpApiLive = (oauthLayer = OAuthProviders.layer) =>
+            Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+        style: secondary
+        start: 13
+        end: 150
+      - source: Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))
+        style: secondary
+        start: 72
+        end: 150
+  'export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)':
+    labels:
+      - source: '(deps: Deps) => Layer.succeed(Users, deps)'
+        style: primary
+        start: 30
+        end: 72
+      - source: 'export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+        style: secondary
+        start: 0
+        end: 72
+      - source: 'const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+        style: secondary
+        start: 7
+        end: 72
+      - source: 'makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+        style: secondary
+        start: 13
+        end: 72
+      - source: Layer.succeed(Users, deps)
+        style: secondary
+        start: 46
+        end: 72

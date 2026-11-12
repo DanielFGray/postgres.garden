@@ -1,6 +1,6 @@
 ruleDirs:
-  - ../effect-web-template/rules
+  - rules
 testConfigs:
-  - testDir: ../effect-web-template/rule-tests
+  - testDir: rule-tests
 utilDirs:
   - tools/ast-grep/utils

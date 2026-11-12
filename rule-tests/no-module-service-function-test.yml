@@ -1,0 +1,27 @@
+id: no-module-service-function
+valid:
+  - |
+    const helper = Effect.fnUntraced(function* (userId: string) {
+      const sessions = yield* Sessions
+      return yield* sessions.createSession(userId)
+    })
+  - |
+    export const oauthCookiePolicy = Effect.gen(function* () {
+      const nodeEnv = yield* Config.String('NODE_ENV')
+      return { secure: nodeEnv === 'production' }
+    })
+  - |
+    export const parse = Effect.fn('parse')(function* (raw: string) {
+      return yield* Schema.decodeUnknownEffect(Body)(raw)
+    })
+invalid:
+  - |
+    export const currentUser = Effect.gen(function* () {
+      const cookie = yield* SessionCookie
+      return yield* cookie.read
+    })
+  - |
+    export const loginAndCreateSession = Effect.fn('Auth.login')(function* (payload: Login) {
+      const user = yield* Users.use((users) => users.login(payload))
+      return user
+    })

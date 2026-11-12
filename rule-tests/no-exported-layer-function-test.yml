@@ -1,0 +1,10 @@
+id: no-exported-layer-function
+valid:
+  - 'export const UsersLive = Layer.effect(Users, make)'
+  - 'const helper = (deps: Deps) => Layer.succeed(Users, deps)'
+  - 'export const toHttpError = (error: DatabaseError) => Effect.fail(error)'
+invalid:
+  - 'export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+  - |
+    export const makeHttpApiLive = (oauthLayer = OAuthProviders.layer) =>
+      Layer.mergeAll(ApiLive, TestingMountLive).pipe(Layer.provideMerge(oauthLayer))

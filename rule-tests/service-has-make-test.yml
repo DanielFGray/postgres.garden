@@ -1,0 +1,23 @@
+id: service-has-make
+valid:
+  - |
+    export class Users extends Context.Service<Users>()('effect-test/Users', {
+      make: Effect.succeed({}),
+    }) {}
+  - |
+    /**
+     * The session cookie.
+     *
+     * @perRequest: a middleware provides it for each request.
+     */
+    export class SessionCookie extends Context.Service<SessionCookie, Shape>()('effect-test/SessionCookie') {}
+invalid:
+  - |
+    export class Users extends Context.Service<Users>()('effect-test/Users') {}
+  - |
+    /** Sends mail. */
+    export class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer') {
+      static make(impl: Shape) {
+        return Layer.succeed(this, impl)
+      }
+    }

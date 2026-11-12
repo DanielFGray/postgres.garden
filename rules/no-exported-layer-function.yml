@@ -1,0 +1,28 @@
+id: no-exported-layer-function
+language: TypeScript
+severity: error
+message: Export a Layer as a value (a service's static layer), not as a function that builds one.
+note: |
+  A function that takes values and returns a Layer hides the service it
+  builds. Put the behaviour in a service's `make`, and the variants in
+  `layer<Variant>` statics.
+rule:
+  kind: arrow_function
+  has:
+    field: body
+    any:
+      - regex: '^Layer\.'
+      - all:
+          - pattern: $SOURCE.pipe($$$STEPS)
+          - has:
+              stopBy: end
+              regex: '^Layer\.'
+  inside:
+    kind: variable_declarator
+    inside:
+      kind: lexical_declaration
+      inside:
+        kind: export_statement
+ignores:
+  - '**/*.test.ts'
+  - '**/test/**'

@@ -1,0 +1,86 @@
+id: no-module-service-function
+snapshots:
+  ? |
+    export const currentUser = Effect.gen(function* () {
+      const cookie = yield* SessionCookie
+      return yield* cookie.read
+    })
+  : labels:
+      - source: |-
+          currentUser = Effect.gen(function* () {
+            const cookie = yield* SessionCookie
+            return yield* cookie.read
+          })
+        style: primary
+        start: 13
+        end: 121
+      - source: |-
+          Effect.gen(function* () {
+            const cookie = yield* SessionCookie
+            return yield* cookie.read
+          })
+        style: secondary
+        start: 27
+        end: 121
+      - source: |-
+          export const currentUser = Effect.gen(function* () {
+            const cookie = yield* SessionCookie
+            return yield* cookie.read
+          })
+        style: secondary
+        start: 0
+        end: 121
+      - source: |-
+          const currentUser = Effect.gen(function* () {
+            const cookie = yield* SessionCookie
+            return yield* cookie.read
+          })
+        style: secondary
+        start: 7
+        end: 121
+      - source: yield* SessionCookie
+        style: secondary
+        start: 70
+        end: 90
+  ? |
+    export const loginAndCreateSession = Effect.fn('Auth.login')(function* (payload: Login) {
+      const user = yield* Users.use((users) => users.login(payload))
+      return user
+    })
+  : labels:
+      - source: |-
+          loginAndCreateSession = Effect.fn('Auth.login')(function* (payload: Login) {
+            const user = yield* Users.use((users) => users.login(payload))
+            return user
+          })
+        style: primary
+        start: 13
+        end: 171
+      - source: |-
+          Effect.fn('Auth.login')(function* (payload: Login) {
+            const user = yield* Users.use((users) => users.login(payload))
+            return user
+          })
+        style: secondary
+        start: 37
+        end: 171
+      - source: |-
+          export const loginAndCreateSession = Effect.fn('Auth.login')(function* (payload: Login) {
+            const user = yield* Users.use((users) => users.login(payload))
+            return user
+          })
+        style: secondary
+        start: 0
+        end: 171
+      - source: |-
+          const loginAndCreateSession = Effect.fn('Auth.login')(function* (payload: Login) {
+            const user = yield* Users.use((users) => users.login(payload))
+            return user
+          })
+        style: secondary
+        start: 7
+        end: 171
+      - source: Users.use
+        style: secondary
+        start: 112
+        end: 121

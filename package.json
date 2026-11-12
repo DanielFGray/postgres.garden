@@ -300,5 +300,9 @@
   },
   "fromEmail": "noreply@postgres.garden",
   "legalText": "Postgres Garden - Open Source PostgreSQL Development Environment",
-  "projectName": "Postgres Garden"
+  "projectName": "Postgres Garden",
+  "templateCopies": [
+    "rules",
+    "rule-tests"
+  ]
 }

@@ -1,0 +1,103 @@
+id: no-module-make
+snapshots:
+  ? |
+    const makeStorage = Effect.gen(function* () {
+      return {}
+    })
+    export class Storage extends Context.Service<Storage>()('effect-test/Storage', { make: makeStorage }) {}
+  : labels:
+      - source: |-
+          makeStorage = Effect.gen(function* () {
+            return {}
+          })
+        style: primary
+        start: 6
+        end: 60
+      - source: makeStorage
+        style: secondary
+        start: 6
+        end: 17
+      - source: |-
+          Effect.gen(function* () {
+            return {}
+          })
+        style: secondary
+        start: 20
+        end: 60
+      - source: |
+          const makeStorage = Effect.gen(function* () {
+            return {}
+          })
+          export class Storage extends Context.Service<Storage>()('effect-test/Storage', { make: makeStorage }) {}
+        style: secondary
+        start: 0
+        end: 166
+      - source: |-
+          const makeStorage = Effect.gen(function* () {
+            return {}
+          })
+        style: secondary
+        start: 0
+        end: 60
+      - source: "Context.Service<Storage>()('effect-test/Storage', { make: makeStorage })"
+        style: secondary
+        start: 90
+        end: 162
+      - source: |
+          const makeStorage = Effect.gen(function* () {
+            return {}
+          })
+          export class Storage extends Context.Service<Storage>()('effect-test/Storage', { make: makeStorage }) {}
+        style: secondary
+        start: 0
+        end: 166
+  ? |
+    export const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+      return {}
+    })
+    export class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer', { make }) {}
+  : labels:
+      - source: |-
+          makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+            return {}
+          })
+        style: primary
+        start: 13
+        end: 93
+      - source: makeSmtp
+        style: secondary
+        start: 13
+        end: 21
+      - source: |-
+          Effect.fnUntraced(function* (settings: SmtpSettings) {
+            return {}
+          })
+        style: secondary
+        start: 24
+        end: 93
+      - source: |-
+          export const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+            return {}
+          })
+        style: secondary
+        start: 0
+        end: 93
+      - source: |-
+          const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+            return {}
+          })
+        style: secondary
+        start: 7
+        end: 93
+      - source: Context.Service<Mailer, Shape>()('effect-test/Mailer', { make })
+        style: secondary
+        start: 122
+        end: 186
+      - source: |
+          export const makeSmtp = Effect.fnUntraced(function* (settings: SmtpSettings) {
+            return {}
+          })
+          export class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer', { make }) {}
+        style: secondary
+        start: 0
+        end: 190

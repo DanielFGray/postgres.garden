@@ -1,0 +1,29 @@
+id: service-layer-name
+language: TypeScript
+severity: error
+message: A service's static that holds a Layer is named `layer` or `layer<Variant>`.
+note: |
+  `layer` builds `make` with its dependencies. Other implementations are
+  `layerCapture`, `layerTest`, `layerNoDeps`, and so on. A static named
+  `make`, `Live` or `Test` that returns a Layer is the old form.
+rule:
+  any:
+    - kind: public_field_definition
+    - kind: method_definition
+  all:
+    - regex: '^static\s'
+    - has:
+        field: name
+        not:
+          regex: '^layer([A-Z][A-Za-z0-9]*)?$'
+    - has:
+        stopBy: end
+        pattern: Layer.$FN
+    - inside:
+        stopBy: end
+        kind: class_declaration
+        has:
+          kind: class_heritage
+          has:
+            stopBy: end
+            pattern: Context.Service

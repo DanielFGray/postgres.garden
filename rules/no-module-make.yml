@@ -1,0 +1,25 @@
+id: no-module-make
+language: TypeScript
+severity: error
+message: Build the service in its `make`, not in a module-level `make*` effect.
+rule:
+  kind: variable_declarator
+  all:
+    - has:
+        field: name
+        regex: '^make[A-Z]'
+    - has:
+        field: value
+        regex: '^Effect\.(gen|fn|fnUntraced)\b'
+    - inside:
+        kind: lexical_declaration
+        inside:
+          any:
+            - kind: program
+            - kind: export_statement
+    - inside:
+        stopBy: end
+        kind: program
+        has:
+          stopBy: end
+          pattern: Context.Service<$$$TYPES>()($$$ARGS)

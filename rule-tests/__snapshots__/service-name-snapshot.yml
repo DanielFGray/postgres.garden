@@ -1,0 +1,20 @@
+id: service-name
+snapshots:
+  class StorageService extends Context.Service<StorageService>()('effect-test/StorageService', { make }) {}:
+    labels:
+      - source: class StorageService extends Context.Service<StorageService>()('effect-test/StorageService', { make }) {}
+        style: primary
+        start: 0
+        end: 105
+      - source: StorageService
+        style: secondary
+        start: 6
+        end: 20
+      - source: Context.Service
+        style: secondary
+        start: 29
+        end: 44
+      - source: extends Context.Service<StorageService>()('effect-test/StorageService', { make })
+        style: secondary
+        start: 21
+        end: 102

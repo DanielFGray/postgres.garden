@@ -1,0 +1,27 @@
+id: service-layer-name
+valid:
+  - |
+    class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+      static readonly layer = Layer.effect(this, this.make)
+      static readonly layerCapture = Layer.effect(this, capture)
+      static readonly layerSmtp = (settings: SmtpSettings) => Layer.effect(this, smtp(settings))
+    }
+  - |
+    class Schema extends Base {
+      static readonly Live = Layer.empty
+    }
+invalid:
+  - |
+    class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+      static readonly Live = Layer.effect(this, this.make)
+    }
+  - |
+    class Mailer extends Context.Service<Mailer, Shape>()('effect-test/Mailer') {
+      static make(impl: Shape) {
+        return Layer.succeed(this, impl)
+      }
+    }
+  - |
+    class Mailer extends Context.Service<Mailer>()('effect-test/Mailer', { make }) {
+      static readonly capture = Layer.effect(this, capture)
+    }

@@ -1,0 +1,6 @@
+id: service-name
+valid:
+  - "class Storage extends Context.Service<Storage>()('effect-test/Storage', { make }) {}"
+  - 'class UserService {}'
+invalid:
+  - "class StorageService extends Context.Service<StorageService>()('effect-test/StorageService', { make }) {}"

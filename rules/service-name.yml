@@ -1,0 +1,15 @@
+id: service-name
+language: TypeScript
+severity: error
+message: Name a service class for its feature, with no "Service" suffix.
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        field: name
+        regex: 'Service$'
+    - has:
+        kind: class_heritage
+        has:
+          stopBy: end
+          pattern: Context.Service

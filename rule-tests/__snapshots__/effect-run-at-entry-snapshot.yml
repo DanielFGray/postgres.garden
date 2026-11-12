@@ -1,0 +1,49 @@
+id: effect-run-at-entry
+snapshots:
+  ? |
+    const handler = async () => {
+      await Effect.runPromise(sendMail)
+    }
+  : labels:
+      - source: Effect.runPromise(sendMail)
+        style: primary
+        start: 38
+        end: 65
+      - source: runPromise
+        style: secondary
+        start: 45
+        end: 55
+      - source: Effect.runPromise
+        style: secondary
+        start: 38
+        end: 55
+  ? |
+    const log = (message: string) => runtime.runSyncWith(context)(Effect.log(message))
+  : labels:
+      - source: runtime.runSyncWith(context)
+        style: primary
+        start: 33
+        end: 61
+      - source: runSyncWith
+        style: secondary
+        start: 41
+        end: 52
+      - source: runtime.runSyncWith
+        style: secondary
+        start: 33
+        end: 52
+  ? |
+    export const resolveUser = (token: string) => Effect.runSync(users.find(token))
+  : labels:
+      - source: Effect.runSync(users.find(token))
+        style: primary
+        start: 46
+        end: 79
+      - source: runSync
+        style: secondary
+        start: 53
+        end: 60
+      - source: Effect.runSync
+        style: secondary
+        start: 46
+        end: 60
