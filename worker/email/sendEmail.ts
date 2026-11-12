@@ -2,9 +2,7 @@ import { Array as Arr, Effect, Schema } from "effect";
 import { FileSystem } from "effect/FileSystem";
 import { Path } from "effect/Path";
 import { RateLimiter } from "effect/persistence/RateLimiter";
-import { convert } from "html-to-text";
 import template from "lodash.template";
-import mjml from "mjml";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { storeTimeout } from "../../server/services/rateLimiter.js";
@@ -75,6 +73,7 @@ export const sendEmail = Effect.fn("sendEmail")(function* (job: QueuedEmail) {
   if (!Arr.isReadonlyArrayNonEmpty(recipients)) return;
   const fs = yield* FileSystem;
   const path = yield* Path;
+  const { mjml, convert } = yield* loadRenderers;
   // From the working directory: the production server is one bundle in
   // `dist/`, so a path relative to this module would point there.
   const source = yield* fs.readFileString(path.resolve("worker/templates", job.template));
@@ -110,6 +109,19 @@ export const sendEmail = Effect.fn("sendEmail")(function* (job: QueuedEmail) {
       text,
     }),
   );
+});
+
+/**
+ * MJML and html-to-text are needed only when a job sends mail, and loading them
+ * at boot adds about 20 MB to the server's resident set. The module loader
+ * keeps both, so only the first mail pays for the import.
+ */
+const loadRenderers = Effect.gen(function* () {
+  const [mjml, text] = yield* Effect.all([
+    Effect.promise(() => import("mjml")),
+    Effect.promise(() => import("html-to-text")),
+  ]);
+  return { mjml: mjml.default, convert: text.convert };
 });
 
 /**
