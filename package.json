@@ -6,7 +6,7 @@
   "scripts": {
     "dev:client": "vite dev",
     "dev": "mprocs 'bun dev:server' 'bun db:watch' 'bun test:watch' 'bun typecheck:watch' 'bun build:renderer --watch' 'bun build:webviews --watch'",
-    "dev:server": "bun --hot server/index.ts 2>&1 | tee -a ./server.log",
+    "dev:server": "bun --watch server/index.ts 2>&1 | tee -a ./server.log",
     "predev": "run-s db:ensure",
     "prebuild": "rm -fr dist",
     "build:server": "NODE_ENV=production bun scripts/serverBuild.ts",
