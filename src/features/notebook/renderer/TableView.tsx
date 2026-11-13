@@ -3,10 +3,9 @@ import { createSignal, onCleanup, For, Show } from "solid-js";
 import * as S from "effect/Schema";
 import type { SQLResult, SqlValue } from "./types";
 
-/** Safely stringify a cell value, using JSON.stringify for objects */
+/** Encode a SQL cell value as JSON. */
 function stringifyCell(v: SqlValue): string {
-  if (v !== null && Object(v) === v) return JSON.stringify(v);
-  return JSON.stringify(v) ?? "";
+  return S.encodeSync(S.fromJsonString(S.Unknown))(v);
 }
 
 // Inline JSON tree for table cells
@@ -32,7 +31,7 @@ function JSONCell(props: { value: SqlValue }) {
       when={props.value !== null && Object(props.value) === props.value}
       fallback={
         <Show when={props.value !== null} fallback={<span class="json-null">null</span>}>
-          <span class="json-scalar">{JSON.stringify(props.value)}</span>
+          <span class="json-scalar">{S.encodeSync(S.fromJsonString(S.Unknown))(props.value)}</span>
         </Show>
       }
     >

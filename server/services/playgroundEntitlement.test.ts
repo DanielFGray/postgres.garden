@@ -12,6 +12,7 @@ import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
+import * as S from "effect/Schema";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
@@ -174,7 +175,13 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
                   db.connection.insertInto("app_public.playground_commits").values({
                     playground_hash: source,
                     message: "initial",
-                    data: JSON.stringify({ files: [{ path: "a.sql", content: "select 1" }] }),
+                    data: S.encodeSync(
+                      S.fromJsonString(
+                        S.Struct({
+                          files: S.Array(S.Struct({ path: S.String, content: S.String })),
+                        }),
+                      ),
+                    )({ files: [{ path: "a.sql", content: "select 1" }] }),
                   }),
                 ),
               ),

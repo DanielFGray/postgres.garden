@@ -9,6 +9,7 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer } from "effect";
+import * as S from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
@@ -31,7 +32,13 @@ interface CommitResultRow {
 /** Far enough ahead that a seeded session is live for the whole run. */
 const expiry = DateTime.toDate(DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"));
 
-const commitData = (content: string) => JSON.stringify({ files: [{ path: "a.sql", content }] });
+const commitDataSchema = S.fromJsonString(
+  S.Struct({
+    files: S.Array(S.Struct({ path: S.String, content: S.String })),
+  }),
+);
+const commitData = (content: string) =>
+  S.encodeSync(commitDataSchema)({ files: [{ path: "a.sql", content }] });
 
 /**
  * What the handlers call: a save that either starts a playground or adds to
@@ -115,7 +122,7 @@ const updateMetadata = (
           sql<{ hash: string; name: string | null; description: string | null; privacy: string }>`
           app_public.update_playground(
             ${hash},
-            ${JSON.stringify(patch)}::jsonb,
+            ${S.encodeSync(S.fromJsonString(S.Record(S.String, S.NullOr(S.String))))(patch)}::jsonb,
             ${editKeyHash}::bytea
           )`.as("updated"),
         )

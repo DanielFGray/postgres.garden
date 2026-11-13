@@ -3,12 +3,13 @@ import { createHmac } from "node:crypto";
 
 import { expect, layer } from "@effect/vitest";
 import { ConfigProvider, Effect } from "effect";
+import * as S from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { makeTestApi } from "./apiHarness.js";
 
 const secret = "test GitHub webhook secret";
-const body = JSON.stringify({ action: "created" });
+const body = S.encodeSync(S.fromJsonString(S.Struct({ action: S.String })))({ action: "created" });
 
 const api = (webhookSecret?: string) => {
   const environment = { ...process.env };

@@ -8,7 +8,7 @@ import { CurrentSession } from "../../shared/session.js";
 import type { AppPublicPlaygrounds } from "../../generated/db.js";
 import { Secrets } from "../secrets.js";
 import { parseSearchDSL } from "lib/searchDSL.js";
-import type { Privacy } from "../../shared/schemas.js";
+import { Privacy } from "../../shared/schemas.js";
 import { CommitDetail } from "../../shared/api/playgrounds.js";
 
 export interface ListPlaygroundsQuery {
@@ -449,6 +449,15 @@ export class Playgrounds extends Context.Service<Playgrounds>()("postgres-garden
         const patch = Object.fromEntries(
           Object.entries(input).filter(([, value]) => value !== undefined),
         );
+        const patchJson = yield* S.encodeEffect(
+          S.fromJsonString(
+            S.Struct({
+              name: S.optional(S.NullOr(S.String)),
+              description: S.optional(S.NullOr(S.String)),
+              privacy: S.optional(S.NullOr(Privacy)),
+            }),
+          ),
+        )(patch).pipe(Effect.orDie);
 
         return yield* RequestDatabase.use((db) =>
           db.all(
@@ -456,7 +465,7 @@ export class Playgrounds extends Context.Service<Playgrounds>()("postgres-garden
               .selectFrom(
                 sql<Selectable<AppPublicPlaygrounds>>`app_public.update_playground(
                   ${hash},
-                  ${JSON.stringify(patch)}::jsonb,
+                  ${patchJson}::jsonb,
                   ${editKeyHash}::bytea
                 )`.as("updated"),
               )

@@ -49,7 +49,20 @@ const user = {
   updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-const userJson = JSON.stringify({ user });
+const userSchema = S.Struct({
+  user: S.Struct({
+    id: S.String,
+    username: S.String,
+    name: S.String,
+    avatar_url: S.NullOr(S.String),
+    bio: S.String,
+    role: S.String,
+    is_verified: S.Boolean,
+    created_at: S.String,
+    updated_at: S.String,
+  }),
+});
+const userJson = S.encodeSync(S.fromJsonString(userSchema))({ user });
 
 /**
  * Joins a webview's client to the host relay the way a real webview is joined
@@ -150,7 +163,25 @@ it.effect("the server's request joins the trace of the webview call that asked f
 
 it.effect("a PATCH keeps the JSON content type its body would otherwise overwrite", () =>
   Effect.gen(function* () {
-    const { client, request } = yield* connect(() => json(JSON.stringify(user)));
+    const { client, request } = yield* connect(() =>
+      json(
+        S.encodeSync(
+          S.fromJsonString(
+            S.Struct({
+              id: S.String,
+              username: S.String,
+              name: S.String,
+              avatar_url: S.NullOr(S.String),
+              bio: S.String,
+              role: S.String,
+              is_verified: S.Boolean,
+              created_at: S.String,
+              updated_at: S.String,
+            }),
+          ),
+        )(user),
+      ),
+    );
 
     yield* client.apiCall("test", (api) =>
       api.users.patchMe({ payload: { name: "Ada Lovelace" } }),

@@ -59,6 +59,7 @@
           "instanceOfSchema": "warning",
           "newPromise": "warning",
           "nodeBuiltinImport": "warning",
+          "globalJson": "warning",
           "globalJsonInEffect": "warning",
           "processEnv": "warning",
           "processEnvInEffect": "warning",

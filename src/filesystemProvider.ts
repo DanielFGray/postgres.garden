@@ -3,7 +3,7 @@ import {
   RegisteredFileSystemProvider,
   RegisteredMemoryFile,
 } from "@codingame/monaco-vscode-files-service-override";
-import { IStoredWorkspace } from "@codingame/monaco-vscode-configuration-service-override";
+import * as S from "effect/Schema";
 
 export const workspaceFile = monaco.Uri.file("/workspace.code-workspace");
 
@@ -16,29 +16,12 @@ export const fileSystemProvider = new RegisteredFileSystemProvider(false);
 fileSystemProvider.registerFile(
   new RegisteredMemoryFile(
     workspaceFile,
-    JSON.stringify(
-      <IStoredWorkspace>{
-        folders: [
-          {
-            path: "/workspace",
-          },
-        ],
-      },
-      null,
-      2,
-    ),
+    S.encodeSync(S.fromJsonString(S.Struct({ folders: S.Array(S.Struct({ path: S.String })) })))({
+      folders: [
+        {
+          path: "/workspace",
+        },
+      ],
+    }),
   ),
 );
-
-// fileSystemProvider.registerFile(
-//   new RegisteredMemoryFile(
-//     monaco.Uri.file('/workspace/.vscode/extensions.json'),
-//     JSON.stringify(
-//       {
-//         recommendations: ['vscodevim.vim']
-//       },
-//       null,
-//       2
-//     )
-//   )
-// )

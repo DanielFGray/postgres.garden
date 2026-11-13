@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import * as S from "effect/Schema";
 
 import { PgRootDB, type DbHandle } from "../db.js";
 import { randomSuffix } from "../testSupport.js";
@@ -32,6 +33,16 @@ export type SeededCommitData =
     }
   | { readonly files: string };
 
+const SeededCommitDataSchema = S.fromJsonString(
+  S.Union([
+    S.Struct({
+      files: S.Array(S.Struct({ path: S.String, content: S.String })),
+      activeFile: S.optional(S.String),
+    }),
+    S.Struct({ files: S.String }),
+  ]),
+);
+
 /**
  * One commit of `hash`, written as the owner. `createdAt` is explicit, so two
  * commits can share a timestamp or run against their order in the chain.
@@ -56,7 +67,7 @@ export const insertCommit = (
           parent_id: commit.parentId ?? null,
           user_id: commit.userId ?? null,
           message: commit.message,
-          data: JSON.stringify(commit.data),
+          data: S.encodeSync(SeededCommitDataSchema)(commit.data),
           created_at: commit.createdAt,
         })
         .returning("id"),

@@ -32,7 +32,8 @@ export const toErrorMessage = (cause: unknown): string => {
     : undefined;
   if (nestedMessage !== undefined) return nestedMessage;
 
-  return JSON.stringify(cause) ?? String(cause);
+  const json = S.encodeSync(S.fromJsonString(S.Unknown))(cause);
+  return json || String(cause);
 };
 
 /** Normalize an unknown thrown value into an Error, preserving Error instances. */

@@ -320,9 +320,7 @@ const applyEdit = Effect.fnUntraced(function* (
 
 const runSql = (run: AgentRun, params: typeof RunSqlParams.Type) =>
   run.database.exec(params.sql).pipe(
-    Effect.catchTag("PGliteError", (error) =>
-      Effect.fail(new SqlError({ cause: error.cause })),
-    ),
+    Effect.catchTag("PGliteError", (error) => Effect.fail(new SqlError({ cause: error.cause }))),
     Effect.map((results) => {
       const statements = results.map((result) => {
         const rows = truncateRows(result.rows, MAX_SQL_ROWS);
@@ -333,7 +331,10 @@ const runSql = (run: AgentRun, params: typeof RunSqlParams.Type) =>
           truncated: rows.truncated,
         };
       });
-      const text = truncateText(JSON.stringify(statements, null, 2), MAX_TOOL_OUTPUT_CHARS);
+      const text = truncateText(
+        S.encodeSync(S.fromJsonString(S.Unknown))(statements),
+        MAX_TOOL_OUTPUT_CHARS,
+      );
       return withNotice(
         text.text,
         statements.some((statement) => statement.truncated)
