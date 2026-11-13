@@ -62,7 +62,7 @@ test.describe("workbench basics", () => {
     const password = "TestPassword123!";
 
     const response = await testingRegister(request, { username, email, password });
-    expect(response.status()).toBe(302);
+    expect(response.username).toBe(username);
 
     const auth = await openSignInPanel(page);
     await auth.locator('[data-pw="nav-register"]').click({ force: true });

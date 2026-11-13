@@ -37,8 +37,8 @@ export const ApiRoutesLive = Layer.unwrap(
     if (yield* isProduction) return Layer.mergeAll(HttpApiLive, responseHeadersLive);
     // Loaded with import() so production never loads the testing routes; their
     // service also refuses to build in production.
-    const { TestingRoutesLive } = yield* Effect.promise(() => import("./testing.js"));
-    return Layer.mergeAll(HttpApiLive, TestingRoutesLive, responseHeadersLive);
+    const { TestingApiLive } = yield* Effect.promise(() => import("./testing.js"));
+    return Layer.mergeAll(HttpApiLive, TestingApiLive, responseHeadersLive);
   }),
 );
 

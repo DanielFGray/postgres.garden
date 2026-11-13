@@ -473,7 +473,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             const me = yield* http("GET", "/api/me", { cookie });
             const meBody = yield* me.json<{ user: { username: string } | null }>();
 
-            expect(login.status).toBe(302);
+            expect(login.status).toBe(200);
             expect(cookie).toContain("session=");
             expect(me.status).toBe(200);
             expect(meBody.user?.username).toBe(username);
@@ -527,7 +527,7 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Auth API",
             const me = yield* http("GET", "/api/me", { cookie });
             const meBody = yield* me.json<{ user: { username: string } | null }>();
 
-            expect(login.status).toBe(302);
+            expect(login.status).toBe(200);
             expect(me.status).toBe(200);
             expect(meBody.user?.username).toBe(username);
           }),

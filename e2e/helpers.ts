@@ -89,9 +89,11 @@ export async function login(page: Page, payload?: LoginOptions) {
   if (payload?.orgs) params.set("orgs", JSON.stringify(payload.orgs));
 
   const queryString = params.toString();
-  await page.goto(`${BASE_URL}/api/testing/login${queryString ? `?${queryString}` : ""}`, {
-    waitUntil: "domcontentloaded",
-  });
+  const response = await page.request.get(
+    `${BASE_URL}/api/testing/login${queryString ? `?${queryString}` : ""}`,
+  );
+  expect(response.ok()).toBeTruthy();
+  await page.goto(payload?.redirectTo ?? "/", { waitUntil: "domcontentloaded" });
 
   return { username: uniqueUsername };
 }
@@ -105,10 +107,9 @@ export async function testingRegister(
     redirectTo?: string;
   },
 ) {
-  return request.post(`${BASE_URL}/api/testing/register`, {
-    data: payload,
-    maxRedirects: 0,
-  });
+  const response = await request.post(`${BASE_URL}/api/testing/register`, { data: payload });
+  expect(response.ok()).toBeTruthy();
+  return (await response.json()) as { username: string };
 }
 
 // --- Workbench Helpers ---

@@ -7,16 +7,17 @@
  * answers 500 with a fixed body, so internal error text never reaches a test.
  */
 import { Array as Arr, Context, Effect, Layer, Random, Schema as S } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
+import { InternalError } from "../shared/errors.js";
 import { sql } from "kysely";
 import { Redis } from "effect/persistence/Redis";
-import { isProduction, rootUrl } from "./config.js";
+import { isProduction } from "./config.js";
 import type { AppPublicUsers as User } from "../generated/db.js";
 import { Sessions, sessionKeyOf } from "./services/sessions.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
 import { PgRootDB } from "./db.js";
-import { MailCapture } from "../worker/email/mailer.js";
+import { MailCapture, MailMessage } from "../worker/email/mailer.js";
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),
@@ -26,10 +27,6 @@ const UserQuery = S.Struct({
 });
 
 const LoginQuery = S.Struct({ ...UserQuery.fields, redirectTo: S.optional(S.String) });
-
-const MailQuery = S.Struct({ to: S.String });
-
-const UsernameQuery = S.Struct({ username: S.optional(S.String) });
 
 const RegisterBody = S.Struct({
   username: S.String,
@@ -56,11 +53,9 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
     }
     const root = yield* PgRootDB;
     const sessions = yield* Sessions;
-    const cookies = yield* Cookies;
     const redis = yield* Redis;
     const sessionKey = yield* sessionKeyOf;
     const rateLimitPrefix = yield* rateLimitKeyPrefix();
-    const siteUrl = yield* rootUrl;
     const capture = yield* MailCapture;
 
     /**
@@ -98,26 +93,13 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
       return { user, session };
     });
 
-    const sessionRedirect = (
-      session: { readonly token: string; readonly expiresAt: Date },
-      redirectTo: string | undefined,
-    ) => {
-      const target = redirectTo ?? "/";
-      const location = target.startsWith("http")
-        ? target
-        : new URL(target, `${siteUrl}/`).toString();
-      return HttpServerResponse.redirect(location, {
-        headers: { "set-cookie": cookies.sessionHeader(session.token, session.expiresAt) },
-      });
-    };
-
     const deleteKeys = (pattern: string) =>
       redis.send("KEYS", pattern).pipe(
         Effect.flatMap(S.decodeUnknownEffect(S.Array(S.String))),
         Effect.flatMap((keys) => (keys.length > 0 ? redis.send("DEL", ...keys) : Effect.void)),
       );
 
-    const success = HttpServerResponse.jsonUnsafe({ success: true });
+    const success = { success: true as const };
 
     return {
       clearTestUsers: root
@@ -136,7 +118,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
           email: query.email,
           verified: query.verified === "true",
           password: query.password,
-        }).pipe(Effect.map(({ session }) => sessionRedirect(session, query.redirectTo))),
+        }),
 
       register: (body: typeof RegisterBody.Type) =>
         reallyCreateUser({
@@ -144,7 +126,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
           email: body.email,
           verified: false,
           password: body.password,
-        }).pipe(Effect.map(({ session }) => sessionRedirect(session, body.redirectTo))),
+        }),
 
       loginPost: Effect.fn("Testing.loginPost")(function* (body: typeof LoginPostBody.Type) {
         const user = yield* root
@@ -161,7 +143,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
           )
           .pipe(Effect.head);
         const session = yield* sessions.createSession(user.id);
-        return sessionRedirect(session, body.redirectTo);
+        return { user, session };
       }),
 
       createUser: Effect.fn("Testing.createUser")(function* (query: typeof UserQuery.Type) {
@@ -171,7 +153,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
           verified: query.verified === "true",
           password: query.password,
         });
-        return HttpServerResponse.jsonUnsafe({ user });
+        return { user };
       }),
 
       /**
@@ -182,10 +164,8 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
        */
       mailTo: (to: string) =>
         Effect.map(capture.sent, (sent) =>
-          HttpServerResponse.jsonUnsafe(
-            Arr.filter(sent, (mail) =>
-              mail.to.some((address) => address.toLowerCase() === to.toLowerCase()),
-            ),
+          Arr.filter(sent, (mail) =>
+            mail.to.some((address) => address.toLowerCase() === to.toLowerCase()),
           ),
         ),
 
@@ -206,62 +186,149 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
   );
 }
 
-export const TestingRoutesLive = HttpRouter.addAll(
+const successSchema = S.Struct({ success: S.Boolean });
+const UserQuerySchema = S.Struct({
+  username: S.optionalKey(S.String),
+  email: S.optionalKey(S.String),
+  verified: S.optionalKey(S.Literals(["true", "false"])),
+  password: S.optionalKey(S.String),
+});
+const LoginQuerySchema = S.Struct({
+  ...UserQuerySchema.fields,
+  redirectTo: S.optionalKey(S.String),
+});
+const MailQuerySchema = S.Struct({ to: S.String });
+const UsernameQuerySchema = S.Struct({ username: S.optionalKey(S.String) });
+const RegisterBodySchema = S.Struct({
+  username: S.String,
+  password: S.String.check(S.isMinLength(8)),
+  email: S.String.check(S.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)),
+  redirectTo: S.optionalKey(S.String),
+});
+const LoginPostBodySchema = S.Struct({
+  id: S.String,
+  password: S.String,
+  redirectTo: S.optionalKey(S.String),
+});
+const SignedInSchema = S.Struct({ username: S.String });
+const CreatedUserSchema = S.Struct({
+  user: S.Struct({
+    id: S.String,
+    username: S.String,
+    name: S.NullOr(S.String),
+    avatar_url: S.NullOr(S.String),
+    bio: S.String,
+    role: S.Literals(["user", "sponsor", "pro", "admin"]),
+    is_verified: S.Boolean,
+    created_at: S.DateFromString,
+    updated_at: S.DateFromString,
+  }),
+});
+const apiErrors = [InternalError] as const;
+
+const TestingApiGroup = HttpApiGroup.make("TestingApi")
+  .add(
+    HttpApiEndpoint.get("clearTestUsers", "/clearTestUsers", {
+      success: successSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("clearRateLimits", "/clearRateLimits", {
+      success: successSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("createUser", "/createUser", {
+      query: UserQuerySchema,
+      success: CreatedUserSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("mailTo", "/mailTo", {
+      query: MailQuerySchema,
+      success: S.Array(MailMessage),
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("verifyUser", "/verifyUser", {
+      query: UsernameQuerySchema,
+      success: successSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("login", "/login", {
+      query: LoginQuerySchema,
+      success: SignedInSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("register", "/register", {
+      payload: RegisterBodySchema,
+      success: SignedInSchema,
+      error: apiErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("loginPost", "/loginPost", {
+      payload: LoginPostBodySchema,
+      success: SignedInSchema,
+      error: apiErrors,
+    }),
+  );
+export const TestingApi = HttpApi.make("TestingApi").add(TestingApiGroup).prefix("/api/testing");
+export const TestingApiGroupLive = HttpApiBuilder.group(TestingApi, "TestingApi", (handlers) =>
   Effect.gen(function* () {
     const testing = yield* Testing;
-    const searchParams = HttpServerRequest.schemaSearchParams;
-    const body = HttpServerRequest.schemaBodyJson;
-    return [
-      testingRoute("GET", "/clearTestUsers", testing.clearTestUsers),
-      testingRoute("GET", "/clearRateLimits", testing.clearRateLimits),
-      testingRoute("GET", "/login", Effect.flatMap(searchParams(LoginQuery), testing.login)),
-      testingRoute("POST", "/register", Effect.flatMap(body(RegisterBody), testing.register)),
-      testingRoute("POST", "/loginPost", Effect.flatMap(body(LoginPostBody), testing.loginPost)),
-      testingRoute(
-        "GET",
-        "/createUser",
-        Effect.flatMap(searchParams(UserQuery), testing.createUser),
-      ),
-      testingRoute(
-        "GET",
-        "/mailTo",
-        Effect.flatMap(searchParams(MailQuery), ({ to }) => testing.mailTo(to)),
-      ),
-      testingRoute(
-        "GET",
-        "/verifyUser",
-        Effect.flatMap(searchParams(UsernameQuery), ({ username }) =>
-          testing.verifyUser(username ?? "testuser"),
+    const cookies = yield* Cookies;
+    const signedInResult = (signedIn: {
+      readonly username: string;
+      readonly session: { readonly token: string; readonly expiresAt: Date };
+    }) =>
+      cookies
+        .setSession(signedIn.session.token, signedIn.session.expiresAt)
+        .pipe(Effect.as({ username: signedIn.username }));
+    return handlers
+      .handle("clearTestUsers", () => testing.clearTestUsers.pipe(Effect.orDie))
+      .handle("clearRateLimits", () => testing.clearRateLimits.pipe(Effect.orDie))
+      .handle("createUser", ({ query }) => testing.createUser(query).pipe(Effect.orDie))
+      .handle("mailTo", ({ query: { to } }) => testing.mailTo(to))
+      .handle("verifyUser", ({ query }) =>
+        testing.verifyUser(query.username ?? "testuser").pipe(Effect.orDie),
+      )
+      .handle("login", ({ query }) =>
+        testing.login(query).pipe(
+          Effect.orDie,
+          Effect.flatMap(({ user, session }) =>
+            signedInResult({ username: user.username, session }),
+          ),
         ),
-      ),
-    ];
+      )
+      .handle("register", ({ payload }) =>
+        testing.register(payload).pipe(
+          Effect.orDie,
+          Effect.flatMap(({ user, session }) =>
+            signedInResult({ username: user.username, session }),
+          ),
+        ),
+      )
+      .handle("loginPost", ({ payload }) =>
+        testing.loginPost(payload).pipe(
+          Effect.orDie,
+          Effect.flatMap(({ user, session }) =>
+            signedInResult({ username: user.username, session }),
+          ),
+        ),
+      );
   }),
-).pipe(Layer.provide(Testing.layer));
-
-/**
- * Maps a failed route to a response. Schema failures answer 422; anything
- * else is logged and answers 500 with a fixed body.
- */
-function testingRoute<E, R>(
-  method: "GET" | "POST",
-  path: `/${string}`,
-  handler: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-) {
-  return HttpRouter.route(
-    method,
-    `/api/testing${path}`,
-    handler.pipe(
-      Effect.catch((error) =>
-        S.isSchemaError(error)
-          ? Effect.succeed(
-              HttpServerResponse.jsonUnsafe({ error: "Invalid request" }, { status: 422 }),
-            )
-          : Effect.logError(error).pipe(
-              Effect.as(
-                HttpServerResponse.jsonUnsafe({ error: "Internal Server Error" }, { status: 500 }),
-              ),
-            ),
-      ),
-    ),
-  );
-}
+);
+export const TestingApiLive = HttpApiBuilder.layer(TestingApi).pipe(
+  Layer.provide(TestingApiGroupLive),
+  Layer.provide(Testing.layer),
+  Layer.provide(Cookies.layer),
+);
