@@ -1,6 +1,7 @@
 {
   "apiVersion": "server-ansible/v2",
   "name": "postgres-garden",
+  "build": { "memoryMB": 3584 },
   "postgres": [
     {
       "database": "postgres_garden",
