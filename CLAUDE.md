@@ -34,8 +34,11 @@ limits, Valkey, realtime, worker, tests), read how the template does it and do
 the same. Security code and auth SQL will come from `@danielfgray/stompbox`
 (~/build/stompbox); this app does not depend on it yet.
 
-When the template has no pattern for what you need, file a task in
-effect-web-template and ask; do not invent a local one.
+When the template has no pattern for what you need, stop and ask the user
+which way to go: prove the pattern in this app and then port it to the
+template, or design it in effect-web-template first. Either way, file the
+effect-web-template task, and add a `tasks blocks` edge from the task that
+comes first to the one that follows.
 
 ## Code Quality Rules
 
