@@ -31,8 +31,8 @@ Boot sequence starts at `src/loader.tsx`. VSCode service overrides in `src/setup
 The backend follows ~/build/effect-web-template. Before you add or change a
 backend pattern (config, HTTP server, database access, errors, sessions, rate
 limits, Valkey, realtime, worker, tests), read how the template does it and do
-the same. Security code and auth SQL will come from `@danielfgray/stompbox`
-(~/build/stompbox); this app does not depend on it yet.
+the same. The worker and mail come from `@danielfgray/stompbox` (v0.2.0,
+~/build/stompbox). Security code and auth SQL will follow.
 
 When the template has no pattern for what you need, stop and ask the user
 which way to go: prove the pattern in this app and then port it to the

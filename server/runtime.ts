@@ -24,7 +24,8 @@ import { Sessions } from "./services/sessions.js";
 import { Users } from "./services/users.js";
 import { Webhooks } from "./services/webhooks.js";
 import { TracingLayer } from "./tracing.js";
-import { MailCapture, Mailer } from "../worker/email/mailer.js";
+import { Mailer } from "@danielfgray/stompbox/mail";
+import packageJson from "../package.json" with { type: "json" };
 import { Worker } from "../worker/worker.js";
 
 /**
@@ -66,8 +67,8 @@ export const AppLayer = Layer.mergeAll(
   Webhooks.layer,
   PageData.layer,
   Sessions.layer,
-  Mailer.layer,
-).pipe(Layer.provideMerge(Layer.mergeAll(DatabaseLive, MailCapture.layer)));
+  Mailer.layerConfig({ defaultFrom: packageJson.fromEmail }),
+).pipe(Layer.provideMerge(DatabaseLive));
 
 const HttpApiLive = HttpApiHandlers.pipe(
   Layer.provide(SessionMiddlewareLive),

@@ -17,7 +17,7 @@ import { Sessions, sessionKeyOf } from "./services/sessions.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
 import { PgRootDB } from "./db.js";
-import { MailCapture, MailMessage } from "../worker/email/mailer.js";
+import { MailCapture, MailMessage } from "@danielfgray/stompbox/mail";
 
 const UserQuery = S.Struct({
   username: S.optional(S.String),

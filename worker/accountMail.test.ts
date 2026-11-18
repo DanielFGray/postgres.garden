@@ -13,7 +13,7 @@ import {
   ForgotPasswordUnregistered,
   SendVerification,
 } from "./accountMail.js";
-import { QueuedEmail } from "./email/emailDelivery.js";
+import { QueuedEmail } from "./email/mailKinds.js";
 
 /**
  * Each test starts from the SQL that queues a job, runs the job on the payload

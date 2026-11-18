@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import packageJson from "../package.json" with { type: "json" };
 import { rootUrl } from "../server/config.js";
 import { PgRootDB } from "../server/db.js";
-import { QueuedEmail } from "./email/emailDelivery.js";
+import { QueuedEmail } from "./email/mailKinds.js";
 
 /**
  * Turns account events into queued mail. The SQL in `migrations/` queues one
@@ -19,7 +19,7 @@ export class AccountMail extends Context.Service<AccountMail>()("postgres-garden
     const db = yield* PgRootDB;
 
     const queue = (email: QueuedEmail) =>
-      Effect.flatMap(emailJob(email), (statement) => db.all(db.raw(statement)));
+      Effect.flatMap(emailJob(email), (statement) => db.all(db.raw(statement))).pipe(Effect.asVoid);
 
     const userExists = (userId: string) =>
       db.maybe(

@@ -150,6 +150,7 @@
         "@codingame/monaco-vscode-workspace-trust-service-override": "39.0.4",
         "@codingame/monaco-vscode-xml-default-extension": "39.0.4",
         "@codingame/monaco-vscode-yaml-default-extension": "39.0.4",
+        "@danielfgray/stompbox": "github:DanielFGray/effect-stompbox#v0.2.0",
         "@effect/ai-anthropic": "4.1.3",
         "@effect/ai-openai": "4.1.3",
         "@effect/ai-openai-compat": "4.1.3",
@@ -811,6 +812,8 @@
     "@codingame/monaco-vscode-yaml-default-extension": ["@codingame/monaco-vscode-yaml-default-extension@39.0.4", "", { "dependencies": { "@codingame/monaco-vscode-api": "39.0.4" } }, "sha512-yyNwigBhcK/q4MfYOX2TIRwY7ywTcGdjYBiN+vH3shXtFVUs55BrhU4pv3MmxITlRbINjTUZPbvsHPJ3ABnIUA=="],
 
     "@colordx/core": ["@colordx/core@5.8.0", "", {}, "sha512-cG0QJAO6VkaRUlIb0zOzX9gfJgs1pjoOL9gZ/PK1kfvBs0GCkADu5oQh6gPxXgQnZ3gV575h+lQRC0NlMDTclA=="],
+
+    "@danielfgray/stompbox": ["@danielfgray/stompbox@github:DanielFGray/effect-stompbox#fbbc09e", { "peerDependencies": { "@effect/platform-bun": "^4.1.0", "@effect/sql-pg": "^4.1.0", "effect": "^4.1.0", "graphile-worker": "^0.18.0", "html-to-text": "^10.0.1", "kysely": "^0.29.4", "lodash.template": "^4.18.1", "mjml": "^5.4.1", "nodemailer": "^10.5.0" }, "optionalPeers": ["@effect/platform-bun", "@effect/sql-pg", "graphile-worker", "html-to-text", "kysely", "lodash.template", "mjml", "nodemailer"] }, "DanielFGray-effect-stompbox-fbbc09e", "sha512-Icu8nIxv5pHRzWSJ8fgX9r6cKNs8GjZGYwRoRVJQW6e6VFsS6xiP4NMzCKifoUG8aVyUKYOUMQSzf6JxkSVtWA=="],
 
     "@effect/ai-anthropic": ["@effect/ai-anthropic@4.1.3", "", { "peerDependencies": { "effect": "^4.1.3" } }, "sha512-1zKiI05BChOuMqfnLhmAwTuZcM32QWBYp2pjl5CE8gWpdDc524WREwfaYg9PdQsX8ZA3XAxVWyHlmlSl6KWloA=="],
 
