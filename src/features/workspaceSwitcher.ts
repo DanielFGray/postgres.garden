@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { IWorkingCopyService, getService } from "@codingame/monaco-vscode-api";
 import { Context, DateTime, Effect, Layer, Option, pipe } from "effect";
 import * as S from "effect/Schema";
+import { errorMessage } from "@danielfgray/stompbox/http/client";
 import { ApiCaller } from "../httpapi-client";
 import { readInitialData } from "../shared/dehydrate";
 import { toError } from "../shared/errors.js";
@@ -92,11 +93,11 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
               }),
             ).pipe(
               Effect.catch((error) =>
-                error.status === 404
+                error._tag === "NotFound"
                   ? abandonLoad(`Commit not found: ${commitId.substring(0, 8)}`)
                   : Effect.fail(
                       new WorkspaceError({
-                        message: `Failed to fetch workspace: ${error.status} ${error.message}`,
+                        message: `Failed to fetch workspace: ${errorMessage(error)}`,
                       }),
                     ),
               ),
@@ -112,15 +113,15 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
               api.apiPlaygrounds.playgroundByHash({ params: { hash: playgroundHash } }),
             ).pipe(
               Effect.catch((error) => {
-                if (error.status === 404) {
+                if (error._tag === "NotFound") {
                   return abandonLoad(`Playground not found: ${playgroundHash}`);
                 }
-                if (error.status === 401) {
+                if (error._tag === "Unauthorized") {
                   return abandonLoad("You don't have permission to view this playground");
                 }
                 return Effect.fail(
                   new WorkspaceError({
-                    message: `Failed to fetch playground: ${error.status} ${error.message}`,
+                    message: `Failed to fetch playground: ${errorMessage(error)}`,
                   }),
                 );
               }),
@@ -156,7 +157,7 @@ export class WorkspaceSwitcher extends Context.Service<WorkspaceSwitcher>()(
               Effect.mapError(
                 (error) =>
                   new WorkspaceError({
-                    message: `Failed to fetch workspace: ${error.status} ${error.message}`,
+                    message: `Failed to fetch workspace: ${errorMessage(error)}`,
                   }),
               ),
             );

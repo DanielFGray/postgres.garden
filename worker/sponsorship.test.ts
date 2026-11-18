@@ -2,8 +2,9 @@ import { expect, layer } from "@effect/vitest";
 import { Effect, Layer, Schema } from "effect";
 import { sql } from "kysely";
 
-import { type DatabaseError, PgRootDB } from "../server/db.js";
-import { randomSuffix } from "../server/testSupport.js";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
+import { randomSuffix, rawQuery } from "../server/testSupport.js";
 import { Sponsorship, SponsorshipEvent } from "./sponsorship.js";
 
 layer(Layer.provideMerge(Sponsorship.layer, PgRootDB.layer), {
@@ -61,29 +62,30 @@ const withSponsor = <A, E>(
   ) => Effect.Effect<A, E, Sponsorship | PgRootDB>,
 ) =>
   Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const db = queriesOn<DB>(yield* PgRootDB);
     const login = `sponsor_${yield* randomSuffix}`;
     const { id } = yield* db.one(
-      db.raw(sql<{ id: string }>`select id from app_private.really_create_user(
+      Schema.Struct({ id: Schema.String }),
+      rawQuery(sql<{ id: string }>`select id from app_private.really_create_user(
         username => ${login}::citext,
         email => ${`${login}@example.invalid`}::text,
         email_is_verified => true,
         role => ${role}::app_public.user_role
       )`),
     );
-    yield* db.all(
-      db.raw(
-        sql`select app_private.link_or_register_user(${id}::uuid, 'github', ${login}, json_build_object('login', ${login}::text), '{}'::json)`,
+    yield* db.exec(
+      rawQuery(
+        sql`select app_private.link_or_register_user(${id}::uuid, 'github', ${login}, json_build_object('login', ${login}::text), '{}'::json)::text`,
       ),
     );
     const readRole = db
-      .one(db.connection.selectFrom("app_public.users").select("role").where("id", "=", id))
+      .one(Schema.Struct({ role: Schema.String }), (k) =>
+        k.selectFrom("app_public.users").select("role").where("id", "=", id),
+      )
       .pipe(Effect.map((row) => row.role));
     return yield* test(login, readRole).pipe(
       Effect.ensuring(
-        db
-          .all(db.connection.deleteFrom("app_public.users").where("id", "=", id))
-          .pipe(Effect.orDie),
+        db.exec((k) => k.deleteFrom("app_public.users").where("id", "=", id)).pipe(Effect.orDie),
       ),
     );
   });

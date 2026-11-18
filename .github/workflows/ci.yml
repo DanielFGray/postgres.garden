@@ -33,7 +33,6 @@ jobs:
       # deploys without them having run. Adding them means service containers,
       # a generated .env, and the migrations applied first.
 
-
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: check

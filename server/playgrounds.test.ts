@@ -6,10 +6,10 @@ import {
   CreatePlaygroundResult,
   EDIT_KEY_HEADER,
 } from "../shared/api/playgrounds.js";
-import { Conflict } from "../shared/errors.js";
-import { PgRootDB } from "./db.js";
+import { StaleBasis } from "../shared/errors.js";
 import { TestApi } from "./test/apiHarness.js";
 import { dropPlayground } from "./test/playgrounds.js";
+import { withRoot } from "./testSupport.js";
 
 const files = (content: string) => [{ path: "a.sql", content }];
 
@@ -22,7 +22,7 @@ const startPlayground = Effect.gen(function* () {
   );
   const created = yield* HttpClientResponse.schemaBodyJson(CreatePlaygroundResult)(response);
   yield* Effect.addFinalizer(() =>
-    PgRootDB.use((db) => dropPlayground(db, created.playground_hash)).pipe(Effect.orDie),
+    withRoot((db) => dropPlayground(db, created.playground_hash)).pipe(Effect.orDie),
   );
   // A playground with no account is held by its key alone, so one is always answered.
   return {
@@ -57,8 +57,8 @@ layer(TestApi, { excludeTestServices: true, timeout: "30 seconds" })("Playground
 
       const stale = yield* save(created, created.first, "select 3");
       expect(stale.status).toBe(409);
-      const body = yield* HttpClientResponse.schemaBodyJson(Conflict)(stale);
-      expect(body.reason).toBe("stale_basis");
+      const body = yield* HttpClientResponse.schemaBodyJson(StaleBasis)(stale);
+      expect(body._tag).toBe("StaleBasis");
     }).pipe(Effect.scoped),
   );
 });

@@ -21,6 +21,7 @@ import {
   Schema,
   String as Str,
 } from "effect";
+import { errorMessage } from "@danielfgray/stompbox/http/client";
 import { ApiCaller } from "../../httpapi-client";
 import { takeEditKeyFromUrl } from "../../shared/editKey";
 import { toErrorMessage } from "../../shared/errors";
@@ -96,710 +97,720 @@ export const Failed = Schema.TaggedStruct("Failed", {});
 /** How a load of the workspace ended, which `workspaceSwitcher` reports after each load. */
 export const LoadEnded = Schema.Union([Loaded, Kept, Failed]);
 
-export class ServerSync extends Context.Service<ServerSync>()("postgres-garden/service/ServerSync", {
-  make: Effect.gen(function* () {
-    const { api: vscodeApi, withProgress } = yield* VSCode;
-    const { runPromise } = yield* Workbench;
-    const loadedWorkspace = yield* LoadedWorkspace;
-    const { call } = yield* ApiCaller;
-    const saver = yield* PlaygroundSaver;
+export class ServerSync extends Context.Service<ServerSync>()(
+  "postgres-garden/service/ServerSync",
+  {
+    make: Effect.gen(function* () {
+      const { api: vscodeApi, withProgress } = yield* VSCode;
+      const { runPromise } = yield* Workbench;
+      const loadedWorkspace = yield* LoadedWorkspace;
+      const { call } = yield* ApiCaller;
+      const saver = yield* PlaygroundSaver;
 
-    yield* Effect.sync(takeEditKeyFromUrl);
+      yield* Effect.sync(takeEditKeyFromUrl);
 
-    const position = yield* Ref.make<Position>(loading);
-    /** Baseline content by file path. */
-    const baseline = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
-    /** Changed files by URI. */
-    const changed = yield* Ref.make<ReadonlyMap<string, vscode.Uri>>(new Map());
+      const position = yield* Ref.make<Position>(loading);
+      /** Baseline content by file path. */
+      const baseline = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
+      /** Changed files by URI. */
+      const changed = yield* Ref.make<ReadonlyMap<string, vscode.Uri>>(new Map());
 
-    // VS Code reads the baseline and the history views through callbacks
-    // that expect Promises, so those callbacks run in the workbench runtime.
-    const baselineContent = new BaselineContentProvider((path) =>
-      runPromise(
-        Ref.get(baseline).pipe(
-          Effect.map((files) => Option.getOrElse(Option.fromNullishOr(files.get(path)), () => "")),
-        ),
-      ),
-    );
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        vscodeApi.workspace.registerTextDocumentContentProvider(
-          BaselineContentProvider.scheme,
-          baselineContent,
-        ),
-      ),
-      (registration) =>
-        Effect.sync(() => {
-          registration.dispose();
-          baselineContent.dispose();
-        }),
-    );
-
-    const scm = yield* Effect.acquireRelease(
-      Effect.sync(() => {
-        const control = vscodeApi.scm.createSourceControl(
-          "server-sync",
-          "Server Sync",
-          vscodeApi.workspace.workspaceFolders?.[0]?.uri,
-        );
-        control.inputBox.placeholder = "Commit message (optional)";
-        control.acceptInputCommand = {
-          command: SERVER_SYNC_COMMIT,
-          title: "Sync to Server",
-        };
-        control.actionButton = {
-          command: { command: SERVER_SYNC_COMMIT, title: "Sync to Server" },
-          enabled: true,
-        };
-        control.quickDiffProvider = quickDiffProvider;
-        return control;
-      }),
-      (control) => Effect.sync(() => control.dispose()),
-    );
-    const workingTree = yield* Effect.acquireRelease(
-      Effect.sync(() => scm.createResourceGroup("working-tree", "Changes")),
-      (group) => Effect.sync(() => group.dispose()),
-    );
-
-    const findFiles = (exclude?: string) =>
-      Effect.tryPromise({
-        try: () => vscodeApi.workspace.findFiles("**/*", exclude),
-        catch: toServerSyncError,
-      });
-    const workspaceFiles = findFiles("**/node_modules/**");
-
-    const readText = (uri: vscode.Uri) =>
-      Effect.tryPromise({
-        try: () => vscodeApi.workspace.fs.readFile(uri),
-        catch: toServerSyncError,
-      }).pipe(Effect.map((bytes) => new TextDecoder().decode(bytes)));
-
-    /** Reads each of `uris`. A file that cannot be read is logged and left out. */
-    const readFiles = (uris: ReadonlyArray<vscode.Uri>) =>
-      Effect.forEach(uris, (uri) =>
-        readText(uri).pipe(
-          Effect.map((content) => Option.some<WorkspaceFile>({ path: uri.path, content })),
-          Effect.catch((error) =>
-            Effect.logWarning(`[ServerSync] Failed to read file ${uri.path}:`, error).pipe(
-              Effect.as(Option.none<WorkspaceFile>()),
+      // VS Code reads the baseline and the history views through callbacks
+      // that expect Promises, so those callbacks run in the workbench runtime.
+      const baselineContent = new BaselineContentProvider((path) =>
+        runPromise(
+          Ref.get(baseline).pipe(
+            Effect.map((files) =>
+              Option.getOrElse(Option.fromNullishOr(files.get(path)), () => ""),
             ),
-          ),
-        ),
-      ).pipe(Effect.map(Arr.getSomes));
-
-    const showChanges = Ref.get(changed).pipe(
-      Effect.map((files) => {
-        workingTree.resourceStates = Array.from(files.values(), (uri) => ({
-          resourceUri: uri,
-          command: { title: "Open", command: VSCODE_OPEN, arguments: [uri] },
-        }));
-        scm.count = files.size;
-      }),
-    );
-
-    const refreshQuickDiff = workspaceFiles.pipe(
-      Effect.map((uris) => uris.forEach((uri) => baselineContent.refresh(uri))),
-    );
-
-    /** Makes `files` the baseline, so that no file is changed. */
-    const resetBaseline = Effect.fnUntraced(function* (files: ReadonlyArray<WorkspaceFile>) {
-      yield* Ref.set(baseline, new Map(files.map((file) => [file.path, file.content])));
-      yield* Ref.set(changed, new Map());
-      yield* showChanges;
-      yield* refreshQuickDiff;
-    });
-
-    const currentPlayground = Ref.get(position).pipe(
-      Effect.flatMap((current) =>
-        Effect.fromOption(
-          playgroundOf(current),
-          () => new ServerSyncError({ message: "No playground loaded" }),
-        ),
-      ),
-    );
-
-    const listCommits = (hash: string) =>
-      call("apiPlaygrounds.listCommits", (api) =>
-        api.apiPlaygrounds.listCommits({ params: { hash } }),
-      );
-
-    const loadCommitHistory = Effect.gen(function* () {
-      const current = yield* Ref.get(position);
-      const commitId = commitOf(current);
-      return yield* Option.match(playgroundOf(current), {
-        onNone: () =>
-          Effect.log("[ServerSync] No playground loaded, commit history is empty").pipe(
-            Effect.as(Arr.empty<CommitHistoryItem>()),
-          ),
-        onSome: (hash) =>
-          listCommits(hash).pipe(
-            Effect.tap((commits) =>
-              Effect.log(`[ServerSync] Showing ${commits.length} commits for playground ${hash}`),
-            ),
-            Effect.map((commits) =>
-              commits.map((commit): CommitHistoryItem => ({
-                id: commit.id,
-                message: commit.message,
-                timestamp: commit.timestamp,
-                username: Option.fromNullishOr(commit.username),
-                isCurrent: Option.contains(commitId, commit.id),
-              })),
-            ),
-            Effect.catch((error) =>
-              Effect.logError("[ServerSync] Error loading commits:", error).pipe(
-                Effect.as(Arr.empty<CommitHistoryItem>()),
-              ),
-            ),
-          ),
-      });
-    });
-
-    /**
-     * The fork chain that ends at `hash`, oldest first. A playground that
-     * cannot be loaded ends the chain there, keeping the newer forks.
-     */
-    const forkChain = (hash: string, current: string): Effect.Effect<Array<ForkHistoryItem>> =>
-      call("apiPlaygrounds.playgroundByHash", (api) =>
-        api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
-      ).pipe(
-        Effect.flatMap((playground) => {
-          const fork: ForkHistoryItem = {
-            hash: playground.hash,
-            name: playground.name ?? "Untitled",
-            owner: Option.map(Option.fromNullishOr(playground.user), (user) => user.username),
-            isCurrent: playground.hash === current,
-          };
-          return Option.fromNullishOr(playground.fork_of).pipe(
-            Option.flatMapNullishOr((source) => source.hash),
-            Option.match({
-              onNone: () => Effect.succeed([fork]),
-              onSome: (source) =>
-                forkChain(source, current).pipe(Effect.map((older) => [...older, fork])),
-            }),
-          );
-        }),
-        Effect.catch((error) =>
-          Effect.logError("[ServerSync] Error loading fork history:", error).pipe(
-            Effect.as(Arr.empty<ForkHistoryItem>()),
           ),
         ),
       );
-
-    const loadForkHistory = Ref.get(position).pipe(
-      Effect.flatMap((current) =>
-        Option.match(playgroundOf(current), {
-          onNone: () => Effect.succeed(Arr.empty<ForkHistoryItem>()),
-          onSome: (hash) => forkChain(hash, hash),
-        }),
-      ),
-      Effect.tap((chain) => Effect.log(`[ServerSync] Fork history: ${chain.length} items`)),
-    );
-
-    const commitHistory = new ListTreeProvider(() => runPromise(loadCommitHistory), commitTreeItem);
-    const forkHistory = new ListTreeProvider(() => runPromise(loadForkHistory), forkTreeItem);
-    const showTree = <Item>(id: string, provider: ListTreeProvider<Item>) =>
-      Effect.acquireRelease(
+      yield* Effect.acquireRelease(
         Effect.sync(() =>
-          vscodeApi.window.createTreeView(id, {
-            treeDataProvider: provider,
-            showCollapseAll: false,
-          }),
+          vscodeApi.workspace.registerTextDocumentContentProvider(
+            BaselineContentProvider.scheme,
+            baselineContent,
+          ),
         ),
-        (view) =>
+        (registration) =>
           Effect.sync(() => {
-            view.dispose();
-            provider.dispose();
+            registration.dispose();
+            baselineContent.dispose();
           }),
       );
-    yield* showTree(SERVER_SYNC_COMMIT_HISTORY, commitHistory);
-    yield* showTree(SERVER_SYNC_FORK_HISTORY, forkHistory);
 
-    const updateStatusBar = Effect.gen(function* () {
-      const current = yield* Ref.get(position);
-      const commitId = commitOf(current);
-      const commits = yield* Option.match(playgroundOf(current), {
-        onNone: () => Effect.succeedNone,
-        onSome: (hash) =>
-          listCommits(hash).pipe(
-            Effect.asSome,
+      const scm = yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const control = vscodeApi.scm.createSourceControl(
+            "server-sync",
+            "Server Sync",
+            vscodeApi.workspace.workspaceFolders?.[0]?.uri,
+          );
+          control.inputBox.placeholder = "Commit message (optional)";
+          control.acceptInputCommand = {
+            command: SERVER_SYNC_COMMIT,
+            title: "Sync to Server",
+          };
+          control.actionButton = {
+            command: { command: SERVER_SYNC_COMMIT, title: "Sync to Server" },
+            enabled: true,
+          };
+          control.quickDiffProvider = quickDiffProvider;
+          return control;
+        }),
+        (control) => Effect.sync(() => control.dispose()),
+      );
+      const workingTree = yield* Effect.acquireRelease(
+        Effect.sync(() => scm.createResourceGroup("working-tree", "Changes")),
+        (group) => Effect.sync(() => group.dispose()),
+      );
+
+      const findFiles = (exclude?: string) =>
+        Effect.tryPromise({
+          try: () => vscodeApi.workspace.findFiles("**/*", exclude),
+          catch: toServerSyncError,
+        });
+      const workspaceFiles = findFiles("**/node_modules/**");
+
+      const readText = (uri: vscode.Uri) =>
+        Effect.tryPromise({
+          try: () => vscodeApi.workspace.fs.readFile(uri),
+          catch: toServerSyncError,
+        }).pipe(Effect.map((bytes) => new TextDecoder().decode(bytes)));
+
+      /** Reads each of `uris`. A file that cannot be read is logged and left out. */
+      const readFiles = (uris: ReadonlyArray<vscode.Uri>) =>
+        Effect.forEach(uris, (uri) =>
+          readText(uri).pipe(
+            Effect.map((content) => Option.some<WorkspaceFile>({ path: uri.path, content })),
             Effect.catch((error) =>
-              Effect.logWarning(
-                "[ServerSync] Could not load commits for the status bar:",
-                error,
-              ).pipe(Effect.as(Option.none())),
-            ),
-          ),
-      });
-      scm.statusBarCommands = Option.getOrUndefined(
-        Option.map(commits, (list) => [
-          {
-            command: SERVER_SYNC_CHECKOUT_VERSION,
-            title: `↕ Version ${versionOf(list, commitId)}/${list.length}`,
-            tooltip: "Click to checkout another version",
-          },
-        ]),
-      );
-    });
-
-    const showWarning = (message: string, ...actions: Array<string>) =>
-      Effect.tryPromise({
-        try: () => vscodeApi.window.showWarningMessage(message, ...actions),
-        catch: toServerSyncError,
-      });
-
-    /** Reads the workspace and sends it to `target`. None when the workspace holds no files. */
-    const upload = Effect.fnUntraced(function* (
-      message: Option.Option<string>,
-      target: typeof SaveTarget.Type,
-      progress: vscode.Progress<{ message?: string }>,
-    ) {
-      progress.report({ message: "Saving files..." });
-      // Flush unsaved editor buffers, so the scan reads what is on screen.
-      yield* Effect.tryPromise({
-        try: () => vscodeApi.workspace.saveAll(false),
-        catch: toServerSyncError,
-      });
-
-      progress.report({ message: "Scanning files..." });
-      const files = yield* findFiles().pipe(Effect.flatMap(readFiles));
-      yield* Effect.log(`[ServerSync] Scanned workspace: ${files.length} files`);
-      if (files.length === 0) return Option.none();
-
-      progress.report({ message: `Uploading ${files.length} files...` });
-      const now = yield* DateTime.now;
-      const outcome = yield* saver.upload({
-        files,
-        message: message.pipe(
-          Option.orElse(() => Option.liftPredicate(scm.inputBox.value, Str.isNonEmpty)),
-          Option.getOrElse(() => `Workspace snapshot at ${DateTime.formatIso(now)}`),
-        ),
-        activeFile: Option.fromNullishOr(vscodeApi.window.activeTextEditor?.document.uri.path),
-        openPlayground: target.openPlayground,
-        basis: target.basis,
-      });
-      return Option.some({ outcome, files });
-    });
-
-    /** Makes the commit that a save just made the position and the baseline. */
-    const applySaved = Effect.fnUntraced(function* (
-      saved: typeof Saved.Type,
-      files: ReadonlyArray<WorkspaceFile>,
-    ) {
-      const playgroundHash = playgroundOf(yield* Ref.get(position));
-      // A save that moves the workspace to another playground (new or forked)
-      // changes which playground is loaded, though no file changes.
-      if (!Option.contains(playgroundHash, saved.playgroundHash)) {
-        yield* loadedWorkspace.replace(Effect.void);
-        yield* Effect.log(
-          "[ServerSync] Playground changed - updating URL to:",
-          saved.playgroundHash,
-        );
-        // The key stays out of the address bar: session storage holds it.
-        window.history.replaceState(
-          null,
-          "",
-          buildPath({ type: "playground", playgroundHash: saved.playgroundHash }),
-        );
-      }
-      yield* Ref.set(position, afterSave(saved));
-      scm.inputBox.value = "";
-      yield* resetBaseline(files);
-      commitHistory.refresh();
-      forkHistory.refresh();
-      yield* updateStatusBar;
-    });
-
-    /**
-     * Saves the workspace, with `message` or the input box's text as the
-     * commit message. The progress notification closes before a dialog about
-     * the outcome opens, because a dialog waits for an answer.
-     */
-    const commit = Effect.fn("ServerSync.commit")((message: Option.Option<string>) =>
-      saveOnce(message).pipe(Effect.repeat({ while: (again) => again })),
-    );
-
-    /** One save and what follows it. True when the author asked to send the save again. */
-    const saveOnce = (message: Option.Option<string>) =>
-      chooseTarget.pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.succeed(false),
-            onSome: (target) => saveTo(message, target),
-          }),
-        ),
-      );
-
-    const saveTo = Effect.fnUntraced(function* (
-      message: Option.Option<string>,
-      target: typeof SaveTarget.Type,
-    ) {
-      const uploaded = yield* withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "Syncing workspace to server...",
-          cancellable: false,
-        },
-        (progress) => upload(message, target, progress),
-      );
-      return yield* Option.match(uploaded, {
-        onNone: () =>
-          Effect.sync(() => void vscodeApi.window.showWarningMessage("No files to sync")).pipe(
-            Effect.as(false),
-          ),
-        onSome: ({ outcome, files }) =>
-          Match.valueTags(outcome, {
-            Saved: (saved) =>
-              applySaved(saved, files).pipe(
-                Effect.andThen(saver.announce(saved)),
-                Effect.as(false),
-              ),
-            SessionExpired: (expired) => saver.announce(expired).pipe(Effect.as(false)),
-            Stale: () => offerNewestVersion,
-          }),
-      });
-    });
-
-    /**
-     * Where the next save goes. None when nothing loaded and the author chose not
-     * to start a new playground.
-     */
-    const chooseTarget = Effect.gen(function* () {
-      const decision = saveTarget(yield* Ref.get(position));
-      return yield* Match.valueTags(decision, {
-        StillLoading: () =>
-          Effect.fail(
-            new ServerSyncError({
-              message: "The playground is still loading. Save again when its files appear.",
-            }),
-          ),
-        AskNewPlayground: () =>
-          showWarning(
-            "This playground did not load. Save as a new playground?",
-            "Save as New Playground",
-          ).pipe(
-            Effect.map((choice) =>
-              Option.as(
-                Option.liftPredicate(choice, (picked) => picked === "Save as New Playground"),
-                newPlayground,
+              Effect.logWarning(`[ServerSync] Failed to read file ${uri.path}:`, error).pipe(
+                Effect.as(Option.none<WorkspaceFile>()),
               ),
             ),
           ),
-        Save: ({ target }) => Effect.succeedSome(target),
-      });
-    });
+        ).pipe(Effect.map(Arr.getSomes));
 
-    /**
-     * Asks what to do with a save the server refused because someone else saved
-     * after the head this tab last saw. True when the author chose to send it
-     * again on top of the head as it is now.
-     */
-    const offerNewestVersion = Effect.gen(function* () {
-      const hash = yield* currentPlayground;
-      const choice = yield* showWarning(
-        "This playground has a newer version than the one you started from. Reload to see it, which replaces your changes, or save yours as the newest version.",
-        "Reload",
-        "Save as Newest Version",
-      );
-      if (choice === "Reload") {
-        // The playground's own address opens its head, even when the address
-        // bar names an older commit.
-        window.location.assign(buildPath({ type: "playground", playgroundHash: hash }));
-        return false;
-      }
-      if (choice !== "Save as Newest Version") return false;
-      // The author chose to go on top of whatever the head is now, so reading it
-      // here is the answer to the dialog, not a way around the check.
-      const playground = yield* call("apiPlaygrounds.playgroundByHash", (api) =>
-        api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
-      ).pipe(
-        Effect.mapError(
-          (error) =>
-            new ServerSyncError({
-              message: `Failed to read the newest version: ${error.status} ${error.message}`,
-              cause: error,
-            }),
-        ),
-      );
-      yield* Ref.update(position, (current) =>
-        afterNewestHeadRead(current, Option.fromNullishOr(playground.head_commit_id)),
-      );
-      return true;
-    });
-
-    /** Replaces the workspace with the files of `commitId`, which becomes the baseline. */
-    const restore = Effect.fn("ServerSync.restore")(function* (commitId: string) {
-      const confirm = yield* showWarning(
-        "This will restore all files from this commit. Current changes will be overwritten. Continue?",
-        "Restore",
-        "Cancel",
-      );
-      if (confirm !== "Restore") return;
-
-      const hash = yield* currentPlayground;
-      const restored = yield* call("apiPlaygrounds.getCommit", (api) =>
-        api.apiPlaygrounds.getCommit({
-          params: { hash, commit_id: commitId },
+      const showChanges = Ref.get(changed).pipe(
+        Effect.map((files) => {
+          workingTree.resourceStates = Array.from(files.values(), (uri) => ({
+            resourceUri: uri,
+            command: { title: "Open", command: VSCODE_OPEN, arguments: [uri] },
+          }));
+          scm.count = files.size;
         }),
-      ).pipe(
-        Effect.mapError(
-          (error) =>
-            new ServerSyncError({
-              message: `Failed to load commit: ${error.status} ${error.message}`,
-              cause: error,
-            }),
+      );
+
+      const refreshQuickDiff = workspaceFiles.pipe(
+        Effect.map((uris) => uris.forEach((uri) => baselineContent.refresh(uri))),
+      );
+
+      /** Makes `files` the baseline, so that no file is changed. */
+      const resetBaseline = Effect.fnUntraced(function* (files: ReadonlyArray<WorkspaceFile>) {
+        yield* Ref.set(baseline, new Map(files.map((file) => [file.path, file.content])));
+        yield* Ref.set(changed, new Map());
+        yield* showChanges;
+        yield* refreshQuickDiff;
+      });
+
+      const currentPlayground = Ref.get(position).pipe(
+        Effect.flatMap((current) =>
+          Effect.fromOption(
+            playgroundOf(current),
+            () => new ServerSyncError({ message: "No playground loaded" }),
+          ),
         ),
       );
 
-      yield* loadedWorkspace.replace(
-        Effect.gen(function* () {
-          const existing = yield* workspaceFiles;
-          yield* Effect.forEach(existing, (file) =>
-            Effect.tryPromise({
-              try: () => vscodeApi.workspace.fs.delete(file),
-              catch: toServerSyncError,
-            }).pipe(
-              Effect.catch((error) => Effect.logWarning(`Failed to delete ${file.path}:`, error)),
+      const listCommits = (hash: string) =>
+        call("apiPlaygrounds.listCommits", (api) =>
+          api.apiPlaygrounds.listCommits({ params: { hash } }),
+        );
+
+      const loadCommitHistory = Effect.gen(function* () {
+        const current = yield* Ref.get(position);
+        const commitId = commitOf(current);
+        return yield* Option.match(playgroundOf(current), {
+          onNone: () =>
+            Effect.log("[ServerSync] No playground loaded, commit history is empty").pipe(
+              Effect.as(Arr.empty<CommitHistoryItem>()),
             ),
-          );
-          yield* Effect.forEach(restored.files, (file) =>
-            Effect.gen(function* () {
-              const directory = vscode.Uri.file(file.path.substring(0, file.path.lastIndexOf("/")));
-              // A directory that already exists is not a failure here.
-              yield* Effect.tryPromise(() =>
-                vscodeApi.workspace.fs.createDirectory(directory),
-              ).pipe(Effect.ignore);
-              yield* Effect.tryPromise({
-                try: () =>
-                  vscodeApi.workspace.fs.writeFile(
-                    vscode.Uri.file(file.path),
-                    new TextEncoder().encode(file.content),
-                  ),
-                catch: toServerSyncError,
-              });
-            }).pipe(
+          onSome: (hash) =>
+            listCommits(hash).pipe(
+              Effect.tap((commits) =>
+                Effect.log(`[ServerSync] Showing ${commits.length} commits for playground ${hash}`),
+              ),
+              Effect.map((commits) =>
+                commits.map((commit): CommitHistoryItem => ({
+                  id: commit.id,
+                  message: commit.message,
+                  timestamp: commit.timestamp,
+                  username: Option.fromNullishOr(commit.username),
+                  isCurrent: Option.contains(commitId, commit.id),
+                })),
+              ),
               Effect.catch((error) =>
-                Effect.logWarning(`Failed to restore file ${file.path}:`, error),
+                Effect.logError("[ServerSync] Error loading commits:", error).pipe(
+                  Effect.as(Arr.empty<CommitHistoryItem>()),
+                ),
               ),
             ),
-          );
-        }),
+        });
+      });
+
+      /**
+       * The fork chain that ends at `hash`, oldest first. A playground that
+       * cannot be loaded ends the chain there, keeping the newer forks.
+       */
+      const forkChain = (hash: string, current: string): Effect.Effect<Array<ForkHistoryItem>> =>
+        call("apiPlaygrounds.playgroundByHash", (api) =>
+          api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
+        ).pipe(
+          Effect.flatMap((playground) => {
+            const fork: ForkHistoryItem = {
+              hash: playground.hash,
+              name: playground.name ?? "Untitled",
+              owner: Option.map(Option.fromNullishOr(playground.user), (user) => user.username),
+              isCurrent: playground.hash === current,
+            };
+            return Option.fromNullishOr(playground.fork_of).pipe(
+              Option.flatMapNullishOr((source) => source.hash),
+              Option.match({
+                onNone: () => Effect.succeed([fork]),
+                onSome: (source) =>
+                  forkChain(source, current).pipe(Effect.map((older) => [...older, fork])),
+              }),
+            );
+          }),
+          Effect.catch((error) =>
+            Effect.logError("[ServerSync] Error loading fork history:", error).pipe(
+              Effect.as(Arr.empty<ForkHistoryItem>()),
+            ),
+          ),
+        );
+
+      const loadForkHistory = Ref.get(position).pipe(
+        Effect.flatMap((current) =>
+          Option.match(playgroundOf(current), {
+            onNone: () => Effect.succeed(Arr.empty<ForkHistoryItem>()),
+            onSome: (hash) => forkChain(hash, hash),
+          }),
+        ),
+        Effect.tap((chain) => Effect.log(`[ServerSync] Fork history: ${chain.length} items`)),
       );
 
-      void vscodeApi.window.showInformationMessage(
-        `Restored ${restored.files.length} files from commit`,
+      const commitHistory = new ListTreeProvider(
+        () => runPromise(loadCommitHistory),
+        commitTreeItem,
       );
-      yield* Ref.update(position, (current) => afterRestore(current, commitId));
-      yield* resetBaseline(restored.files);
-      commitHistory.refresh();
-    });
-
-    /** Shows one file of `commitId` as a diff against the commit's parent. */
-    const viewCommitDiff = Effect.fn("ServerSync.viewCommitDiff")(function* (commitId: string) {
-      const hash = yield* currentPlayground;
-      const diff = yield* withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: "Loading commit diff...",
-          cancellable: false,
-        },
-        () =>
-          call("apiPlaygrounds.getCommitDiff", (api) =>
-            api.apiPlaygrounds.getCommitDiff({
-              params: { hash, commit_id: commitId },
+      const forkHistory = new ListTreeProvider(() => runPromise(loadForkHistory), forkTreeItem);
+      const showTree = <Item>(id: string, provider: ListTreeProvider<Item>) =>
+        Effect.acquireRelease(
+          Effect.sync(() =>
+            vscodeApi.window.createTreeView(id, {
+              treeDataProvider: provider,
+              showCollapseAll: false,
             }),
           ),
-      ).pipe(
-        Effect.mapError(
-          (error) =>
-            new ServerSyncError({
-              message: `Failed to load commit diff: ${error.status} ${error.message}`,
-              cause: error,
+          (view) =>
+            Effect.sync(() => {
+              view.dispose();
+              provider.dispose();
             }),
-        ),
-      );
-      yield* Effect.log("[ServerSync] Viewing commit diff:", commitId, {
-        added: diff.added.length,
-        modified: diff.modified.length,
-        deleted: diff.deleted.length,
-      });
+        );
+      yield* showTree(SERVER_SYNC_COMMIT_HISTORY, commitHistory);
+      yield* showTree(SERVER_SYNC_FORK_HISTORY, forkHistory);
 
-      const items = diffItems(diff);
-      if (items.length === 0) {
-        void vscodeApi.window.showInformationMessage("No changes in this commit");
-        return;
-      }
-      const selected = yield* Effect.tryPromise({
-        try: () =>
-          vscodeApi.window.showQuickPick(items, {
-            placeHolder: `Select a file to view diff (${items.length} files changed)`,
-            matchOnDescription: true,
-          }),
-        catch: toServerSyncError,
-      });
-      if (selected === undefined) return;
-
-      const { file } = selected;
-      const scheme = "server-sync-commit";
-      yield* Effect.acquireUseRelease(
-        Effect.sync(() =>
-          vscodeApi.workspace.registerTextDocumentContentProvider(scheme, {
-            provideTextDocumentContent: (uri) =>
-              uri.query === "parent" ? file.parentContent : file.content,
-          }),
-        ),
-        () =>
-          Effect.tryPromise({
-            try: () =>
-              vscodeApi.commands.executeCommand(
-                VSCODE_DIFF,
-                vscode.Uri.parse(`${scheme}:${file.path}?parent`),
-                vscode.Uri.parse(`${scheme}:${file.path}?commit`),
-                `${file.path} (Commit ${commitId.substring(0, 8)})`,
+      const updateStatusBar = Effect.gen(function* () {
+        const current = yield* Ref.get(position);
+        const commitId = commitOf(current);
+        const commits = yield* Option.match(playgroundOf(current), {
+          onNone: () => Effect.succeedNone,
+          onSome: (hash) =>
+            listCommits(hash).pipe(
+              Effect.asSome,
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  "[ServerSync] Could not load commits for the status bar:",
+                  error,
+                ).pipe(Effect.as(Option.none())),
               ),
-            catch: toServerSyncError,
-          }),
-        (registration) => Effect.sync(() => registration.dispose()),
-      );
-    });
-
-    /** Lets the user pick a commit of the playground and opens it. */
-    const checkoutVersion = Effect.fn("ServerSync.checkoutVersion")(function* () {
-      const hash = yield* currentPlayground;
-      const commitId = commitOf(yield* Ref.get(position));
-      const commits = yield* listCommits(hash).pipe(
-        Effect.mapError(
-          (error) =>
-            new ServerSyncError({
-              message: "Failed to load commits",
-              cause: error,
-            }),
-        ),
-      );
-      const items = commits.map((commit, index) => ({
-        label: `${Option.contains(commitId, commit.id) ? "✓ " : ""}Version ${versionAt(commits, index)}`,
-        description: commit.message || `Commit ${commit.id.substring(0, 8)}`,
-        detail: `${commit.username ?? "Unknown"} • ${DateTime.formatLocal(DateTime.makeUnsafe(commit.timestamp))}`,
-        commitId: commit.id,
-      }));
-      const selected = yield* Effect.tryPromise({
-        try: () =>
-          vscodeApi.window.showQuickPick(items, {
-            placeHolder: `Select a version to checkout (currently at ${versionOf(commits, commitId)}/${commits.length})`,
-            matchOnDescription: true,
-            matchOnDetail: true,
-          }),
-        catch: toServerSyncError,
+            ),
+        });
+        scm.statusBarCommands = Option.getOrUndefined(
+          Option.map(commits, (list) => [
+            {
+              command: SERVER_SYNC_CHECKOUT_VERSION,
+              title: `↕ Version ${versionOf(list, commitId)}/${list.length}`,
+              tooltip: "Click to checkout another version",
+            },
+          ]),
+        );
       });
-      if (selected === undefined || Option.contains(commitId, selected.commitId)) return;
-      navigateTo(
-        buildPath({
+
+      const showWarning = (message: string, ...actions: Array<string>) =>
+        Effect.tryPromise({
+          try: () => vscodeApi.window.showWarningMessage(message, ...actions),
+          catch: toServerSyncError,
+        });
+
+      /** Reads the workspace and sends it to `target`. None when the workspace holds no files. */
+      const upload = Effect.fnUntraced(function* (
+        message: Option.Option<string>,
+        target: typeof SaveTarget.Type,
+        progress: vscode.Progress<{ message?: string }>,
+      ) {
+        progress.report({ message: "Saving files..." });
+        // Flush unsaved editor buffers, so the scan reads what is on screen.
+        yield* Effect.tryPromise({
+          try: () => vscodeApi.workspace.saveAll(false),
+          catch: toServerSyncError,
+        });
+
+        progress.report({ message: "Scanning files..." });
+        const files = yield* findFiles().pipe(Effect.flatMap(readFiles));
+        yield* Effect.log(`[ServerSync] Scanned workspace: ${files.length} files`);
+        if (files.length === 0) return Option.none();
+
+        progress.report({ message: `Uploading ${files.length} files...` });
+        const now = yield* DateTime.now;
+        const outcome = yield* saver.upload({
+          files,
+          message: message.pipe(
+            Option.orElse(() => Option.liftPredicate(scm.inputBox.value, Str.isNonEmpty)),
+            Option.getOrElse(() => `Workspace snapshot at ${DateTime.formatIso(now)}`),
+          ),
+          activeFile: Option.fromNullishOr(vscodeApi.window.activeTextEditor?.document.uri.path),
+          openPlayground: target.openPlayground,
+          basis: target.basis,
+        });
+        return Option.some({ outcome, files });
+      });
+
+      /** Makes the commit that a save just made the position and the baseline. */
+      const applySaved = Effect.fnUntraced(function* (
+        saved: typeof Saved.Type,
+        files: ReadonlyArray<WorkspaceFile>,
+      ) {
+        const playgroundHash = playgroundOf(yield* Ref.get(position));
+        // A save that moves the workspace to another playground (new or forked)
+        // changes which playground is loaded, though no file changes.
+        if (!Option.contains(playgroundHash, saved.playgroundHash)) {
+          yield* loadedWorkspace.replace(Effect.void);
+          yield* Effect.log(
+            "[ServerSync] Playground changed - updating URL to:",
+            saved.playgroundHash,
+          );
+          // The key stays out of the address bar: session storage holds it.
+          window.history.replaceState(
+            null,
+            "",
+            buildPath({ type: "playground", playgroundHash: saved.playgroundHash }),
+          );
+        }
+        yield* Ref.set(position, afterSave(saved));
+        scm.inputBox.value = "";
+        yield* resetBaseline(files);
+        commitHistory.refresh();
+        forkHistory.refresh();
+        yield* updateStatusBar;
+      });
+
+      /**
+       * Saves the workspace, with `message` or the input box's text as the
+       * commit message. The progress notification closes before a dialog about
+       * the outcome opens, because a dialog waits for an answer.
+       */
+      const commit = Effect.fn("ServerSync.commit")((message: Option.Option<string>) =>
+        saveOnce(message).pipe(Effect.repeat({ while: (again) => again })),
+      );
+
+      /** One save and what follows it. True when the author asked to send the save again. */
+      const saveOnce = (message: Option.Option<string>) =>
+        chooseTarget.pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.succeed(false),
+              onSome: (target) => saveTo(message, target),
+            }),
+          ),
+        );
+
+      const saveTo = Effect.fnUntraced(function* (
+        message: Option.Option<string>,
+        target: typeof SaveTarget.Type,
+      ) {
+        const uploaded = yield* withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Syncing workspace to server...",
+            cancellable: false,
+          },
+          (progress) => upload(message, target, progress),
+        );
+        return yield* Option.match(uploaded, {
+          onNone: () =>
+            Effect.sync(() => void vscodeApi.window.showWarningMessage("No files to sync")).pipe(
+              Effect.as(false),
+            ),
+          onSome: ({ outcome, files }) =>
+            Match.valueTags(outcome, {
+              Saved: (saved) =>
+                applySaved(saved, files).pipe(
+                  Effect.andThen(saver.announce(saved)),
+                  Effect.as(false),
+                ),
+              SessionExpired: (expired) => saver.announce(expired).pipe(Effect.as(false)),
+              Stale: () => offerNewestVersion,
+            }),
+        });
+      });
+
+      /**
+       * Where the next save goes. None when nothing loaded and the author chose not
+       * to start a new playground.
+       */
+      const chooseTarget = Effect.gen(function* () {
+        const decision = saveTarget(yield* Ref.get(position));
+        return yield* Match.valueTags(decision, {
+          StillLoading: () =>
+            Effect.fail(
+              new ServerSyncError({
+                message: "The playground is still loading. Save again when its files appear.",
+              }),
+            ),
+          AskNewPlayground: () =>
+            showWarning(
+              "This playground did not load. Save as a new playground?",
+              "Save as New Playground",
+            ).pipe(
+              Effect.map((choice) =>
+                Option.as(
+                  Option.liftPredicate(choice, (picked) => picked === "Save as New Playground"),
+                  newPlayground,
+                ),
+              ),
+            ),
+          Save: ({ target }) => Effect.succeedSome(target),
+        });
+      });
+
+      /**
+       * Asks what to do with a save the server refused because someone else saved
+       * after the head this tab last saw. True when the author chose to send it
+       * again on top of the head as it is now.
+       */
+      const offerNewestVersion = Effect.gen(function* () {
+        const hash = yield* currentPlayground;
+        const choice = yield* showWarning(
+          "This playground has a newer version than the one you started from. Reload to see it, which replaces your changes, or save yours as the newest version.",
+          "Reload",
+          "Save as Newest Version",
+        );
+        if (choice === "Reload") {
+          // The playground's own address opens its head, even when the address
+          // bar names an older commit.
+          window.location.assign(buildPath({ type: "playground", playgroundHash: hash }));
+          return false;
+        }
+        if (choice !== "Save as Newest Version") return false;
+        // The author chose to go on top of whatever the head is now, so reading it
+        // here is the answer to the dialog, not a way around the check.
+        const playground = yield* call("apiPlaygrounds.playgroundByHash", (api) =>
+          api.apiPlaygrounds.playgroundByHash({ params: { hash } }),
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new ServerSyncError({
+                message: `Failed to read the newest version: ${errorMessage(error)}`,
+                cause: error,
+              }),
+          ),
+        );
+        yield* Ref.update(position, (current) =>
+          afterNewestHeadRead(current, Option.fromNullishOr(playground.head_commit_id)),
+        );
+        return true;
+      });
+
+      /** Replaces the workspace with the files of `commitId`, which becomes the baseline. */
+      const restore = Effect.fn("ServerSync.restore")(function* (commitId: string) {
+        const confirm = yield* showWarning(
+          "This will restore all files from this commit. Current changes will be overwritten. Continue?",
+          "Restore",
+          "Cancel",
+        );
+        if (confirm !== "Restore") return;
+
+        const hash = yield* currentPlayground;
+        const restored = yield* call("apiPlaygrounds.getCommit", (api) =>
+          api.apiPlaygrounds.getCommit({
+            params: { hash, commit_id: commitId },
+          }),
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new ServerSyncError({
+                message: `Failed to load commit: ${errorMessage(error)}`,
+                cause: error,
+              }),
+          ),
+        );
+
+        yield* loadedWorkspace.replace(
+          Effect.gen(function* () {
+            const existing = yield* workspaceFiles;
+            yield* Effect.forEach(existing, (file) =>
+              Effect.tryPromise({
+                try: () => vscodeApi.workspace.fs.delete(file),
+                catch: toServerSyncError,
+              }).pipe(
+                Effect.catch((error) => Effect.logWarning(`Failed to delete ${file.path}:`, error)),
+              ),
+            );
+            yield* Effect.forEach(restored.files, (file) =>
+              Effect.gen(function* () {
+                const directory = vscode.Uri.file(
+                  file.path.substring(0, file.path.lastIndexOf("/")),
+                );
+                // A directory that already exists is not a failure here.
+                yield* Effect.tryPromise(() =>
+                  vscodeApi.workspace.fs.createDirectory(directory),
+                ).pipe(Effect.ignore);
+                yield* Effect.tryPromise({
+                  try: () =>
+                    vscodeApi.workspace.fs.writeFile(
+                      vscode.Uri.file(file.path),
+                      new TextEncoder().encode(file.content),
+                    ),
+                  catch: toServerSyncError,
+                });
+              }).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning(`Failed to restore file ${file.path}:`, error),
+                ),
+              ),
+            );
+          }),
+        );
+
+        void vscodeApi.window.showInformationMessage(
+          `Restored ${restored.files.length} files from commit`,
+        );
+        yield* Ref.update(position, (current) => afterRestore(current, commitId));
+        yield* resetBaseline(restored.files);
+        commitHistory.refresh();
+      });
+
+      /** Shows one file of `commitId` as a diff against the commit's parent. */
+      const viewCommitDiff = Effect.fn("ServerSync.viewCommitDiff")(function* (commitId: string) {
+        const hash = yield* currentPlayground;
+        const diff = yield* withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Loading commit diff...",
+            cancellable: false,
+          },
+          () =>
+            call("apiPlaygrounds.getCommitDiff", (api) =>
+              api.apiPlaygrounds.getCommitDiff({
+                params: { hash, commit_id: commitId },
+              }),
+            ),
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new ServerSyncError({
+                message: `Failed to load commit diff: ${errorMessage(error)}`,
+                cause: error,
+              }),
+          ),
+        );
+        yield* Effect.log("[ServerSync] Viewing commit diff:", commitId, {
+          added: diff.added.length,
+          modified: diff.modified.length,
+          deleted: diff.deleted.length,
+        });
+
+        const items = diffItems(diff);
+        if (items.length === 0) {
+          void vscodeApi.window.showInformationMessage("No changes in this commit");
+          return;
+        }
+        const selected = yield* Effect.tryPromise({
+          try: () =>
+            vscodeApi.window.showQuickPick(items, {
+              placeHolder: `Select a file to view diff (${items.length} files changed)`,
+              matchOnDescription: true,
+            }),
+          catch: toServerSyncError,
+        });
+        if (selected === undefined) return;
+
+        const { file } = selected;
+        const scheme = "server-sync-commit";
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() =>
+            vscodeApi.workspace.registerTextDocumentContentProvider(scheme, {
+              provideTextDocumentContent: (uri) =>
+                uri.query === "parent" ? file.parentContent : file.content,
+            }),
+          ),
+          () =>
+            Effect.tryPromise({
+              try: () =>
+                vscodeApi.commands.executeCommand(
+                  VSCODE_DIFF,
+                  vscode.Uri.parse(`${scheme}:${file.path}?parent`),
+                  vscode.Uri.parse(`${scheme}:${file.path}?commit`),
+                  `${file.path} (Commit ${commitId.substring(0, 8)})`,
+                ),
+              catch: toServerSyncError,
+            }),
+          (registration) => Effect.sync(() => registration.dispose()),
+        );
+      });
+
+      /** Lets the user pick a commit of the playground and opens it. */
+      const checkoutVersion = Effect.fn("ServerSync.checkoutVersion")(function* () {
+        const hash = yield* currentPlayground;
+        const commitId = commitOf(yield* Ref.get(position));
+        const commits = yield* listCommits(hash).pipe(
+          Effect.mapError(
+            (error) =>
+              new ServerSyncError({
+                message: "Failed to load commits",
+                cause: error,
+              }),
+          ),
+        );
+        const items = commits.map((commit, index) => ({
+          label: `${Option.contains(commitId, commit.id) ? "✓ " : ""}Version ${versionAt(commits, index)}`,
+          description: commit.message || `Commit ${commit.id.substring(0, 8)}`,
+          detail: `${commit.username ?? "Unknown"} • ${DateTime.formatLocal(DateTime.makeUnsafe(commit.timestamp))}`,
+          commitId: commit.id,
+        }));
+        const selected = yield* Effect.tryPromise({
+          try: () =>
+            vscodeApi.window.showQuickPick(items, {
+              placeHolder: `Select a version to checkout (currently at ${versionOf(commits, commitId)}/${commits.length})`,
+              matchOnDescription: true,
+              matchOnDetail: true,
+            }),
+          catch: toServerSyncError,
+        });
+        if (selected === undefined || Option.contains(commitId, selected.commitId)) return;
+        navigateTo(
+          buildPath({
+            type: "commit",
+            playgroundHash: hash,
+            commitId: selected.commitId,
+          }),
+        );
+      });
+
+      /** Opens `commitId` of the playground the workspace holds, through the router. */
+      const openCommit = Effect.fn("ServerSync.openCommit")(function* (commitId: string) {
+        const hash = yield* currentPlayground;
+        const path = buildPath({
           type: "commit",
           playgroundHash: hash,
-          commitId: selected.commitId,
-        }),
-      );
-    });
-
-    /** Opens `commitId` of the playground the workspace holds, through the router. */
-    const openCommit = Effect.fn("ServerSync.openCommit")(function* (commitId: string) {
-      const hash = yield* currentPlayground;
-      const path = buildPath({
-        type: "commit",
-        playgroundHash: hash,
-        commitId,
+          commitId,
+        });
+        yield* Effect.log("[ServerSync] Navigating to commit URL:", path);
+        navigateTo(path);
       });
-      yield* Effect.log("[ServerSync] Navigating to commit URL:", path);
-      navigateTo(path);
-    });
 
-    /** Opens the playground `hash`, which a fork history item names, through the router. */
-    const openFork = Effect.fn("ServerSync.openFork")(function* (hash: string) {
-      const path = buildPath({ type: "playground", playgroundHash: hash });
-      yield* Effect.log("[ServerSync] Opening fork source:", path);
-      navigateTo(path);
-    });
-
-    /**
-     * Moves the position to where the load ended, and sets the baseline. Loaded
-     * files are not changes, even when no commit holds them: the author has not
-     * edited them yet. Kept files stay on the baseline they opened with. After
-     * a failed load no commit is behind the files on screen, so all of them
-     * are changes, as they would be in a new playground.
-     */
-    const loadEnded = Effect.fn("ServerSync.loadEnded")(function* (ended: typeof LoadEnded.Type) {
-      yield* Effect.log("[ServerSync] Load ended:", ended._tag);
-      yield* Match.valueTags(ended, {
-        Loaded: ({ files, playground }) =>
-          Ref.set(position, afterLoad(playground)).pipe(Effect.andThen(resetBaseline(files))),
-        Kept: () => Ref.set(position, afterLoad(Option.none())),
-        Failed: () => Ref.set(position, loadFailed).pipe(Effect.andThen(resetBaseline([]))),
+      /** Opens the playground `hash`, which a fork history item names, through the router. */
+      const openFork = Effect.fn("ServerSync.openFork")(function* (hash: string) {
+        const path = buildPath({ type: "playground", playgroundHash: hash });
+        yield* Effect.log("[ServerSync] Opening fork source:", path);
+        navigateTo(path);
       });
-      commitHistory.refresh();
-      forkHistory.refresh();
-      yield* updateStatusBar;
-    });
 
-    /** Adds `uri` to the changed files, or removes it, by comparing it with the baseline. */
-    const markChanged = Effect.fn("ServerSync.markChanged")(function* (uri: vscode.Uri) {
-      // Other documents, such as the baseline's own, are not workspace files.
-      if (uri.scheme !== "file") return;
-
-      // A file that cannot be read counts as absent: deleted when the
-      // baseline holds it, unchanged when it does not.
-      const content = yield* Effect.option(readText(uri));
-      const original = Option.fromNullishOr((yield* Ref.get(baseline)).get(uri.path));
-      const isChanged = !Equal.equals(content, original);
-
-      const key = uri.toString();
-      const moved = yield* Ref.modify(changed, (files) => {
-        if (files.has(key) === isChanged) return [false, files];
-        const next = new Map(files);
-        if (isChanged) next.set(key, uri);
-        else next.delete(key);
-        return [true, next];
+      /**
+       * Moves the position to where the load ended, and sets the baseline. Loaded
+       * files are not changes, even when no commit holds them: the author has not
+       * edited them yet. Kept files stay on the baseline they opened with. After
+       * a failed load no commit is behind the files on screen, so all of them
+       * are changes, as they would be in a new playground.
+       */
+      const loadEnded = Effect.fn("ServerSync.loadEnded")(function* (ended: typeof LoadEnded.Type) {
+        yield* Effect.log("[ServerSync] Load ended:", ended._tag);
+        yield* Match.valueTags(ended, {
+          Loaded: ({ files, playground }) =>
+            Ref.set(position, afterLoad(playground)).pipe(Effect.andThen(resetBaseline(files))),
+          Kept: () => Ref.set(position, afterLoad(Option.none())),
+          Failed: () => Ref.set(position, loadFailed).pipe(Effect.andThen(resetBaseline([]))),
+        });
+        commitHistory.refresh();
+        forkHistory.refresh();
+        yield* updateStatusBar;
       });
-      if (!moved) return;
 
+      /** Adds `uri` to the changed files, or removes it, by comparing it with the baseline. */
+      const markChanged = Effect.fn("ServerSync.markChanged")(function* (uri: vscode.Uri) {
+        // Other documents, such as the baseline's own, are not workspace files.
+        if (uri.scheme !== "file") return;
+
+        // A file that cannot be read counts as absent: deleted when the
+        // baseline holds it, unchanged when it does not.
+        const content = yield* Effect.option(readText(uri));
+        const original = Option.fromNullishOr((yield* Ref.get(baseline)).get(uri.path));
+        const isChanged = !Equal.equals(content, original);
+
+        const key = uri.toString();
+        const moved = yield* Ref.modify(changed, (files) => {
+          if (files.has(key) === isChanged) return [false, files];
+          const next = new Map(files);
+          if (isChanged) next.set(key, uri);
+          else next.delete(key);
+          return [true, next];
+        });
+        if (!moved) return;
+
+        yield* showChanges;
+        const what = !isChanged
+          ? "File reverted to baseline"
+          : Option.isSome(content)
+            ? "File changed"
+            : "File deleted";
+        yield* Effect.log(`[ServerSync] ${what}: ${uri.path}`);
+      });
+
+      /** Offers to reload the page, which loads the workspace from the server again. */
+      const offerReload = Effect.gen(function* () {
+        const choice = yield* Effect.tryPromise({
+          try: () =>
+            vscodeApi.window.showInformationMessage("Reloading workspace from server...", "Reload"),
+          catch: toServerSyncError,
+        });
+        if (choice === "Reload") window.location.reload();
+      });
+
+      // Until a load names a commit, the workspace as it opened is the
+      // baseline, the way a fresh clone has no changes.
+      const initial = yield* workspaceFiles.pipe(Effect.flatMap(readFiles));
+      yield* Ref.set(baseline, new Map(initial.map((file) => [file.path, file.content])));
       yield* showChanges;
-      const what = !isChanged
-        ? "File reverted to baseline"
-        : Option.isSome(content)
-          ? "File changed"
-          : "File deleted";
-      yield* Effect.log(`[ServerSync] ${what}: ${uri.path}`);
-    });
 
-    /** Offers to reload the page, which loads the workspace from the server again. */
-    const offerReload = Effect.gen(function* () {
-      const choice = yield* Effect.tryPromise({
-        try: () =>
-          vscodeApi.window.showInformationMessage("Reloading workspace from server...", "Reload"),
-        catch: toServerSyncError,
-      });
-      if (choice === "Reload") window.location.reload();
-    });
-
-    // Until a load names a commit, the workspace as it opened is the
-    // baseline, the way a fresh clone has no changes.
-    const initial = yield* workspaceFiles.pipe(Effect.flatMap(readFiles));
-    yield* Ref.set(baseline, new Map(initial.map((file) => [file.path, file.content])));
-    yield* showChanges;
-
-    return {
-      commit,
-      restore,
-      viewCommitDiff,
-      checkoutVersion,
-      openCommit,
-      openFork,
-      loadEnded,
-      markChanged,
-      offerReload,
-      refreshCommitHistory: Effect.sync(() => commitHistory.refresh()),
-      refreshForkHistory: Effect.sync(() => forkHistory.refresh()),
-    };
-  }),
-}) {
+      return {
+        commit,
+        restore,
+        viewCommitDiff,
+        checkoutVersion,
+        openCommit,
+        openFork,
+        loadEnded,
+        markChanged,
+        offerReload,
+        refreshCommitHistory: Effect.sync(() => commitHistory.refresh()),
+        refreshForkHistory: Effect.sync(() => forkHistory.refresh()),
+      };
+    }),
+  },
+) {
   static readonly layer = Layer.effect(this, this.make);
 }
 

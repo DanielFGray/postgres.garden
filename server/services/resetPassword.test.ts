@@ -1,8 +1,8 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Schema as S } from "effect";
 import { sql } from "kysely";
-import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
-import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { DatabaseLive, PgRootDB, queriesOn, type DB, type Queries } from "../db.js";
+import { createUser, deleteUser, randomSuffix, rawQuery } from "../testSupport.js";
 
 /**
  * Each test asks for a reset through `app_public.forgot_password`, as the app
@@ -16,7 +16,7 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("accepts the mailed token alone, once, and stores only its hash", () =>
       withPendingReset("reset_valid", ({ user, token }) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
+          const db = queriesOn<DB>(yield* PgRootDB);
           const pending = yield* userSecrets(db, user.id);
           expect(pending.reset_password_token_hash).toBe(yield* sha256(db, token));
 
@@ -33,7 +33,7 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("rejects a token that matches no pending reset", () =>
       withPendingReset("reset_guess", ({ user, token }) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
+          const db = queriesOn<DB>(yield* PgRootDB);
           const before = yield* userSecrets(db, user.id);
           const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
 
@@ -47,9 +47,9 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("rejects the mailed token once it is older than 1 hour", () =>
       withPendingReset("reset_expired", ({ user, token }) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
-          yield* db.all(
-            db.connection
+          const db = queriesOn<DB>(yield* PgRootDB);
+          yield* db.exec((k) =>
+            k
               .updateTable("app_private.user_secrets")
               .set({ reset_password_token_generated: sql`now() - interval '1 hour 1 minute'` })
               .where("user_id", "=", user.id),
@@ -75,20 +75,23 @@ const withPendingReset = <A, E, R>(
   test: (pending: { user: { id: string }; token: string }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const db = queriesOn<DB>(yield* PgRootDB);
     const username = `${name}_${yield* randomSuffix}`;
     const email = `${username}@example.com`;
     const user = yield* createUser(db, username);
     const cleanUp = Effect.all([
-      db.all(
-        db.raw(sql`delete from graphile_worker._private_jobs where payload->>'email' = ${email}`),
+      db.exec(
+        rawQuery(sql`delete from graphile_worker._private_jobs where payload->>'email' = ${email}`),
       ),
       deleteUser(db, user.id),
     ]).pipe(Effect.orDie);
     return yield* Effect.gen(function* () {
-      yield* db.all(db.raw(sql`select app_public.forgot_password(${email}::citext)`));
+      yield* db.exec((k) =>
+        k.selectNoFrom(sql<unknown>`app_public.forgot_password(${email}::citext)`.as("r")),
+      );
       const { token } = yield* db.one(
-        db.raw(sql<{ token: string }>`
+        S.Struct({ token: S.String }),
+        rawQuery(sql<{ token: string }>`
           select j.payload->>'token' as token
           from graphile_worker._private_jobs j
           join graphile_worker._private_tasks t on t.id = j.task_id
@@ -98,24 +101,45 @@ const withPendingReset = <A, E, R>(
     }).pipe(Effect.ensuring(cleanUp));
   });
 
-const userSecrets = (db: DbHandle, userId: string) =>
-  db.one(
-    db.connection.selectFrom("app_private.user_secrets").selectAll().where("user_id", "=", userId),
+const SecretsRow = S.Struct({
+  password_hash: S.NullOr(S.String),
+  failed_reset_password_attempts: S.Finite,
+  reset_password_token_hash: S.NullOr(S.String),
+  reset_password_token_generated: S.NullOr(S.Date),
+});
+
+const userSecrets = (db: Queries<DB>, userId: string) =>
+  db.one(SecretsRow, (k) =>
+    k
+      .selectFrom("app_private.user_secrets")
+      .select([
+        "password_hash",
+        "failed_reset_password_attempts",
+        "reset_password_token_hash",
+        "reset_password_token_generated",
+      ])
+      .where("user_id", "=", userId),
   );
 
-const sha256 = (db: DbHandle, token: string) =>
+const sha256 = (db: Queries<DB>, token: string) =>
   db
     .one(
-      db.raw(sql<{ hash: string }>`select encode(sha256(decode(${token}, 'hex')), 'hex') as hash`),
+      S.Struct({ hash: S.String }),
+      rawQuery(
+        sql<{ hash: string }>`select encode(sha256(decode(${token}, 'hex')), 'hex') as hash`,
+      ),
     )
     .pipe(Effect.map((row) => row.hash));
 
-const resetPassword = (db: DbHandle, token: string) =>
+const resetPassword = (db: Queries<DB>, token: string) =>
   db
-    .one(
-      db.connection.selectNoFrom((eb) =>
+    .one(S.Struct({ reset_password: S.NullOr(S.Boolean) }), (k) =>
+      k.selectNoFrom((eb) =>
         eb
-          .fn<boolean>("app_private.reset_password", [eb.val(token), eb.val("NewPassword123!")])
+          .fn<boolean | null>("app_private.reset_password", [
+            eb.val(token),
+            eb.val("NewPassword123!"),
+          ])
           .as("reset_password"),
       ),
     )

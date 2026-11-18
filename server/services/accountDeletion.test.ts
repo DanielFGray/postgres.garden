@@ -1,8 +1,10 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Option } from "effect";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import type { ServiceUnavailable } from "@danielfgray/stompbox/http";
+import { Effect, Option, Schema as S } from "effect";
 import { sql } from "kysely";
-import { DatabaseLive, PgRootDB, type DbHandle } from "../db.js";
-import { asUser, createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { DatabaseLive, PgRootDB, queriesOn, type DB, type Queries } from "../db.js";
+import { asUser, createUser, deleteUser, randomSuffix, rawQuery } from "../testSupport.js";
 
 /**
  * Each test asks for the deletion as the signed-in user, as the account
@@ -16,7 +18,7 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("deletes the account with the mailed token, and stores only its hash", () =>
       withUsers("delete_valid", ([user]) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
+          const db = queriesOn<DB>(yield* PgRootDB);
           const token = yield* requestDeletion(db, user);
           expect((yield* userSecrets(db, user.id)).delete_account_token_hash).toBe(
             yield* sha256(db, token),
@@ -31,7 +33,7 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("refuses a wrong token, and another account's token", () =>
       withUsers("delete_refused", ([owner, other]) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
+          const db = queriesOn<DB>(yield* PgRootDB);
           const token = yield* requestDeletion(db, owner);
           const guess = token.replace(/^./, (digit) => (digit === "0" ? "1" : "0"));
 
@@ -50,10 +52,10 @@ layer(DatabaseLive, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("refuses the mailed token once it is older than 1 hour", () =>
       withUsers("delete_expired", ([user]) =>
         Effect.gen(function* () {
-          const db = yield* PgRootDB;
+          const db = queriesOn<DB>(yield* PgRootDB);
           const token = yield* requestDeletion(db, user);
-          yield* db.all(
-            db.connection
+          yield* db.exec((k) =>
+            k
               .updateTable("app_private.user_secrets")
               .set({ delete_account_token_generated: sql`now() - interval '1 hour 1 minute'` })
               .where("user_id", "=", user.id),
@@ -78,7 +80,7 @@ const withUsers = <A, E, R>(
   test: (users: readonly [TestUser, TestUser]) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const db = queriesOn<DB>(yield* PgRootDB);
     const suffix = yield* randomSuffix;
     const make = (role: string) =>
       createUser(db, `${name}_${role}_${suffix}`).pipe(
@@ -87,8 +89,8 @@ const withUsers = <A, E, R>(
     const users = [yield* make("owner"), yield* make("other")] as const;
     const cleanUp = Effect.forEach(users, (user) =>
       Effect.all([
-        db.all(
-          db.raw(
+        db.exec(
+          rawQuery(
             sql`delete from graphile_worker._private_jobs where payload->>'email' = ${user.email}`,
           ),
         ),
@@ -99,13 +101,16 @@ const withUsers = <A, E, R>(
   });
 
 /** Asks for the deletion as `user`, and returns the token its mail job carries. */
-const requestDeletion = (db: DbHandle, user: TestUser) =>
+const requestDeletion = (db: Queries<DB>, user: TestUser) =>
   asUser(db, user.id, (visitor) =>
-    visitor.all(visitor.raw(sql`select app_public.request_account_deletion()`)),
+    visitor.exec((k) =>
+      k.selectNoFrom(sql<unknown>`app_public.request_account_deletion()`.as("r")),
+    ),
   ).pipe(
     Effect.andThen(
       db.one(
-        db.raw(sql<{ token: string }>`
+        S.Struct({ token: S.String }),
+        rawQuery(sql<{ token: string }>`
           select j.payload->>'token' as token
           from graphile_worker._private_jobs j
           join graphile_worker._private_tasks t on t.id = j.task_id
@@ -116,36 +121,43 @@ const requestDeletion = (db: DbHandle, user: TestUser) =>
     Effect.map((row) => row.token),
   );
 
-const confirmDeletion = (db: DbHandle, userId: string, token: string) =>
+const confirmDeletion = (db: Queries<DB>, userId: string, token: string) =>
   asUser(db, userId, (visitor) =>
-    visitor.one(
-      visitor.raw(
-        sql<{ deleted: boolean }>`select app_public.confirm_account_deletion(${token}) as deleted`,
-      ),
+    visitor.one(S.Struct({ deleted: S.Boolean }), (k) =>
+      k.selectNoFrom(sql<boolean>`app_public.confirm_account_deletion(${token})`.as("deleted")),
     ),
   ).pipe(Effect.map((row) => row.deleted));
 
 /** The SQLSTATE `effect` failed with. */
-const refusal = <A, R>(
-  effect: Effect.Effect<A, { readonly report: Option.Option<{ readonly code: string }> }, R>,
-) =>
-  Effect.flip(effect).pipe(
+const refusal = <A, R>(effect: Effect.Effect<A, DatabaseError | ServiceUnavailable, R>) =>
+  effect.pipe(
+    // A misconfigured visitor role is a fault of the test setup, not a refusal.
+    Effect.catchTag("ServiceUnavailable", Effect.die),
+    Effect.flip,
     Effect.map((error) => Option.map(error.report, (report) => report.code)),
   );
 
-const userExists = (db: DbHandle, userId: string) =>
+const userExists = (db: Queries<DB>, userId: string) =>
   db
-    .maybe(db.connection.selectFrom("app_public.users").select("id").where("id", "=", userId))
+    .maybe(S.Struct({ id: S.String }), (k) =>
+      k.selectFrom("app_public.users").select("id").where("id", "=", userId),
+    )
     .pipe(Effect.map(Option.isSome));
 
-const userSecrets = (db: DbHandle, userId: string) =>
-  db.one(
-    db.connection.selectFrom("app_private.user_secrets").selectAll().where("user_id", "=", userId),
+const userSecrets = (db: Queries<DB>, userId: string) =>
+  db.one(S.Struct({ delete_account_token_hash: S.NullOr(S.String) }), (k) =>
+    k
+      .selectFrom("app_private.user_secrets")
+      .select("delete_account_token_hash")
+      .where("user_id", "=", userId),
   );
 
-const sha256 = (db: DbHandle, token: string) =>
+const sha256 = (db: Queries<DB>, token: string) =>
   db
     .one(
-      db.raw(sql<{ hash: string }>`select encode(sha256(decode(${token}, 'hex')), 'hex') as hash`),
+      S.Struct({ hash: S.String }),
+      rawQuery(
+        sql<{ hash: string }>`select encode(sha256(decode(${token}, 'hex')), 'hex') as hash`,
+      ),
     )
     .pipe(Effect.map((row) => row.hash));

@@ -14,13 +14,13 @@ rule:
     kind: member_expression
     has:
       field: property
-      regex: '^run(Promise|Sync|Fork|Callback|Main)(Exit|With)?$'
+      regex: "^run(Promise|Sync|Fork|Callback|Main)(Exit|With)?$"
   not:
     inside:
       stopBy: end
       kind: program
       has:
         kind: comment
-        regex: '@entrypoint'
+        regex: "@entrypoint"
 ignores:
-  - 'scripts/**'
+  - "scripts/**"

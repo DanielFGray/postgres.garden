@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { NotFound } from "../../shared/errors.js";
-import { toHttpError } from "../databaseErrors.js";
+import { NotFound } from "@danielfgray/stompbox/http";
 import { editKeyFrom, requireSession } from "./http.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
@@ -16,13 +15,8 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
       const playgrounds = yield* Playgrounds;
       return handlers.handleAll({
         userPlaygrounds: ({ params, query }) =>
-          playgrounds
-            .listForUser(params.username, query)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError)),
-        playgrounds: ({ query }) =>
-          playgrounds
-            .list(query)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError)),
+          playgrounds.listForUser(params.username, query).pipe(withAuthContext),
+        playgrounds: ({ query }) => playgrounds.list(query).pipe(withAuthContext),
         // A caller with no account may start a playground. The answer then carries
         // the key that holds it, which is the only time the server has it in a form
         // anyone can read.
@@ -38,7 +32,6 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
               expires_at: result.expires_at,
             })),
             withAuthContext,
-            Effect.catchTag("DatabaseError", toHttpError),
           ),
         playgroundByHash: ({ params }) =>
           Effect.gen(function* () {
@@ -48,18 +41,14 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
               user: pg.user?.username ? { username: pg.user.username } : null,
             };
           }).pipe(
-            Effect.catchTags({
-              NoSuchElementError: () =>
-                Effect.fail(new NotFound({ message: "Playground not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Playground not found" })),
+            ),
           ),
         forkPlayground: ({ params, payload }) =>
           Effect.gen(function* () {
             yield* requireSession;
-            return yield* playgrounds
-              .fork(params.hash, payload.name)
-              .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+            return yield* playgrounds.fork(params.hash, payload.name).pipe(withAuthContext);
           }),
         // A metadata change needs an account or the playground's edit key, and
         // which of the two the caller has is the database's question: the function
@@ -72,11 +61,9 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
         updatePlayground: ({ params, payload, request }) =>
           playgrounds.update(params.hash, payload, editKeyFrom(request.headers)).pipe(
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () =>
-                Effect.fail(new NotFound({ message: "Playground not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Playground not found" })),
+            ),
           ),
         // Saving needs an account or the playground's edit key, and which of the
         // two the caller has is the database's question, not this handler's: it
@@ -88,11 +75,9 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
               .createCommit(user?.id ?? null, params.hash, payload, editKeyFrom(request.headers))
               .pipe(
                 withAuthContext,
-                Effect.catchTags({
-                  NoSuchElementError: () =>
-                    Effect.fail(new NotFound({ message: "Playground not found" })),
-                  DatabaseError: toHttpError,
-                }),
+                Effect.catchTag("NoSuchElementError", () =>
+                  Effect.fail(new NotFound({ message: "Playground not found" })),
+                ),
               );
           }),
         claimPlayground: ({ params, request }) =>
@@ -100,38 +85,31 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             yield* requireSession;
             return yield* playgrounds
               .claim(params.hash, editKeyFrom(request.headers))
-              .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+              .pipe(withAuthContext);
           }),
-        listCommits: ({ params }) =>
-          playgrounds
-            .listCommits(params.hash)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError)),
+        listCommits: ({ params }) => playgrounds.listCommits(params.hash).pipe(withAuthContext),
         getCommit: ({ params }) =>
           playgrounds.getCommit(params.hash, params.commit_id).pipe(
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () => Effect.fail(new NotFound({ message: "Commit not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Commit not found" })),
+            ),
           ),
         getCommitHistory: ({ params, query }) =>
           playgrounds
             .getCommitHistory(params.hash, params.commit_id, query.limit)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError)),
+            .pipe(withAuthContext),
         getCommitDiff: ({ params }) =>
           playgrounds.getCommitDiff(params.hash, params.commit_id).pipe(
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () => Effect.fail(new NotFound({ message: "Commit not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Commit not found" })),
+            ),
           ),
         togglePlaygroundStar: ({ params }) =>
           Effect.gen(function* () {
             yield* requireSession;
-            return yield* playgrounds
-              .toggleStar(params.hash)
-              .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+            return yield* playgrounds.toggleStar(params.hash).pipe(withAuthContext);
           }),
         deletePlayground: ({ params }) =>
           Effect.gen(function* () {
@@ -139,17 +117,13 @@ export const PlaygroundsApiGroupLive = HttpApiBuilder.group(
             return yield* playgrounds.deletePlayground(params.hash).pipe(
               Effect.map((result) => ({ hash: result.hash })),
               withAuthContext,
-              Effect.catchTags({
-                NoSuchElementError: () =>
-                  Effect.fail(new NotFound({ message: "Playground not found" })),
-                DatabaseError: toHttpError,
-              }),
+              Effect.catchTag("NoSuchElementError", () =>
+                Effect.fail(new NotFound({ message: "Playground not found" })),
+              ),
             );
           }),
         searchPlaygrounds: ({ query }) =>
-          playgrounds
-            .search(query.q ?? "", query.limit, query.offset)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError)),
+          playgrounds.search(query.q ?? "", query.limit, query.offset).pipe(withAuthContext),
       });
     }),
 );

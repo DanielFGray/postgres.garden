@@ -4,8 +4,8 @@ import { sql } from "kysely";
 
 import packageJson from "../package.json" with { type: "json" };
 import { rootUrl } from "../server/config.js";
-import { PgRootDB } from "../server/db.js";
-import { randomSuffix } from "../server/testSupport.js";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
+import { randomSuffix, rawQuery } from "../server/testSupport.js";
 import {
   AccountMail,
   AuditEvent,
@@ -29,12 +29,9 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), {
     withUsers("vrfy", (marker) =>
       Effect.gen(function* () {
         const { email } = yield* createUser(marker, false);
-        const db = yield* PgRootDB;
-        const { id } = yield* db.one(
-          db.connection
-            .selectFrom("app_public.user_emails")
-            .select("id")
-            .where("email", "=", email),
+        const db = queriesOn<DB>(yield* PgRootDB);
+        const { id } = yield* db.one(Schema.Struct({ id: Schema.String }), (k) =>
+          k.selectFrom("app_public.user_emails").select("id").where("email", "=", email),
         );
         const [job] = yield* queuedOnce(SendVerification, "user_emails__send_verification", id);
         const { token } = job.payload;
@@ -61,16 +58,13 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), {
     withUsers("stale", (marker) =>
       Effect.gen(function* () {
         const { email } = yield* createUser(marker, false);
-        const db = yield* PgRootDB;
-        const { id } = yield* db.one(
-          db.connection
-            .selectFrom("app_public.user_emails")
-            .select("id")
-            .where("email", "=", email),
+        const db = queriesOn<DB>(yield* PgRootDB);
+        const { id } = yield* db.one(Schema.Struct({ id: Schema.String }), (k) =>
+          k.selectFrom("app_public.user_emails").select("id").where("email", "=", email),
         );
         const [job] = yield* queuedOnce(SendVerification, "user_emails__send_verification", id);
-        yield* db.all(
-          db.connection
+        yield* db.exec((k) =>
+          k
             .updateTable("app_private.user_email_secrets")
             .set({
               verification_token_hash: sql`app_private.hash_token(encode(gen_random_bytes(32), 'hex'))`,
@@ -87,10 +81,10 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), {
     withUsers("audit", (marker) =>
       Effect.gen(function* () {
         const user = yield* createUser(marker, true);
-        const db = yield* PgRootDB;
+        const db = queriesOn<DB>(yield* PgRootDB);
         const added = `${marker}_second@example.invalid`;
-        yield* db.all(
-          db.raw(
+        yield* db.exec(
+          rawQuery(
             sql`insert into app_public.user_emails (user_id, email) values (${user.id}, ${added})`,
           ),
         );
@@ -124,10 +118,10 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), {
       Effect.gen(function* () {
         const user = yield* createUser(marker, true);
         const identifier = `${marker}_gh`;
-        const db = yield* PgRootDB;
-        yield* db.all(
-          db.raw(
-            sql`select app_private.link_or_register_user(null, 'github', ${identifier}, json_build_object('email', ${user.email}::text), '{}'::json)`,
+        const db = queriesOn<DB>(yield* PgRootDB);
+        yield* db.exec(
+          rawQuery(
+            sql`select app_private.link_or_register_user(null, 'github', ${identifier}, json_build_object('email', ${user.email}::text), '{}'::json)::text`,
           ),
         );
         const [job] = yield* queuedOnce(AuditEvent, "user__audit", identifier);
@@ -155,9 +149,9 @@ layer(Layer.provideMerge(AccountMail.layer, PgRootDB.layer), {
       Effect.gen(function* () {
         const user = yield* createUser(marker, true);
         const unknown = `${marker}_none@example.invalid`;
-        const db = yield* PgRootDB;
-        yield* db.all(db.raw(sql`select app_public.forgot_password(${user.email}::citext)`));
-        yield* db.all(db.raw(sql`select app_public.forgot_password(${unknown}::citext)`));
+        const db = queriesOn<DB>(yield* PgRootDB);
+        yield* db.exec(rawQuery(sql`select app_public.forgot_password(${user.email}::citext)`));
+        yield* db.exec(rawQuery(sql`select app_public.forgot_password(${unknown}::citext)`));
         const [reset] = yield* queuedOnce(ForgotPassword, "user__forgot_password", user.email);
         const [notice] = yield* queuedOnce(
           ForgotPasswordUnregistered,
@@ -206,10 +200,11 @@ const withUsers = <A, E>(
   });
 
 const createUser = Effect.fn(function* (name: string, verified: boolean) {
-  const db = yield* PgRootDB;
+  const db = queriesOn<DB>(yield* PgRootDB);
   const email = `${name}@example.invalid`;
   const { id } = yield* db.one(
-    db.raw(
+    Schema.Struct({ id: Schema.String }),
+    rawQuery(
       sql<{
         id: string;
       }>`select id from app_private.really_create_user(
@@ -225,9 +220,10 @@ const createUser = Effect.fn(function* (name: string, verified: boolean) {
 
 /** The jobs queued for `task` whose payload mentions `text`, oldest first. */
 const queued = Effect.fn(function* (task: string, text: string) {
-  const db = yield* PgRootDB;
+  const db = queriesOn<DB>(yield* PgRootDB);
   return yield* db.all(
-    db.raw(sql<{ payload: unknown; created_at: Date }>`
+    Schema.Struct({ payload: Schema.Unknown, created_at: Schema.Date }),
+    rawQuery(sql<{ payload: unknown; created_at: Date }>`
       select j.payload, j.created_at
       from graphile_worker._private_jobs j
       join graphile_worker._private_tasks t on t.id = j.task_id
@@ -254,13 +250,13 @@ const queuedMail = Effect.fn(function* (marker: string) {
 });
 
 const cleanUp = Effect.fn(function* (marker: string) {
-  const db = yield* PgRootDB;
+  const db = queriesOn<DB>(yield* PgRootDB);
   const like = `%${marker}%`;
-  yield* db.all(
-    db.raw(sql`
+  yield* db.exec(
+    rawQuery(sql`
       delete from graphile_worker._private_jobs
       where payload::text like ${like}
         or payload->>'id' in (select id::text from app_public.user_emails where email like ${like})`),
   );
-  yield* db.all(db.raw(sql`delete from app_public.users where username like ${like}`));
+  yield* db.exec(rawQuery(sql`delete from app_public.users where username like ${like}`));
 });

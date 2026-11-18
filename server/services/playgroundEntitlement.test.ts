@@ -14,9 +14,10 @@ import { DateTime, Effect, Layer } from "effect";
 import { SecureRandom } from "effect/crypto";
 import * as S from "effect/Schema";
 import { sql } from "kysely";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
-import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
-import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { DatabaseLive, type DB, type Queries } from "../db.js";
+import { asVisitor, createUser, deleteUser, randomSuffix, withRoot } from "../testSupport.js";
 import { dropPlayground } from "../test/playgrounds.js";
 
 const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
@@ -24,31 +25,26 @@ const randomUuid = SecureRandom.SecureRandom.use((random) => random.uuidV4());
 /** Far enough ahead that the seeded session is live for the whole run. */
 const sessionExpiry = DateTime.toDate(DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"));
 
-const mayHavePrivate = (db: DbHandle, userId: string | null) =>
+const mayHavePrivate = (db: Queries<DB>, userId: string | null) =>
   db
-    .all(
-      db.connection.selectNoFrom(
-        sql<boolean>`app_public.may_have_private(${userId}::uuid)`.as("allowed"),
-      ),
+    .one(S.Struct({ allowed: S.Boolean }), (k) =>
+      k.selectNoFrom(sql<boolean>`app_public.may_have_private(${userId}::uuid)`.as("allowed")),
     )
-    .pipe(
-      Effect.head,
-      Effect.map((row) => row.allowed),
-    );
+    .pipe(Effect.map((row) => row.allowed));
 
-const setRole = (db: DbHandle, userId: string, role: "user" | "sponsor") =>
-  db.all(db.connection.updateTable("app_public.users").set({ role }).where("id", "=", userId));
+const setRole = (db: Queries<DB>, userId: string, role: "user" | "sponsor") =>
+  db.exec((k) => k.updateTable("app_public.users").set({ role }).where("id", "=", userId));
 
 /** Writes a playground as the owner, so RLS is out of the way and only the trigger answers. */
 const insertPlayground = (
-  db: DbHandle,
+  db: Queries<DB>,
   values: { hash: string; privacy: "private" | "secret" | "public"; user_id: string | null },
-) => db.all(db.connection.insertInto("app_public.playgrounds").values(values));
+) => db.exec((k) => k.insertInto("app_public.playgrounds").values(values));
 
-const readPrivacy = (db: DbHandle, hash: string) =>
+const readPrivacy = (db: Queries<DB>, hash: string) =>
   db
-    .all(
-      db.connection.selectFrom("app_public.playgrounds").select("privacy").where("hash", "=", hash),
+    .all(S.Struct({ privacy: S.String }), (k) =>
+      k.selectFrom("app_public.playgrounds").select("privacy").where("hash", "=", hash),
     )
     .pipe(Effect.head);
 
@@ -62,14 +58,14 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
   it.effect("refuses a private playground to an account without the entitlement", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `ent_free_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `ent_free_${suffix}`));
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
-          expect(yield* PgRootDB.use((db) => mayHavePrivate(db, user.id))).toBe(false);
+          expect(yield* withRoot((db) => mayHavePrivate(db, user.id))).toBe(false);
 
           const error = yield* Effect.flip(
-            PgRootDB.use((db) =>
+            withRoot((db) =>
               insertPlayground(db, {
                 hash: `entfree${suffix}`,
                 privacy: "private",
@@ -82,7 +78,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
           expect(code).toBe("DNIED");
           expect(message).toContain("Private playgrounds require a sponsor account");
         }),
-        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        withRoot((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );
@@ -90,22 +86,22 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
   it.effect("allows a private playground to a sponsor", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `ent_sponsor_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `ent_sponsor_${suffix}`));
       const hash = `entspon${suffix}`;
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
-          yield* PgRootDB.use((db) => setRole(db, user.id, "sponsor"));
-          expect(yield* PgRootDB.use((db) => mayHavePrivate(db, user.id))).toBe(true);
+          yield* withRoot((db) => setRole(db, user.id, "sponsor"));
+          expect(yield* withRoot((db) => mayHavePrivate(db, user.id))).toBe(true);
 
-          yield* PgRootDB.use((db) =>
+          yield* withRoot((db) =>
             insertPlayground(db, { hash, privacy: "private", user_id: user.id }),
           );
-          expect(yield* PgRootDB.use((db) => readPrivacy(db, hash))).toEqual({
+          expect(yield* withRoot((db) => readPrivacy(db, hash))).toEqual({
             privacy: "private",
           });
         }),
-        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        withRoot((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );
@@ -116,10 +112,10 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
 
       // Nobody holds the entitlement, so there is no account to check: the
       // trigger answers anonymity before it asks about a role.
-      expect(yield* PgRootDB.use((db) => mayHavePrivate(db, null))).toBe(false);
+      expect(yield* withRoot((db) => mayHavePrivate(db, null))).toBe(false);
 
       const error = yield* Effect.flip(
-        PgRootDB.use((db) =>
+        withRoot((db) =>
           insertPlayground(db, { hash: `entanon${suffix}`, privacy: "private", user_id: null }),
         ),
       );
@@ -133,7 +129,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
   it.effect("gives a fork the most private level the forking account may have", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `ent_fork_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `ent_fork_${suffix}`));
       const source = `entsrc${suffix}`;
       const sessionId = yield* randomUuid;
       const forked: Array<string> = [];
@@ -142,9 +138,9 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
         Effect.gen(function* () {
           // fork_playground reads the forking account through
           // app_public.current_user_id(), which resolves a session row.
-          yield* PgRootDB.use((db) =>
-            db.all(
-              db.connection.insertInto("app_private.sessions").values({
+          yield* withRoot((db) =>
+            db.exec((k) =>
+              k.insertInto("app_private.sessions").values({
                 id: sessionId,
                 user_id: user.id,
                 expires_at: sessionExpiry,
@@ -168,20 +164,21 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
 
           // A public source with one commit: a fork copies the latest commit,
           // and refuses a source the caller may not read.
-          yield* PgRootDB.use((db) =>
+          yield* withRoot((db) =>
             insertPlayground(db, { hash: source, privacy: "public", user_id: null }).pipe(
               Effect.andThen(
-                db.all(
-                  db.connection.insertInto("app_public.playground_commits").values({
+                db.exec((k) =>
+                  k.insertInto("app_public.playground_commits").values({
                     playground_hash: source,
                     message: "initial",
-                    data: S.encodeSync(
+                    // JSON text goes through text: a string sent to a json parameter is encoded twice.
+                    data: sql`${S.encodeSync(
                       S.fromJsonString(
                         S.Struct({
                           files: S.Array(S.Struct({ path: S.String, content: S.String })),
                         }),
                       ),
-                    )({ files: [{ path: "a.sql", content: "select 1" }] }),
+                    )({ files: [{ path: "a.sql", content: "select 1" }] })}::text::jsonb`,
                   }),
                 ),
               ),
@@ -190,31 +187,30 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer), {
 
           const fork = () =>
             asVisitor((db) =>
-              db.all(
-                db.connection
+              db.one(S.Struct({ playground_hash: S.String }), (k) =>
+                k
                   .selectFrom(
                     sql<{ playground_hash: string }>`app_public.fork_playground(${source})`.as("f"),
                   )
                   .selectAll(),
               ),
             ).pipe(
-              Effect.head,
               asUser,
               Effect.tap((row) => Effect.sync(() => forked.push(row.playground_hash))),
-              Effect.flatMap((row) => PgRootDB.use((db) => readPrivacy(db, row.playground_hash))),
+              Effect.flatMap((row) => withRoot((db) => readPrivacy(db, row.playground_hash))),
             );
 
           // A free account cannot hold a private playground, so its fork is
           // unlisted instead of refused.
           expect(yield* fork()).toEqual({ privacy: "secret" });
 
-          yield* PgRootDB.use((db) => setRole(db, user.id, "sponsor"));
+          yield* withRoot((db) => setRole(db, user.id, "sponsor"));
           expect(yield* fork()).toEqual({ privacy: "private" });
         }),
         Effect.gen(function* () {
-          yield* Effect.forEach(forked, (hash) => PgRootDB.use((db) => dropPlayground(db, hash)));
-          yield* PgRootDB.use((db) => dropPlayground(db, source));
-          yield* PgRootDB.use((db) => deleteUser(db, user.id));
+          yield* Effect.forEach(forked, (hash) => withRoot((db) => dropPlayground(db, hash)));
+          yield* withRoot((db) => dropPlayground(db, source));
+          yield* withRoot((db) => deleteUser(db, user.id));
         }).pipe(Effect.asVoid, Effect.orDie),
       );
     }),

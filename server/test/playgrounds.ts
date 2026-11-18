@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import * as S from "effect/Schema";
+import { sql } from "kysely";
 
-import { PgRootDB, type DbHandle } from "../db.js";
+import { PgRootDB, queriesOn, type DB, type Queries } from "../db.js";
 import { randomSuffix } from "../testSupport.js";
 
 /**
@@ -11,15 +12,11 @@ import { randomSuffix } from "../testSupport.js";
 export const withPlayground = <A, E, R>(use: (hash: string) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const hash = `pgtest${yield* randomSuffix}`;
-    yield* PgRootDB.use((db) =>
-      db.all(
-        db.connection.insertInto("app_public.playgrounds").values({ hash, privacy: "public" }),
-      ),
+    const db = queriesOn<DB>(yield* PgRootDB);
+    yield* db.exec((k) =>
+      k.insertInto("app_public.playgrounds").values({ hash, privacy: "public" }),
     );
-    return yield* Effect.ensuring(
-      use(hash),
-      PgRootDB.use((db) => dropPlayground(db, hash)).pipe(Effect.asVoid, Effect.orDie),
-    );
+    return yield* Effect.ensuring(use(hash), dropPlayground(db, hash).pipe(Effect.orDie));
   });
 
 /**
@@ -48,7 +45,7 @@ const SeededCommitDataSchema = S.fromJsonString(
  * commits can share a timestamp or run against their order in the chain.
  */
 export const insertCommit = (
-  db: DbHandle,
+  db: Queries<DB>,
   hash: string,
   commit: {
     readonly message: string;
@@ -58,48 +55,45 @@ export const insertCommit = (
     readonly userId?: string;
   },
 ) =>
-  db
-    .all(
-      db.connection
-        .insertInto("app_public.playground_commits")
-        .values({
-          playground_hash: hash,
-          parent_id: commit.parentId ?? null,
-          user_id: commit.userId ?? null,
-          message: commit.message,
-          data: S.encodeSync(SeededCommitDataSchema)(commit.data),
-          created_at: commit.createdAt,
-        })
-        .returning("id"),
-    )
-    .pipe(Effect.head);
+  db.one(S.Struct({ id: S.String }), (k) =>
+    k
+      .insertInto("app_public.playground_commits")
+      .values({
+        playground_hash: hash,
+        parent_id: commit.parentId ?? null,
+        user_id: commit.userId ?? null,
+        message: commit.message,
+        // JSON text goes through text: a string sent to a json parameter is encoded twice.
+        data: sql`${S.encodeSync(SeededCommitDataSchema)(commit.data)}::text::jsonb` as never,
+        created_at: commit.createdAt,
+      })
+      .returning("id"),
+  );
 
-export const setHead = (db: DbHandle, hash: string, commitId: string) =>
-  db.all(
-    db.connection
+export const setHead = (db: Queries<DB>, hash: string, commitId: string) =>
+  db.exec((k) =>
+    k
       .updateTable("app_public.playgrounds")
       .set({ head_commit_id: commitId })
       .where("hash", "=", hash),
   );
 
 /** Clears the head first: the commits cannot go while a playground names one. */
-export const dropPlayground = (db: DbHandle, hash: string) =>
+export const dropPlayground = (db: Queries<DB>, hash: string) =>
   db
-    .all(
-      db.connection
+    .exec((k) =>
+      k
         .updateTable("app_public.playgrounds")
         .set({ head_commit_id: null })
         .where("hash", "=", hash),
     )
     .pipe(
       Effect.andThen(
-        db.all(
-          db.connection
-            .deleteFrom("app_public.playground_commits")
-            .where("playground_hash", "=", hash),
+        db.exec((k) =>
+          k.deleteFrom("app_public.playground_commits").where("playground_hash", "=", hash),
         ),
       ),
       Effect.andThen(
-        db.all(db.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
+        db.exec((k) => k.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
       ),
     );

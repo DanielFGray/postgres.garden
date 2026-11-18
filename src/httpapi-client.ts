@@ -1,33 +1,20 @@
-import type * as HttpClientError from "effect/http/HttpClientError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
-import { HttpApiClient, type HttpApiError } from "effect/http-api";
-import { Context, Effect, Layer, Match, Option, type Schema } from "effect";
-import * as S from "effect/Schema";
+import { HttpApiClient } from "effect/http-api";
+import { Context, Effect, Layer, Option } from "effect";
 import { PgGardenApi } from "../shared/httpApi";
 import { editKeyHeaders } from "./shared/editKey";
-import {
-  Conflict,
-  Forbidden,
-  InternalError,
-  InvalidOperation,
-  Locked,
-  NotFound,
-  ServiceUnavailable,
-  TooManyRequests,
-  Unauthorized,
-} from "../shared/errors";
 import { type RequestTelemetry, telemetryHeaders } from "./requestTelemetry";
 
 /** The generated client for `PgGardenApi`. */
 export type PgGardenClient = HttpApiClient.ForApi<typeof PgGardenApi>;
 
 type ApiCallerService = {
-  readonly call: <A, E extends ClientFailure>(
+  readonly call: <A, E>(
     action: string,
     run: (api: PgGardenClient) => Effect.Effect<A, E>,
-  ) => Effect.Effect<A, ApiRequestError>;
+  ) => Effect.Effect<A, E>;
 };
 
 const buildApiCaller = Effect.fnUntraced(function* (options: {
@@ -56,14 +43,15 @@ const buildApiCaller = Effect.fnUntraced(function* (options: {
         Option.some({ action, feature: options.feature }),
       ),
       Effect.withSpan(`api ${action}`),
-      Effect.mapError(toApiRequestError),
     );
   return { call } satisfies ApiCallerService;
 });
 
 /**
  * Makes calls against `PgGardenApi` as named UI actions: attributes each for
- * tracing and flattens every way it can fail into `ApiRequestError`.
+ * tracing. A failed call fails with the error the contract declares for it, so
+ * the UI shows its text with `errorMessage` and matches its `_tag` to treat
+ * one refusal differently.
  *
  * The workbench provides `ApiCaller.layer`. A sandboxed webview cannot use
  * `fetch`, so it provides `ApiCaller.layerWebview` over a transport that relays each
@@ -98,33 +86,6 @@ export class ApiCaller extends Context.Service<ApiCaller, ApiCallerService>()(
 }
 
 /**
- * One failed server call, in the shape the UI needs: a status to branch on and
- * a message to show. `status` is 0 when the request never reached the server.
- */
-export class ApiRequestError extends S.TaggedError<
-  ApiRequestError,
-  { readonly brand: unique symbol }
->()("ApiRequestError", {
-  status: S.Int,
-  message: S.String,
-}) {}
-
-/** Everything a call through the generated client can fail with. */
-export type ClientFailure =
-  | Conflict
-  | Forbidden
-  | HttpApiError.HttpApiSchemaError
-  | HttpClientError.HttpClientError
-  | InternalError
-  | InvalidOperation
-  | Locked
-  | NotFound
-  | Schema.SchemaError
-  | ServiceUnavailable
-  | TooManyRequests
-  | Unauthorized;
-
-/**
  * Observability context for the call in flight. `ApiCaller` provides it around
  * each call; the client turns it into request headers.
  * The generated client takes no per-call headers, so this is the only channel.
@@ -133,54 +94,6 @@ export type ClientFailure =
 const CurrentRequestTelemetry = Context.Reference<Option.Option<RequestTelemetry>>(
   "postgres-garden/CurrentRequestTelemetry",
   { defaultValue: Option.none },
-);
-
-const toApiRequestError = Match.type<ClientFailure>().pipe(
-  Match.tag(
-    "InvalidOperation",
-    (error) => new ApiRequestError({ status: 400, message: error.message }),
-  ),
-  Match.tag(
-    "Unauthorized",
-    (error) => new ApiRequestError({ status: 401, message: error.message }),
-  ),
-  Match.tag("Forbidden", (error) => new ApiRequestError({ status: 403, message: error.message })),
-  Match.tag("NotFound", (error) => new ApiRequestError({ status: 404, message: error.message })),
-  Match.tag("Conflict", (error) => new ApiRequestError({ status: 409, message: error.message })),
-  Match.tag("Locked", (error) => new ApiRequestError({ status: 423, message: error.message })),
-  Match.tag(
-    "TooManyRequests",
-    (error) => new ApiRequestError({ status: 429, message: error.message }),
-  ),
-  Match.tag(
-    "ServiceUnavailable",
-    (error) => new ApiRequestError({ status: 503, message: error.message }),
-  ),
-  // The trace id is how a user report finds the logged cause, so the user sees it.
-  Match.tag(
-    "InternalError",
-    (error) =>
-      new ApiRequestError({
-        status: 500,
-        message: `${error.message} Reference: ${error.traceId}`,
-      }),
-  ),
-  Match.tag(
-    "HttpClientError",
-    (error) => new ApiRequestError({ status: 0, message: error.message }),
-  ),
-  // The server answered with something the contract does not describe, so the
-  // two sides disagree. Nothing the visitor did can fix it.
-  Match.tag(
-    "HttpApiSchemaError",
-    (error) =>
-      new ApiRequestError({
-        status: 500,
-        message: `The server's ${error.kind.toLowerCase()} did not match the contract: ${error.cause.message}`,
-      }),
-  ),
-  Match.tag("SchemaError", (error) => new ApiRequestError({ status: 500, message: error.message })),
-  Match.exhaustive,
 );
 
 /**

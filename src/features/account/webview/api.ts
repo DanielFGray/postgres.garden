@@ -1,6 +1,6 @@
 // @entrypoint: the webview calls this module's message bridge.
 import { Effect, Option } from "effect";
-import { ApiRequestError } from "../../../httpapi-client";
+import { Unauthorized } from "@danielfgray/stompbox/http";
 import { createWebviewApiClient, vsCodeChannel } from "../../webview/relayTransport";
 import { AccountDeleted, AccountWebviewMessage, Initialized } from "../types";
 
@@ -19,7 +19,7 @@ export const loadProfile = (action: string) =>
     Effect.flatMap(({ user }) =>
       Effect.fromOption(
         Option.fromNullOr(user),
-        () => new ApiRequestError({ status: 401, message: "Not signed in" }),
+        () => new Unauthorized({ message: "Not signed in" }),
       ),
     ),
   );

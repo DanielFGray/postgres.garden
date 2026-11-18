@@ -1,7 +1,6 @@
 import { createSignal, refresh, For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type * as Effect from "effect/Effect";
-import type { ApiRequestError } from "../../../../httpapi-client";
 import { apiCall } from "../api";
 import { formText } from "../format";
 import { createRequest, runRequest } from "../../../webview/request";
@@ -21,11 +20,7 @@ export const EmailsSection = () => {
   const [actionLoading, setActionLoading] = createSignal<string | null>(null);
   const [mutationError, setMutationError] = createSignal<string | null>(null);
 
-  const runAction = <A,>(
-    emailId: string,
-    request: Effect.Effect<A, ApiRequestError>,
-    refreshAfter = false,
-  ) => {
+  const runAction = <A, E>(emailId: string, request: Effect.Effect<A, E>, refreshAfter = false) => {
     setActionLoading(emailId);
     setMutationError(null);
     void runRequest(request)

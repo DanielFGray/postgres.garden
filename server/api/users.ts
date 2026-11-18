@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { NotFound } from "../../shared/errors.js";
-import { toHttpError } from "../databaseErrors.js";
+import { NotFound } from "@danielfgray/stompbox/http";
 import { requireSession } from "./http.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { CurrentSession } from "../../shared/session.js";
@@ -16,17 +15,13 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "users", (han
         Effect.gen(function* () {
           const { session } = yield* CurrentSession;
           if (!session) return { user: null };
-          const profile = yield* users
-            .getProfile()
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          const profile = yield* users.getProfile().pipe(withAuthContext);
           return { user: profile };
         }),
       deleteMe: ({ query }) =>
         Effect.gen(function* () {
           yield* requireSession;
-          const success = yield* users
-            .requestAccountDeletion(query.token)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          const success = yield* users.requestAccountDeletion(query.token).pipe(withAuthContext);
           return { success };
         }),
       patchMe: ({ payload }) =>
@@ -34,43 +29,35 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "users", (han
           yield* requireSession;
           return yield* users.updateProfile(payload).pipe(
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () => Effect.fail(new NotFound({ message: "User not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "User not found" })),
+            ),
           );
         }),
       meEmails: () =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users
-            .listEmails()
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          return yield* users.listEmails().pipe(withAuthContext);
         }),
       createMeEmail: ({ payload }) =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users
-            .addEmail(payload.email)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          return yield* users.addEmail(payload.email).pipe(withAuthContext);
         }),
       deleteMeEmail: ({ params }) =>
         Effect.gen(function* () {
           yield* requireSession;
           return yield* users.deleteEmail(params.id).pipe(
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () => Effect.fail(new NotFound({ message: "Email not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Email not found" })),
+            ),
           );
         }),
       meAuthentications: () =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users
-            .listAuthentications()
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          return yield* users.listAuthentications().pipe(withAuthContext);
         }),
       deleteMeAuthentication: ({ params }) =>
         Effect.gen(function* () {
@@ -78,11 +65,9 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "users", (han
           return yield* users.unlinkAuthentication(params.id).pipe(
             Effect.map((result) => ({ id: result.id })),
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () =>
-                Effect.fail(new NotFound({ message: "Authentication not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "Authentication not found" })),
+            ),
           );
         }),
       meHasPassword: () =>
@@ -91,45 +76,31 @@ export const UsersApiGroupLive = HttpApiBuilder.group(PgGardenApi, "users", (han
           return yield* users.hasPassword().pipe(
             Effect.map((result) => ({ has_password: result.has_password })),
             withAuthContext,
-            Effect.catchTags({
-              NoSuchElementError: () => Effect.fail(new NotFound({ message: "User not found" })),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("NoSuchElementError", () =>
+              Effect.fail(new NotFound({ message: "User not found" })),
+            ),
           );
         }),
       forgotPassword: ({ payload }) =>
-        users
-          .forgotPassword(payload.email)
-          .pipe(
-            Effect.as({ success: true as const }),
-            Effect.catchTag("DatabaseError", toHttpError),
-          ),
-      resetPassword: ({ payload }) =>
-        users
-          .resetPassword(payload.token, payload.password)
-          .pipe(Effect.catchTag("DatabaseError", toHttpError)),
+        users.forgotPassword(payload.email).pipe(Effect.as({ success: true as const })),
+      resetPassword: ({ payload }) => users.resetPassword(payload.token, payload.password),
       changePassword: ({ payload }) =>
         Effect.gen(function* () {
           yield* requireSession;
           return yield* users
             .changePassword(payload.oldPassword, payload.newPassword)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+            .pipe(withAuthContext);
         }),
-      verifyEmail: ({ payload }) =>
-        users.verifyEmail(payload.token).pipe(Effect.catchTag("DatabaseError", toHttpError)),
+      verifyEmail: ({ payload }) => users.verifyEmail(payload.token),
       makeEmailPrimary: ({ payload }) =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users
-            .makeEmailPrimary(payload.emailId)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          return yield* users.makeEmailPrimary(payload.emailId).pipe(withAuthContext);
         }),
       resendEmailVerificationCode: ({ payload }) =>
         Effect.gen(function* () {
           yield* requireSession;
-          return yield* users
-            .resendEmailVerificationCode(payload.emailId)
-            .pipe(withAuthContext, Effect.catchTag("DatabaseError", toHttpError));
+          return yield* users.resendEmailVerificationCode(payload.emailId).pipe(withAuthContext);
         }),
     });
   }),

@@ -32,21 +32,21 @@ snapshots:
         style: secondary
         start: 72
         end: 150
-  'export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)':
+  "export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)":
     labels:
-      - source: '(deps: Deps) => Layer.succeed(Users, deps)'
+      - source: "(deps: Deps) => Layer.succeed(Users, deps)"
         style: primary
         start: 30
         end: 72
-      - source: 'export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+      - source: "export const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)"
         style: secondary
         start: 0
         end: 72
-      - source: 'const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+      - source: "const makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)"
         style: secondary
         start: 7
         end: 72
-      - source: 'makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)'
+      - source: "makeUsersLayer = (deps: Deps) => Layer.succeed(Users, deps)"
         style: secondary
         start: 13
         end: 72

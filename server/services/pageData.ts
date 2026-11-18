@@ -2,7 +2,8 @@ import { Cause, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { PageState } from "../../src/shared/dehydrate.js";
 import { parseRoute, type RouteInfo } from "../../src/shared/routes.js";
-import { RequestDatabase, withAuthContext } from "../requestDatabase.js";
+import { requestDb, withAuthContext } from "../requestDatabase.js";
+import { CommitRow } from "../rows.js";
 import { PgAuthDB } from "../db.js";
 import { CurrentSession } from "../../shared/session.js";
 import { injectInitialData } from "../initialData.js";
@@ -28,9 +29,9 @@ export class PageData extends Context.Service<PageData>()("postgres-garden/pageD
 
     /** The commit a playground names as its head, or `null` if it has none. */
     const headCommit = Effect.fn("PageData.headCommit")((playgroundHash: string) =>
-      RequestDatabase.use((db) =>
-        db.all(
-          db.connection
+      requestDb
+        .maybe(CommitRow, (k) =>
+          k
             .selectFrom("app_public.playground_commits as c")
             .innerJoin("app_public.playgrounds as p", "p.head_commit_id", "c.id")
             .select([
@@ -43,15 +44,15 @@ export class PageData extends Context.Service<PageData>()("postgres-garden/pageD
               "p.head_commit_id",
             ])
             .where("p.hash", "=", playgroundHash),
-        ),
-      ).pipe(Effect.flatMap(firstCommit)),
+        )
+        .pipe(Effect.flatMap(firstCommit)),
     );
 
     /** One named commit of a playground, or `null` if it is not there. */
     const commit = (playgroundHash: string, commitId: string) =>
-      RequestDatabase.use((db) =>
-        db.all(
-          db.connection
+      requestDb
+        .maybe(CommitRow, (k) =>
+          k
             .selectFrom("app_public.playground_commits as c")
             .innerJoin("app_public.playgrounds as p", "p.hash", "c.playground_hash")
             .select([
@@ -65,8 +66,8 @@ export class PageData extends Context.Service<PageData>()("postgres-garden/pageD
             ])
             .where("c.playground_hash", "=", playgroundHash)
             .where("c.id", "=", commitId),
-        ),
-      ).pipe(Effect.flatMap(firstCommit));
+        )
+        .pipe(Effect.flatMap(firstCommit));
 
     /** Runs `read` as the visitor of `CurrentSession`, on the pool this service resolved. */
     const visitorRead = <A, E, R>(read: Effect.Effect<A, E, R>) =>
@@ -151,17 +152,7 @@ const CommitData = Schema.Struct({
 
 const decodeCommitData = Schema.decodeUnknownEffect(CommitData);
 
-type CommitRow = {
-  readonly id: string;
-  readonly message: string;
-  readonly data: unknown;
-  readonly created_at: Date;
-  readonly playground_hash: string;
-  readonly parent_id: string | null;
-  readonly head_commit_id: string | null;
-};
-
-const toCommit = (row: CommitRow) =>
+const toCommit = (row: typeof CommitRow.Type) =>
   decodeCommitData(row.data).pipe(
     Effect.map((data) => ({
       id: row.id,
@@ -176,7 +167,5 @@ const toCommit = (row: CommitRow) =>
     })),
   );
 
-const firstCommit = (rows: ReadonlyArray<CommitRow>) => {
-  const [row] = rows;
-  return row ? toCommit(row) : Effect.succeed(null);
-};
+const firstCommit = (row: Option.Option<typeof CommitRow.Type>) =>
+  Option.isSome(row) ? toCommit(row.value) : Effect.succeed(null);

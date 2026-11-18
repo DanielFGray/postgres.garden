@@ -15,7 +15,7 @@ rule:
     - has:
         field: name
         not:
-          regex: '^layer([A-Z][A-Za-z0-9]*)?$'
+          regex: "^layer([A-Z][A-Za-z0-9]*)?$"
     - has:
         stopBy: end
         pattern: Layer.$FN

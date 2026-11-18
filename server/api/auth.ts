@@ -1,7 +1,7 @@
 import { Cause, Effect } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { PgGardenApi } from "../../shared/httpApi.js";
-import { Unauthorized } from "../../shared/errors.js";
+import { BadCredentials } from "../../shared/errors.js";
 import { toHttpError } from "../databaseErrors.js";
 import { reportUnexpected } from "../failureBoundary.js";
 import { Auth } from "../services/auth.js";
@@ -30,22 +30,15 @@ export const AuthApiGroupLive = HttpApiBuilder.group(PgGardenApi, "auth", (handl
     return handlers
       .handleAll({
         register: ({ payload }) =>
-          auth.register(payload).pipe(
-            Effect.map((user) => ({ ...user, bio: user.bio ?? "" })),
-            Effect.catchTag("DatabaseError", toHttpError),
-          ),
+          auth.register(payload).pipe(Effect.map((user) => ({ ...user, bio: user.bio ?? "" }))),
         login: ({ payload }) =>
           auth.login(payload).pipe(
             Effect.map((user) => ({ ...user, bio: user.bio ?? "" })),
-            Effect.catchTags({
-              InvalidCredentials: (e) =>
-                Effect.fail(
-                  new Unauthorized({ message: e.message, reason: "invalid_credentials" }),
-                ),
-              DatabaseError: toHttpError,
-            }),
+            Effect.catchTag("InvalidCredentials", (e) =>
+              Effect.fail(new BadCredentials({ message: e.message })),
+            ),
           ),
-        logout: () => auth.logout().pipe(Effect.catchTag("DatabaseError", toHttpError)),
+        logout: () => auth.logout(),
       })
       .handleRaw("authGithubStart", () =>
         popup.start().pipe(

@@ -72,9 +72,7 @@ export const DangerZoneSection = () => {
     setRequesting(true);
     setMutationError(null);
     void runRequest(
-      apiCall("account.danger.confirm_delete", (api) =>
-        api.users.deleteMe({ query: { token } }),
-      ),
+      apiCall("account.danger.confirm_delete", (api) => api.users.deleteMe({ query: { token } })),
     )
       .then(
         (response) => {

@@ -1,8 +1,8 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { sql } from "kysely";
 
-import { PgRootDB } from "../server/db.js";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
 import { randomSuffix } from "../server/testSupport.js";
 import { ExpiredPlaygrounds } from "./expiredPlaygrounds.js";
 
@@ -12,19 +12,19 @@ layer(Layer.provideMerge(ExpiredPlaygrounds.layer, PgRootDB.layer), {
 })("ExpiredPlaygrounds", (it) => {
   it.effect("deletes a playground with no account past its expiry, and keeps the rest", () =>
     Effect.gen(function* () {
-      const db = yield* PgRootDB;
+      const db = queriesOn<DB>(yield* PgRootDB);
       const suffix = yield* randomSuffix;
       const expired = `expired_${suffix}`;
       const live = `live_${suffix}`;
-      yield* db.all(
-        db.connection.insertInto("app_public.playgrounds").values([
+      yield* db.exec((k) =>
+        k.insertInto("app_public.playgrounds").values([
           { hash: expired, expires_at: sql<Date>`now() - interval '1 minute'` },
           { hash: live, expires_at: sql<Date>`now() + interval '1 day'` },
         ]),
       );
       const left = db
-        .all(
-          db.connection
+        .all(Schema.Struct({ hash: Schema.String }), (k) =>
+          k
             .selectFrom("app_public.playgrounds")
             .select("hash")
             .where("hash", "in", [expired, live]),
@@ -37,10 +37,8 @@ layer(Layer.provideMerge(ExpiredPlaygrounds.layer, PgRootDB.layer), {
       yield* prune.pipe(
         Effect.ensuring(
           db
-            .all(
-              db.connection
-                .deleteFrom("app_public.playgrounds")
-                .where("hash", "in", [expired, live]),
+            .exec((k) =>
+              k.deleteFrom("app_public.playgrounds").where("hash", "in", [expired, live]),
             )
             .pipe(Effect.orDie),
         ),

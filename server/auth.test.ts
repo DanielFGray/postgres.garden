@@ -11,10 +11,10 @@
 import { describe, expect, layer } from "@effect/vitest";
 import { Effect, Random, pipe } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import { PgRootDB } from "./db.js";
 import { Redis } from "effect/persistence/Redis";
 import { sessionKeyOf } from "./services/sessions.js";
 import { TestApi } from "./test/apiHarness.js";
+import { withRoot } from "./testSupport.js";
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -72,8 +72,8 @@ const testingHttp = (
 /** Delete a user by username. Errors are swallowed (cleanup must not fail tests). */
 const deleteUser = (username: string) =>
   pipe(
-    PgRootDB.use((db) =>
-      db.all(db.connection.deleteFrom("app_public.users").where("username", "=", username)),
+    withRoot((db) =>
+      db.exec((k) => k.deleteFrom("app_public.users").where("username", "=", username)),
     ),
     Effect.ignore,
   );

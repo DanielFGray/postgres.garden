@@ -1,7 +1,7 @@
 import { Config, Effect, Layer } from "effect";
 import { HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/http";
 import { Redis } from "effect/persistence/Redis";
-import { sql } from "kysely";
+import { toDatabaseError } from "@danielfgray/stompbox/db";
 
 import { Worker } from "../worker/worker.js";
 import { PgAuthDB, PgRootDB } from "./db.js";
@@ -16,7 +16,7 @@ import { PgAuthDB, PgRootDB } from "./db.js";
  *
  * No probe is traced. The route is not in the API contract, so `PagesUntraced`
  * skips its server span; `withTracerEnabled` below covers the spans inside the
- * handler, such as its db.query spans.
+ * handler, such as its query spans.
  */
 export const HealthLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -26,9 +26,9 @@ export const HealthLive = Layer.unwrap(
     const auth = yield* PgAuthDB;
     const redis = yield* Redis;
     // Both pools, because they log in as different roles.
-    const databases = Effect.all([root.all(root.raw(ping)), auth.all(auth.raw(ping))], {
+    const databases = Effect.all([root`select 1`, auth`select 1`], {
       concurrency: "unbounded",
-    });
+    }).pipe(toDatabaseError);
     return HttpRouter.add(
       "GET",
       "/healthz",
@@ -72,7 +72,5 @@ const answers = <A, E>(dependency: string, check: Effect.Effect<A, E>) =>
       Effect.logError(`Health check: ${dependency} unavailable`, error).pipe(Effect.as(false)),
     ),
   );
-
-const ping = sql`select 1`;
 
 const noStore = { headers: { "cache-control": "no-store" } };

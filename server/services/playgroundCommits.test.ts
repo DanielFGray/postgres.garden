@@ -1,12 +1,24 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
-import { Array, DateTime, Duration, Effect, Fiber, Layer, Option, Schedule } from "effect";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import {
+  Array,
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Schedule,
+  Schema as S,
+} from "effect";
 import { sql } from "kysely";
 import { CurrentSession } from "../../shared/session.js";
-import { DatabaseLive, type DatabaseError, PgRootDB } from "../db.js";
+import { DatabaseLive, PgRootDB, queriesOn, type DB } from "../db.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { Secrets } from "../secrets.js";
-import { createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { createUser, deleteUser, randomSuffix, rawQuery, withRoot } from "../testSupport.js";
 import { dropPlayground, insertCommit, setHead, withPlayground } from "../test/playgrounds.js";
 import { Playgrounds } from "./playgrounds.js";
 
@@ -36,7 +48,7 @@ const withAnonymousPlayground = <A, E, R>(
         first: created.commit_id,
         editKey: created.edit_key,
       }),
-      PgRootDB.use((db) => dropPlayground(db, created.playground_hash)).pipe(
+      withRoot((db) => dropPlayground(db, created.playground_hash)).pipe(
         Effect.asVoid,
         Effect.orDie,
       ),
@@ -62,8 +74,9 @@ const save = (
 const refusalCode = (error: DatabaseError) => Option.map(error.report, (report) => report.code);
 
 /** A save that fails other than by the database refusing it is a broken test. */
-const refusedBy = (error: { readonly _tag: "NoSuchElementError" } | DatabaseError) =>
-  error._tag === "DatabaseError" ? Effect.succeed(error) : Effect.die(error);
+const refusedBy = (
+  error: DatabaseError | { readonly _tag: "NoSuchElementError" | "ServiceUnavailable" },
+) => (error._tag === "DatabaseError" ? Effect.succeed(error) : Effect.die(error));
 
 /**
  * How many lock requests wait. pg_stat_activity would name the waiting
@@ -72,9 +85,10 @@ const refusedBy = (error: { readonly _tag: "NoSuchElementError" } | DatabaseErro
  * file waits on can count too and release the saves early, which weakens the
  * race but cannot fail a correct function.
  */
-const locksWaiting = PgRootDB.use((db) =>
+const locksWaiting = withRoot((db) =>
   db.one(
-    db.raw(
+    S.Struct({ waiting: S.Finite }),
+    rawQuery(
       sql<{ waiting: number }>`select count(*)::int as waiting from pg_locks where not granted`,
     ),
   ),
@@ -100,7 +114,7 @@ layer(
         // save on it share one transaction's now(), and a save whose
         // transaction began first can be stamped before its parent, so the
         // clock is no witness to the order.
-        const seeded = yield* PgRootDB.use((db) =>
+        const seeded = yield* withRoot((db) =>
           Effect.gen(function* () {
             const root = yield* insertCommit(db, hash, {
               message: "root",
@@ -139,25 +153,33 @@ layer(
         // in create_playground_commit they all read the same one, and four
         // inserts fail on the one-child constraint instead of naming the
         // conflict.
-        const racing = yield* PgRootDB.use((db) =>
-          db.transaction((trx) =>
+        // The saves are forked before the transaction opens: a fiber started
+        // inside it would inherit the open transaction, and its saves would
+        // join it instead of using their own connections.
+        const locked = yield* Deferred.make<void>();
+        const racing = yield* Effect.forkChild(
+          Deferred.await(locked).pipe(
+            Effect.andThen(
+              Effect.all(
+                Array.makeBy(5, (i) => Effect.result(save(created, created.first, `select ${i}`))),
+                { concurrency: "unbounded" },
+              ),
+            ),
+          ),
+        );
+        yield* PgRootDB.use((pool) =>
+          pool.withTransaction(
             Effect.gen(function* () {
-              yield* trx.all(trx.raw(sql`lock table app_public.playground_commits in share mode`));
-              const saves = yield* Effect.forkChild(
-                Effect.all(
-                  Array.makeBy(5, (i) =>
-                    Effect.result(save(created, created.first, `select ${i}`)),
-                  ),
-                  { concurrency: "unbounded" },
-                ),
+              yield* queriesOn<DB>(pool).exec(
+                rawQuery(sql`lock table app_public.playground_commits in share mode`),
               );
+              yield* Deferred.succeed(locked, undefined);
               yield* locksWaiting.pipe(
                 Effect.repeat({
                   until: (waiting) => waiting >= 5,
                   schedule: Schedule.spaced(Duration.millis(10)),
                 }),
               );
-              return saves;
             }),
           ),
         );
@@ -177,21 +199,17 @@ layer(
       Effect.gen(function* () {
         const second = yield* save(created, created.first, "select 2");
 
-        const middle = yield* PgRootDB.use((db) =>
-          db.all(
-            db.connection
-              .deleteFrom("app_public.playground_commits")
-              .where("id", "=", created.first),
+        const middle = yield* withRoot((db) =>
+          db.exec((k) =>
+            k.deleteFrom("app_public.playground_commits").where("id", "=", created.first),
           ),
         ).pipe(Effect.flip);
         // 23503: a foreign key still refers to the row, here the child's parent.
         expect(Option.map(middle.report, (report) => report.code)).toEqual(Option.some("23503"));
 
-        yield* PgRootDB.use((db) =>
-          db.all(
-            db.connection
-              .deleteFrom("app_public.playground_commits")
-              .where("id", "=", second.commit_id),
+        yield* withRoot((db) =>
+          db.exec((k) =>
+            k.deleteFrom("app_public.playground_commits").where("id", "=", second.commit_id),
           ),
         );
         expect(yield* listCommitIds(created.hash)).toEqual([created.first]);
@@ -204,11 +222,9 @@ layer(
   it.effect("takes a save with no basis as the new root of a playground emptied by a delete", () =>
     withAnonymousPlayground((created) =>
       Effect.gen(function* () {
-        yield* PgRootDB.use((db) =>
-          db.all(
-            db.connection
-              .deleteFrom("app_public.playground_commits")
-              .where("id", "=", created.first),
+        yield* withRoot((db) =>
+          db.exec((k) =>
+            k.deleteFrom("app_public.playground_commits").where("id", "=", created.first),
           ),
         );
         expect(yield* listCommitIds(created.hash)).toEqual([]);
@@ -225,11 +241,11 @@ layer(
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
       const hash = `pgchain${suffix}`;
-      yield* PgRootDB.use((db) =>
+      yield* withRoot((db) =>
         Effect.gen(function* () {
           const user = yield* createUser(db, `chain_${suffix}`);
-          yield* db.all(
-            db.connection
+          yield* db.exec((k) =>
+            k
               .insertInto("app_public.playgrounds")
               .values({ hash, privacy: "public", user_id: user.id }),
           );
@@ -252,8 +268,8 @@ layer(
 
           yield* deleteUser(db, user.id);
 
-          const left = yield* db.all(
-            db.connection
+          const left = yield* db.all(S.Struct({ id: S.String }), (k) =>
+            k
               .selectFrom("app_public.playground_commits")
               .select("id")
               .where("playground_hash", "=", hash),

@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Match, Option, Schema } from "effect";
 
-import { PgRootDB } from "../server/db.js";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
 
 /**
  * Gives a GitHub sponsor the sponsor role, and takes it back when the
@@ -12,11 +12,11 @@ import { PgRootDB } from "../server/db.js";
  */
 export class Sponsorship extends Context.Service<Sponsorship>()("postgres-garden/sponsorship", {
   make: Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const db = queriesOn<DB>(yield* PgRootDB);
 
     const setRole = (userId: string, from: "user" | "sponsor", to: "user" | "sponsor") =>
-      db.all(
-        db.connection
+      db.exec((k) =>
+        k
           .updateTable("app_public.users")
           .set({ role: to })
           .where("id", "=", userId)
@@ -29,8 +29,8 @@ export class Sponsorship extends Context.Service<Sponsorship>()("postgres-garden
           return yield* Effect.logWarning(`The sponsorship event (${action}) names no sponsor`);
         }
         const { login } = sponsorship.sponsor.value;
-        const account = yield* db.maybe(
-          db.connection
+        const account = yield* db.maybe(Schema.Struct({ user_id: Schema.String }), (k) =>
+          k
             .selectFrom("app_public.user_authentications")
             .select("user_id")
             .where("service", "=", "github")

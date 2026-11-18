@@ -4,7 +4,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { Context, Effect, ManagedRuntime, Match, Option } from "effect";
 import * as S from "effect/Schema";
-import { ApiCaller, type ClientFailure, type PgGardenClient } from "../../httpapi-client";
+import { ApiCaller, type PgGardenClient } from "../../httpapi-client";
 import {
   RelayMethod,
   RelayRequest,
@@ -195,10 +195,7 @@ export const createWebviewApiClient = <Message, Encoded>(options: {
 
   return {
     /** Makes one call against the contract, attributed to a named UI action. */
-    apiCall: <A, E extends ClientFailure>(
-      action: string,
-      run: (api: PgGardenClient) => Effect.Effect<A, E>,
-    ) =>
+    apiCall: <A, E>(action: string, run: (api: PgGardenClient) => Effect.Effect<A, E>) =>
       caller.contextEffect.pipe(
         Effect.flatMap((context) => Context.get(context, ApiCaller).call(action, run)),
       ),

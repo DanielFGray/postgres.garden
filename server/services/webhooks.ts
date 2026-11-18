@@ -1,7 +1,7 @@
 import { Config, Context, Effect, Layer, Option, Redacted, Schema as S } from "effect";
 import { HttpServerRequest } from "effect/http";
 import { sql } from "kysely";
-import { PgRootDB } from "../db.js";
+import { PgRootDB, queriesOn, type DB } from "../db.js";
 import { recordWebhook } from "../metrics.js";
 
 class WebhookNotConfiguredError extends S.TaggedError<
@@ -28,7 +28,7 @@ class WebhookVerificationError extends S.TaggedError<
 export class Webhooks extends Context.Service<Webhooks>()("postgres-garden/webhooks", {
   make: Effect.gen(function* () {
     const webhookSecret = yield* Config.option(Config.Redacted("GITHUB_WEBHOOK_SECRET"));
-    const root = yield* PgRootDB;
+    const root = queriesOn<DB>(yield* PgRootDB);
     return {
       handleGitHubSponsor: Effect.fn("Webhooks.handleGitHubSponsor")(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
@@ -75,10 +75,15 @@ export class Webhooks extends Context.Service<Webhooks>()("postgres-garden/webho
             return { ok: true as const };
           }
 
-          yield* root.all(
-            root.connection.selectNoFrom((eb) =>
+          // The body is JSON text, so it goes through text: a string sent straight
+          // to a json parameter is encoded a second time.
+          yield* root.exec((k) =>
+            k.selectNoFrom((eb) =>
               eb
-                .fn("graphile_worker.add_job", [eb.val("sponsor_webhook"), sql`${body}::json`])
+                .fn("graphile_worker.add_job", [
+                  eb.val("sponsor_webhook"),
+                  sql`${body}::text::json`,
+                ])
                 .as("add_job"),
             ),
           );

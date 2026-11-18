@@ -1,8 +1,8 @@
 import { NodeCrypto } from "@effect/platform-node";
 import { expect, layer } from "@effect/vitest";
 import { DateTime, Effect, Layer, Option } from "effect";
-import { DatabaseLive, PgRootDB } from "../db.js";
-import { randomSuffix, withCapturedLogs } from "../testSupport.js";
+import { DatabaseLive } from "../db.js";
+import { randomSuffix, withCapturedLogs, withRoot } from "../testSupport.js";
 import { Sessions } from "./sessions.js";
 import { TestValkeyLive } from "../test/valkey.js";
 import { insertCommit, setHead, withPlayground } from "../test/playgrounds.js";
@@ -35,14 +35,14 @@ layer(
       Effect.gen(function* () {
         // One timestamp for both commits: ordering by the clock cannot tell
         // them apart, which is why the head is a column and not a maximum.
-        const first = yield* PgRootDB.use((db) =>
+        const first = yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "first",
             data: { files: [{ path: "a.sql", content: "select 1" }] },
             createdAt: fixedInstant,
           }),
         );
-        const second = yield* PgRootDB.use((db) =>
+        const second = yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "second",
             data: { files: [{ path: "b.sql", content: "select 2" }] },
@@ -50,7 +50,7 @@ layer(
             parentId: first.id,
           }),
         );
-        yield* PgRootDB.use((db) => setHead(db, hash, second.id));
+        yield* withRoot((db) => setHead(db, hash, second.id));
 
         const commit = yield* headCommit(hash);
 
@@ -65,7 +65,7 @@ layer(
   it.effect("answers null for a playground with no head commit", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        yield* PgRootDB.use((db) =>
+        yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "orphan",
             data: { files: [] },
@@ -93,14 +93,14 @@ layer(
   it.effect("fails rather than reporting an empty workspace for data that is not a file list", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* PgRootDB.use((db) =>
+        const head = yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "malformed",
             data: { files: "not-an-array" },
             createdAt: fixedInstant,
           }),
         );
-        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
+        yield* withRoot((db) => setHead(db, hash, head.id));
 
         const error = yield* Effect.flip(headCommit(hash));
         // A commit whose jsonb does not describe a file list is a broken
@@ -113,14 +113,14 @@ layer(
   it.effect("serves the page without a commit, and says why, when the commit is broken", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* PgRootDB.use((db) =>
+        const head = yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "malformed",
             data: { files: "not-an-array" },
             createdAt: fixedInstant,
           }),
         );
-        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
+        yield* withRoot((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
           PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),
@@ -141,14 +141,14 @@ layer(
   it.effect("serves a readable head commit as the page's initial data", () =>
     withPlayground((hash) =>
       Effect.gen(function* () {
-        const head = yield* PgRootDB.use((db) =>
+        const head = yield* withRoot((db) =>
           insertCommit(db, hash, {
             message: "initial",
             data: { files: [{ path: "a.sql", content: "select 1" }], activeFile: "a.sql" },
             createdAt: fixedInstant,
           }),
         );
-        yield* PgRootDB.use((db) => setHead(db, hash, head.id));
+        yield* withRoot((db) => setHead(db, hash, head.id));
 
         const { result, lines } = yield* withCapturedLogs(
           PageData.use((pages) => pages.initialState(`/playgrounds/${hash}`, Option.none())),

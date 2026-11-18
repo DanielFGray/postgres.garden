@@ -4,9 +4,9 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import type { RateLimiter } from "effect/persistence/RateLimiter";
 import { RateLimitMiddleware } from "../shared/api/rateLimit.js";
 import { PgGardenApi } from "../shared/httpApi.js";
-import { PgRootDB } from "./db.js";
 import { TooManyRequests } from "../shared/errors.js";
 import { RateLimitMiddlewareLive, rules } from "./rateLimit.js";
+import { withRoot } from "./testSupport.js";
 import { RateLimiterMemory } from "./services/rateLimiter.js";
 import { makeTestApi } from "./test/apiHarness.js";
 import { RateLimiterStoreFails, RateLimiterStoreSilent } from "./test/rateLimiterStores.js";
@@ -142,6 +142,6 @@ const signIn = Effect.fnUntraced(function* (username: string) {
 });
 
 const deleteUsers = (usernames: ReadonlyArray<string>) =>
-  PgRootDB.use((db) =>
-    db.all(db.connection.deleteFrom("app_public.users").where("username", "in", usernames)),
+  withRoot((db) =>
+    db.exec((k) => k.deleteFrom("app_public.users").where("username", "in", usernames)),
   ).pipe(Effect.ignore);

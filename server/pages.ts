@@ -11,7 +11,7 @@ import {
 import type { Connect } from "vite";
 import { isApiPath } from "../shared/httpApi.js";
 import { isProduction } from "./config.js";
-import type { DatabaseError } from "./db.js";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
 import { PageData, pathnameOf } from "./services/pageData.js";
 
 /**

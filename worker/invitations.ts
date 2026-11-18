@@ -1,7 +1,15 @@
 import type { LoadedInvitation } from "@danielfgray/stompbox/mail";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 
-import { PgRootDB } from "../server/db.js";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
+
+/** The invitation's address or user, its code, and the organization's name. */
+const InvitationRow = Schema.Struct({
+  email: Schema.NullOr(Schema.String),
+  code: Schema.NullOr(Schema.String),
+  user_id: Schema.NullOr(Schema.String),
+  name: Schema.String,
+});
 
 /**
  * Reads an organization invitation for its mail task. Runs as the owner role:
@@ -10,7 +18,7 @@ import { PgRootDB } from "../server/db.js";
  */
 export class Invitations extends Context.Service<Invitations>()("postgres-garden/invitations", {
   make: Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const db = queriesOn<DB>(yield* PgRootDB);
 
     return {
       /**
@@ -20,8 +28,8 @@ export class Invitations extends Context.Service<Invitations>()("postgres-garden
        * The table does not record who invited, so `inviterName` is none.
        */
       load: Effect.fn("Invitations.load")(function* (id: string) {
-        const invitation = yield* db.maybe(
-          db.connection
+        const invitation = yield* db.maybe(InvitationRow, (k) =>
+          k
             .selectFrom("app_public.organization_invitations as invitation")
             .innerJoin(
               "app_public.organizations as organization",
@@ -42,8 +50,8 @@ export class Invitations extends Context.Service<Invitations>()("postgres-garden
           ? Option.some(email)
           : user_id
             ? yield* db
-                .maybe(
-                  db.connection
+                .maybe(Schema.Struct({ email: Schema.String }), (k) =>
+                  k
                     .selectFrom("app_public.user_emails")
                     .select("email")
                     .where("user_id", "=", user_id)

@@ -1,12 +1,12 @@
 /**
  * Helpers every handler group shares: reading the edit key and requiring a
- * session. A refused query is answered with `toHttpError`
- * (`server/databaseErrors.ts`).
+ * session. A refused query is answered by the failure boundary
+ * (`server/failureBoundary.ts`).
  */
 import { Effect, Option } from "effect";
 import { EDIT_KEY_HEADER } from "../../shared/api/playgrounds.js";
 import { CurrentSession } from "../../shared/session.js";
-import { Unauthorized } from "../../shared/errors.js";
+import { Unauthorized } from "@danielfgray/stompbox/http";
 
 type RequestHeaders = Record<string, string | ReadonlyArray<string> | undefined>;
 
@@ -30,8 +30,6 @@ export const requireSession = CurrentSession.pipe(
     ),
   ),
   Effect.catchTag("NoSuchElementError", () =>
-    Effect.fail(
-      new Unauthorized({ message: "Sign in to do that.", reason: "authentication_required" }),
-    ),
+    Effect.fail(new Unauthorized({ message: "Sign in to do that." })),
   ),
 );

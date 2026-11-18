@@ -1,6 +1,6 @@
 import { Schema as S } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { Unauthorized } from "../errors.js";
+import { Unauthorized } from "@danielfgray/stompbox/http";
 import { SuccessResponse, User } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";

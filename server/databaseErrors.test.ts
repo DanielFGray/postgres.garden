@@ -1,5 +1,6 @@
 import { expect, it, suite } from "@effect/vitest";
 import { Config, Effect, Layer, Schema as S } from "effect";
+import { toDatabaseError } from "@danielfgray/stompbox/db";
 import { HttpClientRequest } from "effect/http";
 import {
   HttpApi,
@@ -8,36 +9,37 @@ import {
   HttpApiGroup,
   HttpApiSchema,
 } from "effect/http-api";
-import { type RawBuilder, sql } from "kysely";
+import { boundaryErrors } from "@danielfgray/stompbox/http";
+import { sql } from "kysely";
 
 import { FailureBoundary } from "../shared/api/failureBoundary.js";
-import { DatabaseRefusals } from "../shared/errors.js";
+import { refusals } from "../shared/errors.js";
 import { toHttpError } from "./databaseErrors.js";
-import { PgAuthDB, PgRootDB } from "./db.js";
+import { PgAuthDB, PgRootDB, queriesOn, type DB } from "./db.js";
 import { FailureBoundaryLive } from "./failureBoundary.js";
 import { requestProbe } from "./test/probeServer.js";
 
-/** Statements that fail the way the app's SQL fails. */
+/** Statements, as plain text for the pool, that fail the way the app's SQL fails. */
 const statements = {
-  custom: sql`do $$ begin
+  custom: `do $$ begin
     raise exception 'You are not allowed to do that' using errcode = 'DNIED';
   end $$`,
-  usernameTaken: sql`do $$ begin
+  usernameTaken: `do $$ begin
     raise exception 'duplicate key value violates unique constraint "users_username_key"'
       using errcode = '23505', constraint = 'users_username_key',
         detail = 'Key (username)=(alice) already exists.';
   end $$`,
-  otherUnique: sql`do $$ begin
+  otherUnique: `do $$ begin
     raise exception 'duplicate key value violates unique constraint "sessions_cookie_id_key"'
       using errcode = '23505', constraint = 'sessions_cookie_id_key',
         detail = 'Key (cookie_id)=(c00k1e) already exists.';
   end $$`,
-  divisionByZero: sql`select 1 / 0`,
-  unknown: sql`do $$ begin
+  divisionByZero: `select 1 / 0`,
+  unknown: `do $$ begin
     raise exception 'relation secret_table is broken' using errcode = 'ZZ001',
       hint = 'look at secret_table';
   end $$`,
-} satisfies Record<string, RawBuilder<unknown>>;
+};
 
 const ProbeApi = HttpApi.make("probe")
   .add(
@@ -54,13 +56,13 @@ const ProbeApi = HttpApi.make("probe")
             ]),
           },
           success: S.Void.pipe(HttpApiSchema.status(204)),
-          error: DatabaseRefusals,
+          error: [...boundaryErrors, ...refusals],
         }),
       )
       .add(
         HttpApiEndpoint.get("visitorInsert", "/api/visitor-insert", {
           success: S.Void.pipe(HttpApiSchema.status(204)),
-          error: DatabaseRefusals,
+          error: [...boundaryErrors, ...refusals],
         }),
       ),
   )
@@ -70,15 +72,16 @@ const ProbeHandlers = HttpApiBuilder.group(
   ProbeApi,
   "probe",
   Effect.fnUntraced(function* (handlers) {
-    const root = yield* PgRootDB;
+    const root = queriesOn<DB>(yield* PgRootDB);
     const auth = yield* PgAuthDB;
+    const authQueries = queriesOn<DB>(auth);
     const visitor = yield* Config.String("DATABASE_VISITOR");
     return handlers
       .handle(
         "raise",
         Effect.fn("Probe.raise")(
           function* ({ params: { name } }) {
-            yield* root.all(root.raw(statements[name]));
+            yield* root.exec((k) => ({ compile: () => sql.raw(statements[name]).compile(k) }));
           },
           Effect.catchTag("DatabaseError", toHttpError),
         ),
@@ -87,19 +90,23 @@ const ProbeHandlers = HttpApiBuilder.group(
         "visitorInsert",
         Effect.fn("Probe.visitorInsert")(
           function* () {
-            yield* auth.transaction((trx) =>
-              trx
-                .all(trx.raw(sql`select set_config('role', ${visitor}, true)`))
-                .pipe(
-                  Effect.andThen(
-                    trx.all(
-                      trx.raw(
-                        sql`insert into app_public.user_emails (email) values ('probe@example.com')`,
+            yield* auth
+              .withTransaction(
+                authQueries
+                  .exec((k) =>
+                    k.selectNoFrom(sql<string>`set_config('role', ${visitor}, true)`.as("role")),
+                  )
+                  .pipe(
+                    Effect.andThen(
+                      authQueries.exec((k) =>
+                        k
+                          .insertInto("app_public.user_emails")
+                          .values({ email: "probe@example.com" }),
                       ),
                     ),
                   ),
-                ),
-            );
+              )
+              .pipe(toDatabaseError);
           },
           Effect.catchTag("DatabaseError", toHttpError),
         ),
@@ -132,9 +139,7 @@ suite("toHttpError", () => {
       expect(lines).toHaveLength(2);
       expect(lines[1]?.message).toEqual(["Sent HTTP response"]);
       expect(lines[0]?.level).toBe("Info");
-      expect(lines[0]?.cause).toContain(
-        "[DNIED] You are not allowed to do that; query: Probe.raise",
-      );
+      expect(lines[0]?.cause).toContain("[DNIED] You are not allowed to do that");
     }),
   );
 
@@ -143,11 +148,7 @@ suite("toHttpError", () => {
       name: "a unique constraint users can hit, by its name",
       path: "/api/raise/usernameTaken",
       status: 409,
-      body: {
-        _tag: "Conflict",
-        message: "That username is already taken.",
-        reason: "username_taken",
-      },
+      body: { _tag: "UsernameTaken", message: "That username is already taken." },
       logged: "detail: Key (username)=(alice) already exists.; constraint: users_username_key",
     },
     {
@@ -165,6 +166,7 @@ suite("toHttpError", () => {
         _tag: "InvalidOperation",
         message: "Some values are not valid.",
         reason: "invalid_input",
+        issues: [],
       },
       logged: "[22012] division by zero",
     },
@@ -203,7 +205,7 @@ suite("toHttpError", () => {
       expect(line?.level).toBe("Error");
       expect(line?.message).toEqual(["Unexpected failure"]);
       expect(line?.cause).toContain(
-        "[ZZ001] relation secret_table is broken; query: Probe.raise; hint: look at secret_table",
+        "[ZZ001] relation secret_table is broken; hint: look at secret_table",
       );
       expect(status).toBe(500);
       expect(yield* parseBody(body)).toEqual({

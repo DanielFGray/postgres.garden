@@ -14,7 +14,7 @@ import {
 import * as arctic from "arctic";
 import { sql } from "kysely";
 import { rootUrl } from "../config.js";
-import { PgRootDB } from "../db.js";
+import { PgRootDB, queriesOn, type DB } from "../db.js";
 import { Sessions } from "./sessions.js";
 import { Cookies } from "./cookies.js";
 import { UserRole as UserRoleSchema } from "../../shared/schemas.js";
@@ -123,6 +123,9 @@ class OAuthCallbackError extends S.TaggedError<
   cause: S.optional(S.Unknown),
 }) {}
 
+/** The user that signing in with GitHub linked or created. */
+const LinkedUserRow = S.Struct({ id: S.String, username: S.String, role: S.String });
+
 const callbackError = (message: string) =>
   Effect.fail(new OAuthCallbackError({ message, isBadCode: false }));
 
@@ -138,7 +141,7 @@ export class OAuth extends Context.Service<OAuth>()("postgres-garden/oauth", {
     );
     const callbackUrl = `${yield* rootUrl}/auth/github/callback`;
     const cookies = yield* Cookies;
-    const root = yield* PgRootDB;
+    const root = queriesOn<DB>(yield* PgRootDB);
     const sessions = yield* Sessions;
     const client = yield* HttpClient.HttpClient;
 
@@ -297,9 +300,11 @@ export class OAuth extends Context.Service<OAuth>()("postgres-garden/oauth", {
             );
 
             // 5. Link or register user
+            // The JSON arrives as text: a string sent straight to a json parameter
+            // is encoded a second time.
             const linkedUser = yield* root
-              .all(
-                root.connection
+              .all(LinkedUserRow, (k) =>
+                k
                   .selectFrom(
                     sql<{
                       id: string;
@@ -309,8 +314,8 @@ export class OAuth extends Context.Service<OAuth>()("postgres-garden/oauth", {
           f_user_id => ${currentUserId ?? null},
           f_service => ${"github"},
           f_identifier => ${userInfo.login},
-          f_profile => ${profileJson}::json,
-          f_auth_details => ${tokensJson}::json
+          f_profile => ${profileJson}::text::json,
+          f_auth_details => ${tokensJson}::text::json
                         )`.as("linked_user"),
                   )
                   .selectAll(),

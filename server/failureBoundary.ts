@@ -1,58 +1,21 @@
-import { Cause, Effect, Layer } from "effect";
-import { HttpApiError } from "effect/http-api";
-import * as SchemaIssue from "effect/SchemaIssue";
-import type { unhandled } from "effect/Types";
+import { FailureBoundaryLayer } from "@danielfgray/stompbox/http/server";
+import { Cause, Effect } from "effect";
 
 import { FailureBoundary } from "../shared/api/failureBoundary.js";
-import { InternalError, InvalidOperation } from "../shared/errors.js";
+import { InternalError } from "@danielfgray/stompbox/http";
+import { toHttpError } from "./databaseErrors.js";
 
 /**
- * The one place that logs an unexpected failure. A request that fails its
- * schema becomes `InvalidOperation`; other typed failures pass through for the
- * endpoint to encode; a cause with a defect is logged with the trace id and
- * answered with that id, never with the defect's text.
+ * The one place a request's failure is answered: a schema failure becomes
+ * `InvalidOperation`, a refused query answers through `toHttpError`, and a
+ * defect is logged with the trace id and answered with that id.
  */
-export const FailureBoundaryLive = Layer.succeed(FailureBoundary, (httpEffect) =>
-  Effect.catchCauseIf(
-    Effect.catchIf(httpEffect, isSchemaError, rejectRequest),
-    Cause.hasDies,
-    reportUnexpected,
-  ),
-);
-
-/** The middleware sees failures as `unhandled`; HttpApi tags its own schema failures. */
-const isSchemaError = (error: unhandled): error is unhandled & HttpApiError.HttpApiSchemaError =>
-  HttpApiError.HttpApiSchemaError.is(error);
-
-/**
- * A request part that fails decoding is the caller's mistake. A response that
- * fails encoding (`Body`, `ResponseHeaders`) is ours, so it is unexpected.
- */
-const rejectRequest = Effect.fnUntraced(function* (error: HttpApiError.HttpApiSchemaError) {
-  if (error.kind === "Body" || error.kind === "ResponseHeaders") {
-    return yield* reportUnexpected(Cause.fail(error));
-  }
-  return yield* new InvalidOperation({
-    message: "Some values are not valid.",
-    reason: "invalid_input",
-    issues: formatIssues(error.cause.issue).issues.map((issue) => ({
-      path: [error.kind.toLowerCase(), ...(issue.path ?? []).map(pathSegment)],
-      message: issue.message,
-    })),
-  });
-});
-
-const pathSegment = (segment: PropertyKey | { readonly key: PropertyKey }) => {
-  const key = typeof segment === "object" ? segment.key : segment;
-  return typeof key === "number" ? key : String(key);
-};
-
-const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+export const FailureBoundaryLive = FailureBoundaryLayer.make(FailureBoundary, toHttpError);
 
 /**
  * Logs an unexpected failure once, with its cause and trace id, and fails with
- * the InternalError that carries the id. Routes that answer their own failures
- * (the GitHub popup) use it too, so every defect has one log line.
+ * the `InternalError` that carries the id. The GitHub popup routes answer their
+ * own failures as a page, so they use it directly instead of the boundary.
  *
  * It runs in its own span: a child of the request span shares its trace id, and a
  * request that tracing skips still gets an id that its log line carries.

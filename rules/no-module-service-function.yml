@@ -25,4 +25,4 @@ rule:
           - kind: member_expression
             regex: '^[A-Z][A-Za-z0-9]*\.use$'
 ignores:
-  - 'server/api/**'
+  - "server/api/**"

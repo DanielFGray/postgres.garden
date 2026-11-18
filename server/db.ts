@@ -1,16 +1,8 @@
-import {
-  Array as Arr,
-  Config,
-  Context,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Redacted,
-  Schema,
-} from "effect";
-import { Kysely, PostgresDialect, sql, type ControlledTransaction, type RawBuilder } from "kysely";
-import * as pg from "pg";
+import { runnerOn } from "@danielfgray/stompbox/db";
+import { PgClient } from "@effect/sql-pg";
+import { Config, Context, Effect, Layer } from "effect";
+import * as Reactivity from "effect/reactivity/Reactivity";
+import type { SqlClient } from "effect/sql/SqlClient";
 import { waitFor } from "./dependencies.js";
 
 import type {
@@ -23,218 +15,57 @@ import type {
 
 export type { DB, User, Organization, Playground, Commit };
 
-export { PostgresError } from "pg-error-enum";
-
-/** What Postgres reports about a statement it refused. */
-export const PostgresReport = Schema.Struct({
-  /** The SQLSTATE: a standard code, or a custom one our SQL functions raise. */
-  code: Schema.String,
-  message: Schema.String,
-  detail: Schema.OptionFromOptional(Schema.String),
-  hint: Schema.OptionFromOptional(Schema.String),
-  constraint: Schema.OptionFromOptional(Schema.String),
-});
-export type PostgresReport = typeof PostgresReport.Type;
-
-/**
- * A failed database call. `report` is none when the failure did not come from
- * Postgres (a lost connection, a driver error). `message` is for the log only:
- * a defect's log line shows the error's message and cause, so the message
- * holds every part of the report and the span that ran the query.
- */
-export class DatabaseError extends Schema.TaggedError<
-  DatabaseError,
-  { readonly brand: unique symbol }
->()("DatabaseError", {
-  message: Schema.String,
-  report: Schema.Option(PostgresReport),
-  cause: Schema.Unknown,
-}) {}
-
-/** `query` names the span the query ran in, such as `Users.login`. */
-export const toDatabaseError = (cause: unknown, query: Option.Option<string> = Option.none()) => {
-  const report = Schema.decodeUnknownOption(PostgresReport)(cause);
-  return new DatabaseError({ message: logMessage(report, query, cause), report, cause });
-};
-
-/** A Kysely query builder, or any value whose `execute()` returns a Promise. */
-export type Query<A> = { execute(): Promise<A> };
-
 /** The tables the visitor role reaches: `app_public` only. */
 export type PublicDB = Pick<DB, Extract<keyof DB, `app_public.${string}`>>;
 
-/** A connection typed to the tables its role can reach, with the ways to run a query on it. */
-export type DbHandle<Schema = DB> = {
-  /** The connection to build queries against: the pool, or an open transaction. */
-  readonly connection: Kysely<Schema>;
-  /** Wraps a raw `sql` template so `all`, `one` and `maybe` run it on this connection. */
-  readonly raw: <A>(query: RawBuilder<A>) => Query<ReadonlyArray<A>>;
-  /** Runs a query and returns its result. */
-  readonly all: <A>(query: Query<A>) => Effect.Effect<A, DatabaseError>;
-  /** Runs a query and returns its sole row. No row is a defect: use it where the row must exist. */
-  readonly one: <A>(query: Query<ReadonlyArray<A>>) => Effect.Effect<A, DatabaseError>;
-  /** Runs a query and returns its first row, if any. */
-  readonly maybe: <A>(
-    query: Query<ReadonlyArray<A>>,
-  ) => Effect.Effect<Option.Option<A>, DatabaseError>;
-  /**
-   * Runs `use` in one transaction on one pooled connection: it commits when
-   * `use` succeeds and rolls back when it fails or is interrupted. Call it on a
-   * pool handle only; Kysely cannot start a transaction inside another.
-   */
-  readonly transaction: <A, E, R>(
-    use: (trx: DbHandle<Schema>) => Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E | DatabaseError, R>;
-};
+/** What `PgClient.make` builds: the client with the PgClient extras and the `SqlClient` surface. */
+export type Pool = PgClient.PgClient & SqlClient;
+
+// Shared by both database services so their pool setup stays identical. A
+// const, so it is defined before the classes that call it.
+const openPool = Effect.fnUntraced(function* (urlKey: string) {
+  const url = yield* Config.Redacted(urlKey);
+  // The pool opens no connection until the first query, so `make` fails only
+  // on a URL it cannot read: a fault in the settings, not a down database.
+  const client = yield* PgClient.make({ url }).pipe(Effect.orDie);
+  // A first query proves Postgres answers.
+  yield* client`select 1`.pipe(waitFor(`postgres (${urlKey})`), Effect.withTracerEnabled(false));
+  return client;
+});
 
 /**
- * The authenticator login. Its type holds only `app_public` tables. A query on
- * the pool itself runs as the authenticator role; request code reaches it
- * through `withAuthContext`, which switches each transaction to the visitor role.
+ * The owning role, which bypasses row-level security. Each query runs on the
+ * pool and commits on its own; work that must commit or roll back together
+ * runs inside `withTransaction`. Its connections are not the visitor pool's, so
+ * a root write inside a request stays committed when the request's transaction
+ * rolls back.
  */
-export class PgAuthDB extends Context.Service<PgAuthDB, DbHandle<PublicDB>>()(
-  "postgres-garden/db/PgAuthDB",
-  { make: makePool<PublicDB>("AUTH_DATABASE_URL").pipe(Effect.map(makeHandle)) },
-) {
-  static readonly layer = Layer.effect(this, this.make);
+export class PgRootDB extends Context.Service<PgRootDB, Pool>()("postgres-garden/db/PgRootDB", {
+  make: openPool("DATABASE_URL"),
+}) {
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Reactivity.layer));
 }
 
 /**
- * The owning role, which bypasses row-level security. Each `all` runs on the
- * pool and commits on its own; work that must commit or roll back together uses
- * `transaction`. Its connections are not the visitor pool's, so a root write
- * inside a request stays committed when the request's transaction rolls back.
+ * The authenticator login. It has no rights of its own: request code reaches
+ * it through `withAuthContext` (server/requestDatabase.ts), which switches each
+ * request's transaction to the visitor role.
  */
-export class PgRootDB extends Context.Service<PgRootDB, DbHandle>()("postgres-garden/db/PgRootDB", {
-  make: makePool<DB>("DATABASE_URL").pipe(Effect.map(makeHandle)),
+export class PgAuthDB extends Context.Service<PgAuthDB, Pool>()("postgres-garden/db/PgAuthDB", {
+  make: openPool("AUTH_DATABASE_URL"),
 }) {
-  static readonly layer = Layer.effect(this, this.make);
+  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Reactivity.layer));
 }
 
 export const DatabaseLive = Layer.mergeAll(PgAuthDB.layer, PgRootDB.layer);
 
-// Shared by both database services so their pool setup stays identical.
-function makePool<Schema>(urlKey: string) {
-  return Effect.gen(function* () {
-    const url = yield* Config.Redacted(urlKey);
-    const db = connect<Schema>(Redacted.value(url));
-    yield* Effect.addFinalizer(() => Effect.promise(() => db.destroy()));
-    // The pool connects on first use, so a first query proves Postgres answers.
-    // The retries reuse this one pool.
-    yield* Effect.tryPromise({
-      try: () => sql`select 1`.execute(db),
-      catch: (cause) => toDatabaseError(cause),
-    }).pipe(waitFor(`postgres (${urlKey})`));
-    return db;
-  });
-}
-
-function makeHandle<Schema>(kysely: Kysely<Schema>): DbHandle<Schema> {
-  const raw = <A>(query: RawBuilder<A>): Query<ReadonlyArray<A>> => ({
-    execute: () => query.execute(kysely).then((result) => result.rows),
-  });
-  const one = <A>(query: Query<ReadonlyArray<A>>) => all(query).pipe(Effect.flatMap(takeOne));
-  const maybe = <A>(query: Query<ReadonlyArray<A>>) => all(query).pipe(Effect.map(Arr.head));
-  const transaction = <A, E, R>(use: (trx: DbHandle<Schema>) => Effect.Effect<A, E, R>) =>
-    Effect.acquireUseRelease(startTransaction(kysely), (trx) => use(makeHandle(trx)), settle);
-  return { connection: kysely, raw, all, one, maybe, transaction };
-}
-
 /**
- * Runs a query in its own `db.query` span, and maps its failure to
- * `DatabaseError`. The enclosing span (a service method) names the query in
- * the error.
+ * Queries typed by `Tables`, run on `client`. A service takes `PgRootDB` in its
+ * `make` and builds its queries with this, so its methods do not require the
+ * pool. Inside `client.withTransaction` they join its transaction.
  */
-function all<A>(query: Query<A>) {
-  return Effect.flatMap(Effect.option(Effect.currentSpan), (enclosing) =>
-    Effect.tryPromise({
-      try: () => query.execute(),
-      catch: (cause) =>
-        toDatabaseError(
-          cause,
-          Option.map(enclosing, (span) => span.name),
-        ),
-    }).pipe(Effect.withSpan("db.query")),
-  );
-}
+export const queriesOn = <Tables>(client: SqlClient) =>
+  runnerOn<Tables, never>(Effect.succeed(client));
 
-function logMessage(
-  report: Option.Option<PostgresReport>,
-  query: Option.Option<string>,
-  cause: unknown,
-) {
-  return Arr.getSomes([
-    Option.some(
-      Option.match(report, {
-        onNone: () =>
-          Option.match(Schema.decodeUnknownOption(DriverFailure)(cause), {
-            onNone: () => "Database call failed",
-            onSome: (failure) => `Database call failed: ${failure.message}`,
-          }),
-        onSome: ({ code, message }) => `[${code}] ${message}`,
-      }),
-    ),
-    Option.map(query, (name) => `query: ${name}`),
-    Option.map(
-      Option.flatMap(report, (r) => r.detail),
-      (detail) => `detail: ${detail}`,
-    ),
-    Option.map(
-      Option.flatMap(report, (r) => r.hint),
-      (hint) => `hint: ${hint}`,
-    ),
-    Option.map(
-      Option.flatMap(report, (r) => r.constraint),
-      (constraint) => `constraint: ${constraint}`,
-    ),
-  ]).join("; ");
-}
-
-const DriverFailure = Schema.Struct({ message: Schema.String });
-
-const expectedOneRow = new Error("expected one row");
-
-const takeOne = <A>(rows: ReadonlyArray<A>): Effect.Effect<A> =>
-  Option.match(Arr.head(rows), {
-    onNone: () => Effect.die(expectedOneRow),
-    onSome: Effect.succeed,
-  });
-
-/**
- * A Kysely instance over a `pg` pool. The pool connects lazily, on the first
- * query. int8 columns arrive as `bigint` rather than strings; the parser is
- * the pool's own, so other pg clients in the process keep their defaults.
- */
-function connect<Schema>(connectionString: string): Kysely<Schema> {
-  return new Kysely<Schema>({
-    dialect: new PostgresDialect({
-      pool: new pg.Pool({
-        connectionString,
-        types: {
-          getTypeParser: (oid, format) =>
-            oid === pg.types.builtins.INT8 ? BigInt : pg.types.getTypeParser(oid, format),
-        },
-      }),
-    }),
-  });
-}
-
-/** Opens a transaction on one pooled connection. */
-function startTransaction<Schema>(db: Kysely<Schema>) {
-  return Effect.tryPromise({
-    try: () => db.startTransaction().execute(),
-    catch: toDatabaseError,
-  });
-}
-
-/**
- * Commits a transaction whose scope succeeded and rolls it back otherwise. A
- * failed rollback leaves the connection in an unknown state, so it is a defect.
- */
-function settle<A, E, Schema>(trx: ControlledTransaction<Schema>, exit: Exit.Exit<A, E>) {
-  return Exit.isSuccess(exit)
-    ? Effect.tryPromise({ try: () => trx.commit().execute(), catch: toDatabaseError })
-    : Effect.tryPromise({ try: () => trx.rollback().execute(), catch: toDatabaseError }).pipe(
-        Effect.orDie,
-      );
-}
+/** What `queriesOn` returns: the typed query runner of a client. */
+export type Queries<Tables> = ReturnType<typeof queriesOn<Tables>>;

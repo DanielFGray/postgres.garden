@@ -1,10 +1,12 @@
 import { expect, it, suite } from "@effect/vitest";
-import { type Config, ConfigProvider, Effect, Layer, Schema } from "effect";
+import { PgClient } from "@effect/sql-pg";
+import { type Config, ConfigProvider, Effect, Layer, Redacted, Schema } from "effect";
+import * as Reactivity from "effect/reactivity/Reactivity";
 import { HttpClientRequest } from "effect/http";
 import { Redis, RedisError, make as makeRedis } from "effect/persistence/Redis";
 
 import { Worker } from "../worker/worker.js";
-import { PgAuthDB, PgRootDB, toDatabaseError } from "./db.js";
+import { PgAuthDB, PgRootDB } from "./db.js";
 import type { DependencyUnavailable } from "./dependencies.js";
 import { HealthLive } from "./health.js";
 import { TestValkeyLive } from "./test/valkey.js";
@@ -13,17 +15,11 @@ import { requestProbe } from "./test/probeServer.js";
 const workerRunning = (isRunning: boolean) =>
   Layer.succeed(Worker, Worker.of({ isRunning: Effect.succeed(isRunning) }));
 
-/** The real auth pool, except that every query fails. */
+/** An auth pool aimed at a port nothing listens on, so every query fails. */
 const AuthDatabaseDown = Layer.effect(
   PgAuthDB,
-  Effect.gen(function* () {
-    const handle = yield* PgAuthDB;
-    return PgAuthDB.of({
-      ...handle,
-      all: () => Effect.fail(toDatabaseError(new Error("connection refused"))),
-    });
-  }),
-).pipe(Layer.provide(PgAuthDB.layer));
+  PgClient.make({ url: Redacted.make("postgres://nobody@127.0.0.1:1/none") }).pipe(Effect.orDie),
+).pipe(Layer.provide(Reactivity.layer));
 
 /** A Valkey whose every command fails, as it does while Valkey is down. */
 const ValkeyDown = Layer.effect(

@@ -1,6 +1,6 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { NotFound, Unauthorized } from "../errors.js";
+import { NotFound, Unauthorized } from "@danielfgray/stompbox/http";
 import { SuccessResponse, User, UserAuthentication, UserEmail } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 import { RateLimitMiddleware } from "./rateLimit.js";

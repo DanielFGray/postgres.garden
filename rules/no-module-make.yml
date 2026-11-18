@@ -7,7 +7,7 @@ rule:
   all:
     - has:
         field: name
-        regex: '^make[A-Z]'
+        regex: "^make[A-Z]"
     - has:
         field: value
         regex: '^Effect\.(gen|fn|fnUntraced)\b'

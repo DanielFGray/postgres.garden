@@ -1,6 +1,7 @@
 import { Schema as S, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { Conflict, NotFound, Unauthorized } from "../errors.js";
+import { NotFound, Unauthorized } from "@danielfgray/stompbox/http";
+import { StaleBasis } from "../errors.js";
 import { Playground, Privacy } from "../schemas.js";
 import { SessionMiddleware } from "../session.js";
 
@@ -209,11 +210,11 @@ export const PlaygroundsGroup = HttpApiGroup.make("apiPlaygrounds")
         files: S.Array(PlaygroundFile),
         activeFile: S.optional(S.NullOr(S.String)),
         // The commit the files were edited from. The save is refused with a
-        // Conflict unless it is still the head: someone saved in between.
+        // StaleBasis unless it is still the head: someone saved in between.
         basis: S.NullOr(S.String),
       }),
       success: CreateCommitResult,
-      error: [NotFound, Conflict],
+      error: [NotFound, StaleBasis],
     }),
   )
   .add(

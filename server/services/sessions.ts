@@ -2,8 +2,9 @@ import { NodeCrypto } from "@effect/platform-node";
 import { Config, Context, DateTime, Effect, Layer, Option, Record, Schema as S } from "effect";
 import { SecureRandom } from "effect/crypto";
 import { Redis } from "effect/persistence/Redis";
-import { PgRootDB } from "../db.js";
-import type { SessionData } from "../../shared/session.js";
+import { toDatabaseError } from "@danielfgray/stompbox/db";
+import { PgRootDB, queriesOn, type DB } from "../db.js";
+import { SessionUser, type SessionData } from "../../shared/session.js";
 import { UserRole } from "../../shared/schemas.js";
 import { Secrets, constantTimeEqual } from "../secrets.js";
 
@@ -46,9 +47,13 @@ const CachedSession = S.Struct({
 
 const decodeCachedSession = S.decodeUnknownEffect(CachedSession);
 
+/** The user fields a session carries, as `app_public.users` returns them. */
+const SessionUserRow = S.toType(SessionUser);
+
 export class Sessions extends Context.Service<Sessions>()("postgres-garden/sessions", {
   make: Effect.gen(function* () {
-    const root = yield* PgRootDB;
+    const pool = yield* PgRootDB;
+    const root = queriesOn<DB>(pool);
     const secureRandom = yield* SecureRandom.SecureRandom;
     const secrets = yield* Secrets;
     const redis = yield* Redis;
@@ -70,29 +75,31 @@ export class Sessions extends Context.Service<Sessions>()("postgres-garden/sessi
         // same row, so it either commits first - the read then finds nothing,
         // which the callers answer as an authentication failure - or it waits
         // for this transaction and cascades the new session away afterwards.
-        const user = yield* root.transaction((trx) =>
-          Effect.gen(function* () {
-            const found = yield* trx
-              .all(
-                trx.connection
-                  .selectFrom("app_public.users")
-                  .select(["id", "username", "role", "is_verified"])
-                  .where("id", "=", userId)
-                  .forKeyShare(),
-              )
-              .pipe(Effect.head);
+        const user = yield* pool
+          .withTransaction(
+            Effect.gen(function* () {
+              const found = yield* root
+                .all(SessionUserRow, (k) =>
+                  k
+                    .selectFrom("app_public.users")
+                    .select(["id", "username", "role", "is_verified"])
+                    .where("id", "=", userId)
+                    .forKeyShare(),
+                )
+                .pipe(Effect.head);
 
-            yield* trx.all(
-              trx.connection.insertInto("app_private.sessions").values({
-                id: sessionUuid,
-                user_id: found.id,
-                expires_at: expiresAt,
-              }),
-            );
+              yield* root.exec((k) =>
+                k.insertInto("app_private.sessions").values({
+                  id: sessionUuid,
+                  user_id: found.id,
+                  expires_at: expiresAt,
+                }),
+              );
 
-            return found;
-          }),
-        );
+              return found;
+            }),
+          )
+          .pipe(toDatabaseError);
 
         // The cache is written only once the session row exists, so a failed
         // insert leaves no hash behind for a cookie that was never issued.
@@ -157,8 +164,8 @@ export class Sessions extends Context.Service<Sessions>()("postgres-garden/sessi
         // immediately instead of waiting up to SESSION_TTL_MS for the cache
         // to expire.
         const dbSession = yield* root
-          .all(
-            root.connection
+          .all(S.Struct({ expires_at: S.NullOr(S.Date) }), (k) =>
+            k
               .selectFrom("app_private.sessions")
               .select(["expires_at"])
               .where("id", "=", cached.session_uuid),
@@ -195,8 +202,8 @@ export class Sessions extends Context.Service<Sessions>()("postgres-garden/sessi
           .pipe(Effect.flatMap(decodeField));
         yield* redis.send("DEL", key);
         if (sessionUuid) {
-          yield* root.all(
-            root.connection.deleteFrom("app_private.sessions").where("id", "=", sessionUuid),
+          yield* root.exec((k) =>
+            k.deleteFrom("app_private.sessions").where("id", "=", sessionUuid),
           );
         }
       }),

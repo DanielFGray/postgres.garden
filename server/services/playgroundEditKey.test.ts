@@ -13,21 +13,45 @@ import * as S from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { sql } from "kysely";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
-import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle, type PublicDB } from "../db.js";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import type { ServiceUnavailable } from "@danielfgray/stompbox/http";
+import { DatabaseLive, type DB, type Queries } from "../db.js";
 import { Secrets } from "../secrets.js";
 import { Playgrounds } from "./playgrounds.js";
-import { withAuthContext } from "../requestDatabase.js";
-import { asVisitor, createUser, deleteUser, randomSuffix } from "../testSupport.js";
+import { type requestDb, withAuthContext } from "../requestDatabase.js";
+import { asVisitor, createUser, deleteUser, randomSuffix, withRoot } from "../testSupport.js";
 import { dropPlayground } from "../test/playgrounds.js";
 
 /** One row of `app_public.playground_commit_result`. */
-interface CommitResultRow {
-  readonly commit_id: string;
-  readonly playground_hash: string;
-  readonly parent_id: string | null;
-  readonly message: string;
-  readonly created_at: Date;
-}
+const CommitResultRow = S.Struct({
+  commit_id: S.String,
+  playground_hash: S.String,
+  parent_id: S.NullOr(S.String),
+  message: S.String,
+  created_at: S.Date,
+});
+type CommitResultRow = typeof CommitResultRow.Type;
+
+const ClaimedRow = S.Struct({
+  hash: S.String,
+  user_id: S.NullOr(S.String),
+  edit_key_hash: S.NullOr(S.Uint8Array),
+  expires_at: S.NullOr(S.Date),
+});
+
+const UpdatedRow = S.Struct({
+  hash: S.String,
+  name: S.NullOr(S.String),
+  description: S.NullOr(S.String),
+  privacy: S.String,
+});
+
+const PlaygroundRow = S.Struct({
+  ...UpdatedRow.fields,
+  user_id: S.NullOr(S.String),
+  edit_key_hash: S.NullOr(S.Uint8Array),
+  expires_at: S.NullOr(S.Date),
+});
 
 /** Far enough ahead that a seeded session is live for the whole run. */
 const expiry = DateTime.toDate(DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"));
@@ -45,7 +69,7 @@ const commitData = (content: string) =>
  * one, with the digest of the caller's key when it has no account.
  */
 const save = (
-  db: DbHandle<PublicDB>,
+  db: typeof requestDb,
   values: {
     name?: string | null;
     message: string;
@@ -55,54 +79,37 @@ const save = (
     basis?: string | null;
   },
 ) =>
-  db
-    .all(
-      db.connection
-        .selectFrom(
-          sql<CommitResultRow>`app_public.create_playground_commit(
+  // A function that answers with no rows did not fail, it misbehaved: this one
+  // either returns a row or raises, so `one` dies on none.
+  db.one(CommitResultRow, (k) =>
+    k
+      .selectFrom(
+        sql<CommitResultRow>`app_public.create_playground_commit(
           p_playground_name => ${values.name ?? null},
           p_commit_message => ${values.message},
-          p_commit_data => ${commitData(values.content)}::jsonb,
+          p_commit_data => ${commitData(values.content)}::text::jsonb,
           p_playground_hash => ${values.hash ?? null},
           p_edit_key_hash => ${values.editKeyHash ?? null}::bytea,
           p_basis_commit_id => ${values.basis ?? null}
         )`.as("result"),
-        )
-        .selectAll(),
-    )
-    .pipe(
-      Effect.head,
-      // A function that answers with no rows did not fail, it misbehaved: this one
-      // either returns a row or raises. Dying keeps the error channel to what the
-      // database actually refuses.
-      Effect.catchTag("NoSuchElementError", () =>
-        Effect.die(new Error("create_playground_commit returned no rows")),
-      ),
-    );
+      )
+      .selectAll(),
+  );
 
-const claim = (db: DbHandle<PublicDB>, hash: string, editKeyHash: Buffer) =>
-  db
-    .all(
-      db.connection
-        .selectFrom(
-          sql<{
-            hash: string;
-            user_id: string | null;
-            edit_key_hash: Buffer | null;
-            expires_at: Date | null;
-          }>`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
-        )
-        .selectAll(),
-    )
-    .pipe(
-      Effect.head,
-      // A function that answers with no rows did not fail, it misbehaved: this one
-      // either returns a row or raises. Dying keeps the error channel to what the
-      // database actually refuses.
-      Effect.catchTag("NoSuchElementError", () =>
-        Effect.die(new Error("claim_playground returned no rows")),
-      ),
-    );
+// Like `save`: no rows is a misbehaving function, not a refusal.
+const claim = (db: typeof requestDb, hash: string, editKeyHash: Buffer) =>
+  db.one(ClaimedRow, (k) =>
+    k
+      .selectFrom(
+        sql<{
+          hash: string;
+          user_id: string | null;
+          edit_key_hash: Buffer | null;
+          expires_at: Date | null;
+        }>`app_public.claim_playground(${hash}, ${editKeyHash}::bytea)`.as("claimed"),
+      )
+      .selectAll(),
+  );
 
 /**
  * What the update handler calls: a metadata change proved by the caller's key.
@@ -110,19 +117,19 @@ const claim = (db: DbHandle<PublicDB>, hash: string, editKeyHash: Buffer) =>
  * alone and one sent as null is cleared.
  */
 const updateMetadata = (
-  db: DbHandle<PublicDB>,
+  db: typeof requestDb,
   hash: string,
   patch: Record<string, string | null>,
   editKeyHash: Buffer | null,
 ) =>
   db
-    .all(
-      db.connection
+    .all(UpdatedRow, (k) =>
+      k
         .selectFrom(
           sql<{ hash: string; name: string | null; description: string | null; privacy: string }>`
           app_public.update_playground(
             ${hash},
-            ${S.encodeSync(S.fromJsonString(S.Record(S.String, S.NullOr(S.String))))(patch)}::jsonb,
+            ${S.encodeSync(S.fromJsonString(S.Record(S.String, S.NullOr(S.String))))(patch)}::text::jsonb,
             ${editKeyHash}::bytea
           )`.as("updated"),
         )
@@ -130,10 +137,10 @@ const updateMetadata = (
     )
     .pipe(Effect.head);
 
-const readPlayground = (db: DbHandle, hash: string) =>
+const readPlayground = (db: Queries<DB>, hash: string) =>
   db
-    .all(
-      db.connection
+    .all(PlaygroundRow, (k) =>
+      k
         .selectFrom("app_public.playgrounds")
         .select([
           "hash",
@@ -148,10 +155,10 @@ const readPlayground = (db: DbHandle, hash: string) =>
     )
     .pipe(Effect.head);
 
-const commitCount = (db: DbHandle, hash: string) =>
+const commitCount = (db: Queries<DB>, hash: string) =>
   db
-    .all(
-      db.connection
+    .all(S.Struct({ commits: S.BigInt }), (k) =>
+      k
         .selectFrom("app_public.playground_commits")
         .select((eb) => eb.fn.countAll<bigint>().as("commits"))
         .where("playground_hash", "=", hash),
@@ -162,7 +169,8 @@ const commitCount = (db: DbHandle, hash: string) =>
     );
 
 /** What Postgres reported about a refused query: its code, and the message the database wrote. */
-const refusal = (error: DatabaseError) => Effect.fromOption(error.report);
+const refusal = (error: DatabaseError | ServiceUnavailable) =>
+  error._tag === "DatabaseError" ? Effect.fromOption(error.report) : Effect.die(error);
 
 /** Nobody is signed in, so `app_public.current_user_id()` resolves to null. */
 const anonymous = Effect.provideService(CurrentSession, { user: null, session: null });
@@ -193,7 +201,7 @@ const withAnonymousPlayground = <A, E, R>(
 
     return yield* Effect.ensuring(
       use({ hash: created.playground_hash, key, keyHash, head: created.commit_id }),
-      PgRootDB.use((db) => dropPlayground(db, created.playground_hash)).pipe(
+      withRoot((db) => dropPlayground(db, created.playground_hash)).pipe(
         Effect.asVoid,
         Effect.orDie,
       ),
@@ -207,14 +215,15 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
   it.effect("stores the key's digest and keeps the name the author sent", () =>
     withAnonymousPlayground(({ hash, key, keyHash }) =>
       Effect.gen(function* () {
-        const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
+        const row = yield* withRoot((db) => readPlayground(db, hash));
 
         expect(row.user_id).toBeNull();
         expect(row.name).toMatch(/^anon-/);
         // The digest is what the row holds. The key itself exists only in
         // this test and, in the real flow, in the answer to the author.
-        expect(row.edit_key_hash?.equals(keyHash)).toBe(true);
-        expect(row.edit_key_hash?.toString("hex")).not.toContain(key);
+        const storedHash = row.edit_key_hash ? Buffer.from(row.edit_key_hash) : null;
+        expect(storedHash?.equals(keyHash)).toBe(true);
+        expect(storedHash?.toString("hex")).not.toContain(key);
         // An unclaimed playground is pruned, so the author has to be told
         // when it goes.
         expect(row.expires_at).toBeInstanceOf(Date);
@@ -237,7 +246,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
 
         // The link the author holds stays the playground they are editing.
         expect(second.playground_hash).toBe(hash);
-        expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(2);
+        expect(yield* withRoot((db) => commitCount(db, hash))).toBe(2);
       }),
     ),
   );
@@ -261,7 +270,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
         );
         expect((yield* refusal(none)).code).toBe("DNIED");
 
-        expect(yield* PgRootDB.use((db) => commitCount(db, hash))).toBe(1);
+        expect(yield* withRoot((db) => commitCount(db, hash))).toBe(1);
       }),
     ),
   );
@@ -281,9 +290,9 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
   it.effect("lets the key holder change what the playground says about itself", () =>
     withAnonymousPlayground(({ hash, keyHash }) =>
       Effect.gen(function* () {
-        yield* PgRootDB.use((db) =>
-          db.all(
-            db.connection
+        yield* withRoot((db) =>
+          db.exec((k) =>
+            k
               .updateTable("app_public.playgrounds")
               .set({ description: "as created" })
               .where("hash", "=", hash),
@@ -329,7 +338,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
         );
         expect(none._tag).toBe("NoSuchElementError");
 
-        const row = yield* PgRootDB.use((db) => readPlayground(db, hash));
+        const row = yield* withRoot((db) => readPlayground(db, hash));
         expect(row.name).not.toBe("stolen");
       }),
     ),
@@ -359,15 +368,15 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
   it.effect("hands the playground to the account that presents the key", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `claim_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `claim_${suffix}`));
       const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
       yield* Effect.ensuring(
         withAnonymousPlayground(({ hash, keyHash, head }) =>
           Effect.gen(function* () {
-            yield* PgRootDB.use((db) =>
-              db.all(
-                db.connection.insertInto("app_private.sessions").values({
+            yield* withRoot((db) =>
+              db.exec((k) =>
+                k.insertInto("app_private.sessions").values({
                   id: sessionId,
                   user_id: user.id,
                   expires_at: expiry,
@@ -403,7 +412,7 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
             expect(third.playground_hash).toBe(hash);
           }),
         ),
-        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        withRoot((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );
@@ -411,15 +420,15 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
   it.effect("refuses a claim without the key", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `noclaim_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `noclaim_${suffix}`));
       const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
       yield* Effect.ensuring(
         withAnonymousPlayground(({ hash }) =>
           Effect.gen(function* () {
-            yield* PgRootDB.use((db) =>
-              db.all(
-                db.connection.insertInto("app_private.sessions").values({
+            yield* withRoot((db) =>
+              db.exec((k) =>
+                k.insertInto("app_private.sessions").values({
                   id: sessionId,
                   user_id: user.id,
                   expires_at: expiry,
@@ -450,10 +459,10 @@ layer(Layer.mergeAll(DatabaseLive, NodeCrypto.layer, Secrets.layer), {
             );
 
             expect((yield* refusal(error)).code).toBe("DNIED");
-            expect((yield* PgRootDB.use((db) => readPlayground(db, hash))).user_id).toBeNull();
+            expect((yield* withRoot((db) => readPlayground(db, hash))).user_id).toBeNull();
           }),
         ),
-        PgRootDB.use((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
+        withRoot((db) => deleteUser(db, user.id)).pipe(Effect.asVoid, Effect.orDie),
       );
     }),
   );
@@ -528,7 +537,7 @@ layer(
           );
           expect(refused.code).toBe("DNIED");
         }),
-        PgRootDB.use((db) => dropPlayground(db, created.playground_hash)).pipe(
+        withRoot((db) => dropPlayground(db, created.playground_hash)).pipe(
           Effect.asVoid,
           Effect.orDie,
         ),
@@ -539,7 +548,7 @@ layer(
   it.effect("hands the playground to an account that presents the answered key", () =>
     Effect.gen(function* () {
       const suffix = yield* randomSuffix;
-      const user = yield* PgRootDB.use((db) => createUser(db, `svc_claim_${suffix}`));
+      const user = yield* withRoot((db) => createUser(db, `svc_claim_${suffix}`));
       const sessionId = yield* SecureRandom.SecureRandom.use((random) => random.uuidV4());
 
       const created = yield* Playgrounds.use((service) =>
@@ -552,9 +561,9 @@ layer(
 
       yield* Effect.ensuring(
         Effect.gen(function* () {
-          yield* PgRootDB.use((db) =>
-            db.all(
-              db.connection.insertInto("app_private.sessions").values({
+          yield* withRoot((db) =>
+            db.exec((k) =>
+              k.insertInto("app_private.sessions").values({
                 id: sessionId,
                 user_id: user.id,
                 expires_at: expiry,
@@ -589,8 +598,8 @@ layer(
           expect(claimed).not.toHaveProperty("edit_key_hash");
         }),
         Effect.gen(function* () {
-          yield* PgRootDB.use((db) => dropPlayground(db, created.playground_hash));
-          yield* PgRootDB.use((db) => deleteUser(db, user.id));
+          yield* withRoot((db) => dropPlayground(db, created.playground_hash));
+          yield* withRoot((db) => deleteUser(db, user.id));
         }).pipe(Effect.asVoid, Effect.orDie),
       );
     }),

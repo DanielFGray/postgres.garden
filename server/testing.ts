@@ -8,15 +8,16 @@
  */
 import { Array as Arr, Context, Effect, Layer, Random, Schema as S } from "effect";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
-import { InternalError } from "../shared/errors.js";
-import { sql } from "kysely";
+import { InternalError } from "@danielfgray/stompbox/http";
+import { type Selectable, sql } from "kysely";
 import { Redis } from "effect/persistence/Redis";
 import { isProduction } from "./config.js";
 import type { AppPublicUsers as User } from "../generated/db.js";
 import { Sessions, sessionKeyOf } from "./services/sessions.js";
 import { rateLimitKeyPrefix } from "./services/rateLimiter.js";
 import { Cookies } from "./services/cookies.js";
-import { PgRootDB } from "./db.js";
+import { PgRootDB, queriesOn, type DB } from "./db.js";
+import { UserRow } from "./rows.js";
 import { MailCapture, MailMessage } from "@danielfgray/stompbox/mail";
 
 const UserQuery = S.Struct({
@@ -51,7 +52,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
     if (yield* isProduction) {
       return yield* Effect.die("testing routes must not run in production");
     }
-    const root = yield* PgRootDB;
+    const root = queriesOn<DB>(yield* PgRootDB);
     const sessions = yield* Sessions;
     const redis = yield* Redis;
     const sessionKey = yield* sessionKeyOf;
@@ -72,22 +73,20 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
       const username = input.username ?? `testuser_${randomValue.toString(36).slice(2, 10)}`;
       const email = input.email ?? `${username}@example.com`;
 
-      const user = yield* root
-        .all(
-          root.connection
-            .selectFrom(
-              sql<User>`app_private.really_create_user(
+      const user = yield* root.one(UserRow, (k) =>
+        k
+          .selectFrom(
+            sql<Selectable<User>>`app_private.really_create_user(
                 username => ${username}::citext,
                 email => ${email}::citext,
                 email_is_verified => ${input.verified},
                 password => ${input.password ?? "TestUserPassword"}::text
               )`.as("u"),
-            )
-            .selectAll()
-            // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
-            .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-        )
-        .pipe(Effect.head);
+          )
+          .selectAll()
+          // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
+          .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
+      );
 
       const session = yield* sessions.createSession(user.id);
       return { user, session };
@@ -103,7 +102,7 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
 
     return {
       clearTestUsers: root
-        .all(root.connection.deleteFrom("app_public.users").where("username", "like", "test%"))
+        .exec((k) => k.deleteFrom("app_public.users").where("username", "like", "test%"))
         .pipe(Effect.andThen(deleteKeys(sessionKey("*"))), Effect.as(success)),
 
       /**
@@ -130,11 +129,14 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
 
       loginPost: Effect.fn("Testing.loginPost")(function* (body: typeof LoginPostBody.Type) {
         const user = yield* root
-          .all(
-            root.connection
+          .all(UserRow, (k) =>
+            k
               .selectFrom((eb) =>
                 eb
-                  .fn<User>("app_private.login", [sql`${body.id}::citext`, eb.val(body.password)])
+                  .fn<Selectable<User>>("app_private.login", [
+                    sql`${body.id}::citext`,
+                    eb.val(body.password),
+                  ])
                   .as("u"),
               )
               .selectAll()
@@ -171,8 +173,8 @@ class Testing extends Context.Service<Testing>()("postgres-garden/testing", {
 
       verifyUser: (username: string) =>
         root
-          .all(
-            root.connection
+          .exec((k) =>
+            k
               .updateTable("app_public.users")
               .set({ is_verified: true })
               .where("username", "=", username),

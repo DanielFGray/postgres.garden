@@ -7,7 +7,7 @@ rule:
   all:
     - has:
         field: name
-        regex: 'Service$'
+        regex: "Service$"
     - has:
         kind: class_heritage
         has:

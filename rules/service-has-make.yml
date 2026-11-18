@@ -17,4 +17,4 @@ rule:
         - kind: export_statement
       follows:
         kind: comment
-        regex: '@perRequest'
+        regex: "@perRequest"

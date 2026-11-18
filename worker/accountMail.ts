@@ -1,9 +1,10 @@
 import { Array as Arr, Context, Effect, Layer, Match, Option, Schema } from "effect";
-import { sql } from "kysely";
+import { toDatabaseError } from "@danielfgray/stompbox/db";
+import { type Kysely, sql } from "kysely";
 
 import packageJson from "../package.json" with { type: "json" };
 import { rootUrl } from "../server/config.js";
-import { PgRootDB } from "../server/db.js";
+import { PgRootDB, queriesOn, type DB } from "../server/db.js";
 import { QueuedEmail } from "./email/mailKinds.js";
 
 /**
@@ -16,14 +17,14 @@ import { QueuedEmail } from "./email/mailKinds.js";
  */
 export class AccountMail extends Context.Service<AccountMail>()("postgres-garden/accountMail", {
   make: Effect.gen(function* () {
-    const db = yield* PgRootDB;
+    const pool = yield* PgRootDB;
+    const db = queriesOn<DB>(pool);
 
-    const queue = (email: QueuedEmail) =>
-      Effect.flatMap(emailJob(email), (statement) => db.all(db.raw(statement))).pipe(Effect.asVoid);
+    const queue = (email: QueuedEmail) => Effect.flatMap(emailJob(email), (job) => db.exec(job));
 
     const userExists = (userId: string) =>
-      db.maybe(
-        db.connection.selectFrom("app_public.users").select("created_at").where("id", "=", userId),
+      db.maybe(Schema.Struct({ created_at: Schema.Date }), (k) =>
+        k.selectFrom("app_public.users").select("created_at").where("id", "=", userId),
       );
 
     return {
@@ -47,8 +48,8 @@ export class AccountMail extends Context.Service<AccountMail>()("postgres-garden
             `Not sent, because it came with the account's creation: ${actionDescription}`,
           );
         }
-        const emails = yield* db.all(
-          db.connection
+        const emails = yield* db.all(Schema.Struct({ email: Schema.String }), (k) =>
+          k
             .selectFrom("app_public.user_emails")
             .select("email")
             .where("user_id", "=", event.user_id)
@@ -119,8 +120,8 @@ export class AccountMail extends Context.Service<AccountMail>()("postgres-garden
         id,
         token,
       }: SendVerification) {
-        const pending = yield* db.maybe(
-          db.connection
+        const pending = yield* db.maybe(PendingVerificationRow, (k) =>
+          k
             .selectFrom("app_public.user_emails as address")
             .innerJoin(
               "app_private.user_email_secrets as secrets",
@@ -136,7 +137,9 @@ export class AccountMail extends Context.Service<AccountMail>()("postgres-garden
                 "secrets.verification_email_sent_at",
                 ">=",
                 eb.ref("secrets.verification_token_generated"),
-              ).as("already_sent"),
+              )
+                .$castTo<boolean | null>()
+                .as("already_sent"),
             ])
             .where("address.id", "=", id)
             .where("address.is_verified", "=", false)
@@ -156,22 +159,24 @@ export class AccountMail extends Context.Service<AccountMail>()("postgres-garden
           return yield* Effect.logInfo(`The verification mail for email ${id} already went out`);
         }
         const verifyLink = yield* link("/verify", token);
-        const statement = yield* emailJob({
+        const job = yield* emailJob({
           options: { to: email, subject: "Please verify your email address" },
           template: "verify_email.mjml",
           variables: { token, verifyLink, username, name },
         });
-        return yield* db.transaction((trx) =>
-          Effect.gen(function* () {
-            yield* trx.all(trx.raw(statement));
-            yield* trx.all(
-              trx.connection
-                .updateTable("app_private.user_email_secrets")
-                .set({ verification_email_sent_at: sql<Date>`now()` })
-                .where("user_email_id", "=", id),
-            );
-          }),
-        );
+        return yield* pool
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* db.exec(job);
+              yield* db.exec((k) =>
+                k
+                  .updateTable("app_private.user_email_secrets")
+                  .set({ verification_email_sent_at: sql<Date>`now()` })
+                  .where("user_email_id", "=", id),
+              );
+            }),
+          )
+          .pipe(toDatabaseError);
       }),
     } as const;
   }),
@@ -238,12 +243,28 @@ export class NoVerifiedEmail extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("NoVerifiedEmail", { userId: Schema.String }) {}
 
+/** The address a verification mail goes to, and whether this token's mail already went out. */
+const PendingVerificationRow = Schema.Struct({
+  email: Schema.String,
+  username: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  already_sent: Schema.NullOr(Schema.Boolean),
+});
+
 const QueuedEmailJson = Schema.fromJsonString(QueuedEmail);
 
-/** The statement that queues `email` for `EmailDelivery`. */
+/**
+ * The query that queues `email` for `EmailDelivery`. The payload is JSON text,
+ * so it goes through text: a string sent straight to a json parameter is
+ * encoded a second time.
+ */
 const emailJob = Effect.fnUntraced(function* (email: QueuedEmail) {
   const json = yield* Schema.encodeEffect(QueuedEmailJson)(email);
-  return sql`select graphile_worker.add_job('send_email', ${json}::json)`;
+  return (k: Kysely<DB>) =>
+    // add_job answers a composite row, which the driver cannot decode, so it is cast to text.
+    k.selectNoFrom(
+      sql<string>`graphile_worker.add_job('send_email', ${json}::text::json)::text`.as("add_job"),
+    );
 });
 
 /**

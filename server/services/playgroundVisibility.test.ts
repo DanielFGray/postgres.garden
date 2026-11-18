@@ -1,7 +1,9 @@
 import { expect, layer } from "@effect/vitest";
-import { Effect, Layer, Option, Random } from "effect";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import { Effect, Layer, Option, Random, Schema as S } from "effect";
 import { sql } from "kysely";
-import { DatabaseLive, type DatabaseError, PgRootDB, type DbHandle } from "../db.js";
+import { DatabaseLive, type DB, type Queries } from "../db.js";
+import { withRoot } from "../testSupport.js";
 import { CurrentSession, type SessionData } from "../../shared/session.js";
 import { withAuthContext } from "../requestDatabase.js";
 import { Playgrounds } from "./playgrounds.js";
@@ -41,17 +43,17 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
         const otherUsername = `visibility_other_${suffix}`;
         // Sponsors, because these cases need a playground at every privacy level
         // and private is a sponsor entitlement.
-        const users = yield* PgRootDB.use((rootDb) =>
+        const users = yield* withRoot((rootDb) =>
           Effect.all([
             createUser(rootDb, ownerUsername, "sponsor"),
             createUser(rootDb, otherUsername, "sponsor"),
           ]),
         );
         const [owner, other] = users;
-        const ownerHashes = yield* PgRootDB.use((rootDb) =>
+        const ownerHashes = yield* withRoot((rootDb) =>
           insertPlaygrounds(rootDb, owner.id, "owner", suffix),
         );
-        const otherHashes = yield* PgRootDB.use((rootDb) =>
+        const otherHashes = yield* withRoot((rootDb) =>
           insertPlaygrounds(rootDb, other.id, "other", suffix),
         );
         const hashes = { owner: ownerHashes, other: otherHashes };
@@ -102,7 +104,7 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
               profile: sortHashes([hashes.owner.public]),
             });
           }),
-          PgRootDB.use((rootDb) =>
+          withRoot((rootDb) =>
             Effect.all([deleteUser(rootDb, owner.id), deleteUser(rootDb, other.id)]),
           ).pipe(Effect.asVoid, Effect.orDie),
         );
@@ -117,9 +119,9 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
         const playgrounds = yield* Playgrounds;
         const hash = `anon_public_${yield* randomSuffix}`;
 
-        yield* PgRootDB.use((rootDb) =>
-          rootDb.all(
-            rootDb.connection
+        yield* withRoot((rootDb) =>
+          rootDb.exec((k) =>
+            k
               .insertInto("app_public.playgrounds")
               .values({ hash, user_id: null, privacy: "public", name: hash }),
           ),
@@ -132,10 +134,8 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
             expect(row).toBeDefined();
             expect(row?.user).toBeNull();
           }).pipe(withAuthContext, Effect.provideService(CurrentSession, anonymousSession)),
-          PgRootDB.use((rootDb) =>
-            rootDb.all(
-              rootDb.connection.deleteFrom("app_public.playgrounds").where("hash", "=", hash),
-            ),
+          withRoot((rootDb) =>
+            rootDb.exec((k) => k.deleteFrom("app_public.playgrounds").where("hash", "=", hash)),
           ).pipe(Effect.asVoid, Effect.orDie),
         );
       }),
@@ -149,17 +149,17 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
     it.effect("rejects private playgrounds without a sponsor account", () =>
       Effect.gen(function* () {
         const suffix = yield* randomSuffix;
-        const free = yield* PgRootDB.use((rootDb) =>
+        const free = yield* withRoot((rootDb) =>
           createUser(rootDb, `privacy_free_${suffix}`, "user"),
         );
-        const sponsor = yield* PgRootDB.use((rootDb) =>
+        const sponsor = yield* withRoot((rootDb) =>
           createUser(rootDb, `privacy_sponsor_${suffix}`, "sponsor"),
         );
 
         const insertPrivate = (userId: string | null, hash: string) =>
-          PgRootDB.use((rootDb) =>
-            rootDb.all(
-              rootDb.connection
+          withRoot((rootDb) =>
+            rootDb.exec((k) =>
+              k
                 .insertInto("app_public.playgrounds")
                 .values({ hash, user_id: userId, privacy: "private", name: hash }),
             ),
@@ -173,18 +173,18 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
             // A sponsor may hold one, and may not keep it after a downgrade.
             const sponsorHash = `sponsor_private_${suffix}`;
             yield* insertPrivate(sponsor.id, sponsorHash);
-            yield* PgRootDB.use((rootDb) =>
-              rootDb.all(
-                rootDb.connection
+            yield* withRoot((rootDb) =>
+              rootDb.exec((k) =>
+                k
                   .updateTable("app_public.users")
                   .set({ role: "user" })
                   .where("id", "=", sponsor.id),
               ),
             );
             yield* expectDenied(
-              PgRootDB.use((rootDb) =>
-                rootDb.all(
-                  rootDb.connection
+              withRoot((rootDb) =>
+                rootDb.exec((k) =>
+                  k
                     .updateTable("app_public.playgrounds")
                     .set({ privacy: "private" })
                     .where("hash", "=", sponsorHash),
@@ -192,7 +192,7 @@ layer(TestLayer, { excludeTestServices: true, timeout: "30 seconds" })(
               ),
             );
           }),
-          PgRootDB.use((rootDb) =>
+          withRoot((rootDb) =>
             Effect.all([deleteUser(rootDb, free.id), deleteUser(rootDb, sponsor.id)]),
           ).pipe(Effect.asVoid, Effect.orDie),
         );
@@ -213,10 +213,10 @@ const expectDenied = <A, R>(effect: Effect.Effect<A, DatabaseError, R>) =>
     ),
   );
 
-const createUser = (db: DbHandle, username: string, role: "user" | "sponsor") =>
+const createUser = (db: Queries<DB>, username: string, role: "user" | "sponsor") =>
   db
-    .all(
-      db.connection
+    .one(S.Struct({ id: S.String, username: S.String }), (k) =>
+      k
         .selectFrom(
           sql<{ id: string; username: string }>`app_private.really_create_user(
         username => ${username}::citext,
@@ -228,16 +228,13 @@ const createUser = (db: DbHandle, username: string, role: "user" | "sponsor") =>
         .selectAll(),
     )
     .pipe(
-      Effect.head,
       Effect.tap((user) =>
-        db.all(
-          db.connection.updateTable("app_public.users").set({ role }).where("id", "=", user.id),
-        ),
+        db.exec((k) => k.updateTable("app_public.users").set({ role }).where("id", "=", user.id)),
       ),
     );
 
 const insertPlaygrounds = Effect.fnUntraced(function* (
-  db: DbHandle,
+  db: Queries<DB>,
   userId: string,
   prefix: string,
   suffix: string,
@@ -247,8 +244,8 @@ const insertPlaygrounds = Effect.fnUntraced(function* (
     secret: `${prefix}_secret_${suffix}`,
     public: `${prefix}_public_${suffix}`,
   } as const;
-  yield* db.all(
-    db.connection.insertInto("app_public.playgrounds").values(
+  yield* db.exec((k) =>
+    k.insertInto("app_public.playgrounds").values(
       Object.entries(rows).map(([privacy, hash]) => ({
         hash,
         user_id: userId,
@@ -260,8 +257,8 @@ const insertPlaygrounds = Effect.fnUntraced(function* (
   return rows;
 });
 
-const deleteUser = (db: DbHandle, userId: string) =>
-  db.all(db.connection.deleteFrom("app_public.users").where("id", "=", userId));
+const deleteUser = (db: Queries<DB>, userId: string) =>
+  db.exec((k) => k.deleteFrom("app_public.users").where("id", "=", userId));
 
 const listAll = (
   service: (typeof Playgrounds)["Service"],

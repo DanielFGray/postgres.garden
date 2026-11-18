@@ -1,7 +1,9 @@
-import { Array as Arr, Context, Effect, Layer, Option, Schema as S } from "effect";
-import { sql } from "kysely";
-import { type DatabaseError, PgRootDB } from "../db.js";
+import { Context, Effect, Layer, Option, Schema as S } from "effect";
+import { type Selectable, sql } from "kysely";
+import type { DatabaseError } from "@danielfgray/stompbox/db";
+import { PgRootDB, queriesOn, type DB } from "../db.js";
 import type { AppPublicUsers } from "../../generated/db.js";
+import { UserRow } from "../rows.js";
 import { CurrentSession } from "../../shared/session.js";
 import { recordActiveSessions, recordAuthAttempt } from "../metrics.js";
 import { Cookies } from "./cookies.js";
@@ -25,7 +27,7 @@ const refusalCode = (error: DatabaseError) => Option.map(error.report, (report) 
  */
 export class Auth extends Context.Service<Auth>()("postgres-garden/auth", {
   make: Effect.gen(function* () {
-    const root = yield* PgRootDB;
+    const root = queriesOn<DB>(yield* PgRootDB);
     const sessions = yield* Sessions;
     const cookies = yield* Cookies;
 
@@ -56,10 +58,10 @@ export class Auth extends Context.Service<Auth>()("postgres-garden/auth", {
           name?: string | null;
           avatarUrl?: string | null;
         }) {
-          const user = yield* root.one(
-            root.connection
+          const user = yield* root.one(UserRow, (k) =>
+            k
               .selectFrom(
-                sql<AppPublicUsers>`
+                sql<Selectable<AppPublicUsers>>`
                       app_private.really_create_user(
                       username => ${username}::citext,
                       email => ${email || null},
@@ -102,19 +104,20 @@ export class Auth extends Context.Service<Auth>()("postgres-garden/auth", {
           // records the failed attempt and then returns null, and a failure here would
           // roll that write back, so the lockout counter would never grow. Database
           // errors such as LOCKD must still fail, so the row is taken with `Arr.head`.
-          const found = yield* root
-            .all(
-              root.connection
-                .selectFrom((eb) =>
-                  eb
-                    .fn<AppPublicUsers>("app_private.login", [sql`${id}::citext`, eb.val(password)])
-                    .as("u"),
-                )
-                .selectAll()
-                // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
-                .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
-            )
-            .pipe(Effect.map(Arr.head));
+          const found = yield* root.maybe(UserRow, (k) =>
+            k
+              .selectFrom((eb) =>
+                eb
+                  .fn<Selectable<AppPublicUsers>>("app_private.login", [
+                    sql`${id}::citext`,
+                    eb.val(password),
+                  ])
+                  .as("u"),
+              )
+              .selectAll()
+              // @ts-expect-error: Kysely doesn't allow referencing virtual tables directly
+              .where((eb) => eb.not(eb(eb.ref("u"), "is", null))),
+          );
           const user = yield* Effect.fromOption(found).pipe(
             Effect.catchTag("NoSuchElementError", () =>
               Effect.fail(new InvalidCredentialsError({ message: "Invalid username or password" })),
