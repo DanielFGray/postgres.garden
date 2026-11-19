@@ -1,7 +1,8 @@
 import { EmailDelivery, invitationMail, mailKind } from "@danielfgray/stompbox/mail";
-import { Effect, Layer, Path, Schema } from "effect";
+import { Schema } from "effect";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { templates } from "./templates.js";
 
 /**
  * The app's mail kinds: each names an MJML file in `worker/templates/` and the
@@ -46,23 +47,18 @@ export const QueuedEmail = Schema.Union([
 export type QueuedEmail = typeof QueuedEmail.Type;
 
 /**
- * Renders the kinds above and the invitation. Templates resolve from this
- * module, so they sit beside `worker/` in the source tree and the image.
+ * Renders the kinds above and the invitation, from the sources `templates.ts`
+ * embeds in the code.
  */
-export const EmailDeliveryLive = Layer.unwrap(
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    return EmailDelivery.layer({
-      kinds: [
-        verifyEmail,
-        passwordReset,
-        deleteAccount,
-        passwordResetUnregistered,
-        accountActivity,
-        invitationMail,
-      ],
-      templates: yield* path.fromFileUrl(new URL("../templates/", import.meta.url)),
-      brand: { projectName: packageJson.projectName, legalText: packageJson.legalText },
-    });
-  }),
-);
+export const EmailDeliveryLive = EmailDelivery.layer({
+  kinds: [
+    verifyEmail,
+    passwordReset,
+    deleteAccount,
+    passwordResetUnregistered,
+    accountActivity,
+    invitationMail,
+  ],
+  templates,
+  brand: { projectName: packageJson.projectName, legalText: packageJson.legalText },
+});
